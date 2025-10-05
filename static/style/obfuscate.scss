@@ -1,0 +1,13 @@
+span.obfuscate {
+  unicode-bidi: bidi-override;
+  direction: rtl;
+  cursor: pointer;
+}
+
+span.obfuscate > i {
+  display: none;
+}
+
+span.obfuscate > span::after {
+  content: '@';
+}

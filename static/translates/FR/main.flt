@@ -1,0 +1,29 @@
+#Menu
+swap_to_EN = 🇬🇧
+swap_to_FR = 🇫🇷
+
+# Root
+pageRoot_desc = Webhome est un site qui vous sert d'accueil.
+pageRoot_foot = <a class="externe" href="https://leptos.dev/" rel="noopener noreferrer nofollow" target="_blank">Source</a>
+pageRoot_signup = S'inscrire
+pageRoot_title_login = Connection
+pageRoot_title_signup = Inscription
+pageRoot_form_login = Login:
+pageRoot_form_pwd = Password:
+pageRoot_form_submit_login = Connection
+pageRoot_form_submit_signup = Crée mon compte
+
+#page 404
+page404_title = Page introuvable
+page404_content = Désoler, cette page est introuvable. vous pouvez allez sur { $children }.
+menu_home = Retour a l'accueil
+
+#login and sign
+LOGIN_USER_CONNECTED = Utilisateur connecté
+LOGIN_USER_DISCONNECTED = Utilisateur déconnecté
+LOGIN_USER_SIGNEDUP = Utilisateur inscrit
+LOGIN_USER_NOT_FOUND = Ce login n'existe pas
+LOGIN_USER_INVALID_PWD = Password invalide
+LOGIN_USER_ALREADY_EXISTS = Ce login existe déjà
+LOGIN_LOCKED = Ce login est verrouillé suite a de nombreuses tentatives de connexion
+SERVER_ERROR = Erreur serveur

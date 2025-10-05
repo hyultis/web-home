@@ -1,0 +1,164 @@
+@use "reset";
+@use "obfuscate";
+//@use "menu";
+
+:root
+{
+	--defaultfontcolor: #e8e8e8;
+	--backgroundcolor: #1b1b1b;
+	--maincolor: #808080;
+	--maincolordarker: hsl(from var(--maincolor) h s calc(l - 25));
+	--maincolorlighter: hsl(from var(--maincolor) h s calc(l + 25));
+	--urlcolor: #F14A00;
+	--urlcolordarker: hsl(from var(--urlcolor) h s calc(l - 10));
+	--urlcolorvisited: #C62300;
+	--buttonbackgrounddanger: #981f00;
+	--buttonbackgroundwarn: #984200;
+	--buttonbackgroundok: #009814;
+}
+
+
+body
+{
+	background: var(--backgroundcolor);
+	color: var(--defaultfontcolor);
+	font-size: 1.1em;
+	font-family: sans-serif;
+	line-height: 1.5em;
+}
+
+.centered_box
+{
+	margin: 2em auto;
+	max-width: 800px;
+	text-align: center;
+}
+
+.centered_box p
+{
+
+}
+
+.centered_box a
+{
+	font-size: 2em;
+	padding: 0.5em;
+	display: inline-block;
+	color: var(--urlcolor);
+}
+
+.centered_box label
+{
+	color: var(--defaultfontcolor);
+	font-weight: bold;
+	font-size: 1.2em;
+	justify-content: flex-end;
+}
+
+.login_box
+{
+	background-color: var(--maincolordarker);
+	border: 1px solid var(--maincolor);
+	border-radius: 10px;
+	padding: 1em;
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	justify-content: flex-start;
+	align-items: stretch;
+	align-content: stretch;
+	gap: 10px;
+}
+
+.login_box > *
+{
+	width: 45%;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+input
+{
+	background-color: var(--backgroundcolor);
+	border: 1px solid var(--maincolor);
+	border-radius: 5px;
+	padding: 0.5em;
+	color: var(--defaultfontcolor);
+}
+
+input[type=button]
+{
+	background-color: var(--urlcolordarker);
+	margin: 0 auto;
+	cursor: pointer;
+}
+
+h1
+{
+	font-size: 2em;
+	margin: 0.5em 0;
+}
+
+footer
+{
+	margin: 2em auto;
+	max-width: 800px;
+	text-align: center;
+	color: var(--urlcolor);
+}
+
+.home_header
+{
+	font-size: 1em;
+	background-color: var(--maincolordarker);
+	border-bottom: 1px solid var(--maincolorlighter);
+	padding: 0.2em 1em;
+}
+
+.home_header i
+{
+	font-size: 1.5em;
+	cursor: pointer;
+	margin: 0 0.2em;
+	padding: 2px;
+}
+
+.home_header i:hover
+{
+	background-color: var(--buttonbackgroundwarn);
+	border-radius: 5px;
+}
+
+.home_header .button_danger:hover
+{
+	background-color: var(--buttonbackgrounddanger);
+}
+
+.home_header .button_ok:hover
+{
+	background-color: var(--buttonbackgroundok);
+}
+
+.home_header .left
+{
+	float: left;
+	display: flex;
+	flex-direction: row;
+	flex-wrap: nowrap;
+	justify-content: flex-start;
+	align-items: flex-start;
+	align-content: center;
+}
+
+
+.home_header .right
+{
+	float: right;
+	display: flex;
+	flex-direction: row-reverse;
+	flex-wrap: nowrap;
+	justify-content: flex-start;
+	align-items: flex-start;
+	align-content: center;
+}

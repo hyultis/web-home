@@ -1,16 +1,46 @@
-use base64ct::{Base64, Encoding};
+use aes_gcm::{AeadCore, Aes256Gcm, Key, KeyInit, Nonce};
+use aes_gcm::aead::Aead;
+use argon2::Config;
 use leptos::prelude::codee::string::JsonSerdeCodec;
 use leptos::prelude::{Signal, WriteSignal};
 use leptos_use::{use_cookie_with_options, SameSite, UseCookieOptions};
 use serde::{Deserialize, Serialize};
-use sha3::{Digest, Sha3_256};
-use crate::api::login::{API_user_disconnect, API_user_login, API_user_sign, LoginStatus};
+use crate::api::login::{API_user_login, API_user_salt, API_user_sign};
+use crate::api::login::components::{LoginStatus, SaltReturn};
+use crate::global_security::{generate_salt_raw, hash};
+use base64ct::{Base64, Encoding};
+
+/// note about salt, hash and secure send/storage client data
+///
+/// the objectif is to disallow the server to know anything about any client data
+/// So the client must send all data hash or crypted
+/// Also the server must control the "global" salt
+///
+/// To do that is use some step for each action.
+///
+/// Note all "hash" here, use the global_security::hash() method, that use an auto-generated salt
+///
+/// # Login
+///
+/// The login is simply hash by the client, this hash is used to store all client data into a "<hash>.json" file
+///
+/// # data
+///
+/// step by step:
+/// * Using the hashed login (generatedId)
+/// * Send it to API_user_salt(generatedId) that combine the generatedId and the server salt, get the result as serverUserSalt
+/// * client hash serverUserSalt and user password into user_salt
+/// * TODO crypt using symmetric stuff
+///
+/// # password
+///
+/// the password is like a data, but instead of crypt, client hash it and send it to the server on sign up or login only
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UserData
 {
 	lang: String,
-	isConnected: bool,
+	userSalt: Option<String>
 }
 
 impl UserData {
@@ -38,18 +68,19 @@ impl UserData {
 
 	pub fn login_isConnected(&self) -> bool
 	{
-		return self.isConnected;
+		return self.userSalt.is_some();
 	}
 
 	pub async fn login_set(&mut self, login: String, pwd: String) -> Option<String>
 	{
-		let generatedId = Self::innerHash(login);
-		let hashedPwd = Self::innerHash(pwd);
+		let generatedId = hash(login);
+		let Ok(SaltReturn::SALT(serverUserSalt)) = API_user_salt(generatedId.clone()).await else {return None};
+		let user_salt = Self::pwdHash(pwd, serverUserSalt.clone());
 
-		return match API_user_login(generatedId.clone(), hashedPwd.clone()).await
+		return match API_user_login(generatedId.clone(), hash(user_salt.clone())).await
 		{
 			Ok(LoginStatus::USER_CONNECTED) => {
-				self.isConnected = true;
+				self.userSalt = Some(user_salt);
 				None
 			},
 			Ok(LoginStatus::SERVER_ERROR) => Some("SERVER_ERROR".to_string()),
@@ -61,10 +92,11 @@ impl UserData {
 	/// return None if the user is correctly created connected, else return the error in translated string
 	pub async fn login_signUp(&mut self, login: String, pwd: String) -> Option<String>
 	{
-		let generatedId = Self::innerHash(login);
-		let hashedPwd = Self::innerHash(pwd);
+		let generatedId = hash(login);
+		let Ok(SaltReturn::SALT(serverUserSalt)) = API_user_salt(generatedId.clone()).await else {return None};
+		let user_salt = Self::pwdHash(pwd, serverUserSalt);
 
-		return match API_user_sign(generatedId, hashedPwd).await {
+		return match API_user_sign(generatedId, hash(user_salt)).await {
 			Ok(LoginStatus::USER_CONNECTED) => None,
 			Ok(LoginStatus::SERVER_ERROR) => Some("SERVER_ERROR".to_string()),
 			Ok(reason) => Some(format!("LOGIN_{}", reason)),
@@ -72,43 +104,81 @@ impl UserData {
 		}
 	}
 
-	pub fn login_force_connect(&mut self)
+	fn derive_key_from_password(password: &str, salt: &[u8]) -> [u8; 32] {
+		let hash = argon2::hash_raw(password.as_bytes(), salt, &Config::default()).unwrap();
+
+		let mut key = [0u8; 32];
+		key.copy_from_slice(&hash[..32]);
+		key
+	}
+
+	pub fn data_crypt(&self, plaintext: String) -> Option<(String, String, String)>
 	{
-		self.isConnected = true;
+		let Some(password) = &self.userSalt else {return None};
+		let Ok(salt) = generate_salt_raw() else {return None};
+
+		// dérive la clé AES-256
+		let key_bytes = Self::derive_key_from_password(&password, &salt);
+		let key = Key::<Aes256Gcm>::try_from(key_bytes).unwrap();
+		let cipher = Aes256Gcm::new(&key);
+		let Ok(nonce) = Aes256Gcm::generate_nonce() else {return None};
+
+		// chiffrement
+		let ciphertext = cipher.encrypt(&nonce, plaintext.as_bytes())
+			.expect("encryption failed");
+
+		Some((
+			Base64::encode_string(&salt),
+			Base64::encode_string(&nonce.as_slice()),
+			Base64::encode_string(&ciphertext),
+		))
+	}
+
+	pub fn decrypt_with_password(
+		&self,
+		salt_b64: &str,
+		nonce_b64: &str,
+		ciphertext_b64: &str
+	) -> Option<String> {
+		let Some(password) = &self.userSalt else {return None};
+		let Ok(salt) = generate_salt_raw() else {return None};
+
+		let Ok(salt) = Base64::decode_vec(salt_b64) else {return None};
+		let Ok(nonce_bytes) = Base64::decode_vec(nonce_b64) else {return None};
+		let Ok(ciphertext) = Base64::decode_vec(ciphertext_b64) else {return None};
+
+		let key_bytes = Self::derive_key_from_password(password, &salt);
+		let key = Key::<Aes256Gcm>::try_from(key_bytes).unwrap();
+		let cipher = Aes256Gcm::new(&key);
+		let nonce = Nonce::try_from(nonce_bytes.as_slice()).unwrap();
+
+		let Ok(plaintext_bytes) = cipher.decrypt(&nonce, ciphertext.as_ref()) else {return None};
+		return match String::from_utf8(plaintext_bytes) {
+			Ok(result) => Some(result),
+			Err(_) => None
+		};
 	}
 
 
 	/// disconnect the user
-	pub async fn login_disconnect(&mut self) -> Option<String>
+	pub async fn login_disconnect(&mut self)
 	{
-		if(!self.isConnected)
-		{
-			return None;
-		}
-
-		return match API_user_disconnect().await {
-			Ok(LoginStatus::USER_DISCONNECTED) => None,
-			Ok(LoginStatus::SERVER_ERROR) => Some("SERVER_ERROR".to_string()),
-			Ok(reason) => Some(format!("LOGIN_{}", reason)),
-			Err(_) => Some("SERVER_ERROR".to_string()),
-		}
+		self.userSalt = None;
 	}
 
 	pub fn cookie_signalGet() -> (Signal<Option<UserData>>, WriteSignal<Option<UserData>>)
 	{
+		let time = 24 * 3600 * 1000; // 1 day
 		return use_cookie_with_options::<UserData, JsonSerdeCodec>("webhome",UseCookieOptions::default()
-			.max_age(3600_000) // one hour
-			.same_site(SameSite::Lax)
+			.max_age(time) // one hour
+			.same_site(SameSite::Strict)
 			.secure(true)
 			.path("/"));
 	}
 
-	fn innerHash(str: String) -> String
+	fn pwdHash(str: String, salt: String) -> String
 	{
-		let mut hasher = Sha3_256::new();
-		hasher.update(str);
-		let result = hasher.finalize();
-		return Base64::encode_string(&result)
+		return hash(format!("{}{}",salt,str));
 	}
 }
 
@@ -118,7 +188,7 @@ impl Default for UserData
 	{
 		Self {
 			lang: "EN".to_string(),
-			isConnected: false,
+			userSalt: None,
 		}
 	}
 }

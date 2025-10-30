@@ -1,5 +1,6 @@
 @use "reset";
 @use "obfuscate";
+@use "linksheader";
 //@use "menu";
 
 :root
@@ -116,7 +117,7 @@ footer
 	padding: 0.2em 1em;
 }
 
-.home_header i
+.home_header .right i
 {
 	font-size: 1.5em;
 	cursor: pointer;
@@ -124,7 +125,7 @@ footer
 	padding: 2px;
 }
 
-.home_header i:hover
+.home_header .right i:hover
 {
 	background-color: var(--buttonbackgroundwarn);
 	border-radius: 5px;

@@ -7,9 +7,9 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-leptos = { version = "0.8.9", features = ["islands"] }
-leptos_router = { version = "0.8.7" }
-axum = { version = "0.8.4", optional = true }
+leptos = { version = "0.8.12", features = ["islands"] }
+leptos_router = { version = "0.8.9" }
+axum = { version = "0.8.6", optional = true }
 console_error_panic_hook = "0.1"
 leptos_axum = { version = "0.8.6", optional = true }
 leptos_meta = { version = "0.8.5" }
@@ -25,16 +25,18 @@ dashmap = {version = "6.1.0", features = ["rayon"]}
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2"
 http = "1"
-leptos-use = { version = "0.16.2", features = ["use_locales","use_cookie","storage"] }
+leptos-use = { version = "0.16.2", features = ["use_locales","use_cookie","storage","use_draggable","use_mouse_in_element"] }
 fluent = { version = "0.17.0" }
 intl-memoizer = "0.5.2"
 unic-langid = { version = "0.9.5", features = ["unic-langid-macros"] }
 anyhow = "1.0.95"
 time = { version = "0.3", features = ["macros","wasm-bindgen"] }
-leptos-obfuscate = "0.5.0"
 sha3 = {  version = "0.10.8", features = ["default"] }
-#aes-gcm = "0.10.3" # error wasm ?
 base64ct = { version = "1.8.0", features = ["alloc"] }
+getrandom = { version = "0.3", optional = true }
+rust-argon2 = "3.0"
+aes-gcm = "0.11.0-rc.1"
+serde_json = "1.0.145"
 
 [features]
 hydrate = [
@@ -53,7 +55,8 @@ ssr = [
     "leptos-use/axum",
 
     "dep:Hconfig",
-    "dep:Htrace"
+    "dep:Htrace",
+    "dep:getrandom"
 ]
 
 # Defines a size-optimized profile for the WASM bundle in release mode
@@ -68,7 +71,7 @@ panic = "abort"
 # The name used by wasm-bindgen/cargo-leptos for the JS/WASM bundle. Defaults to the crate name
 output-name = "webhome"
 
-# The site root folder is where cargo-leptos generate all output. WARNING: all content of this folder will be erased on a rebuild. Use it in your server setup.
+# The site root folder is where cargo-leptos generate all output. WARNING: all modules of this folder will be erased on a rebuild. Use it in your server setup.
 site-root = "target/site"
 
 # The site-root relative folder where all compiled output (JS, WASM and CSS) is written
@@ -83,7 +86,7 @@ style-file = "static/style/main.scss"
 # Optional. Env: LEPTOS_ASSETS_DIR.
 assets-dir = "static/public"
 
-# The IP and port (ex: 127.0.0.1:3000) where the server serves the content. Use it in your server setup.
+# The IP and port (ex: 127.0.0.1:3000) where the server serves the modules. Use it in your server setup.
 site-addr = "127.0.0.1:3001"
 
 # The port to use for automatic reload monitoring

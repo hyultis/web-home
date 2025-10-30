@@ -1,10 +1,12 @@
 use leptoaster::{expect_toaster, ToastBuilder, ToastLevel};
-use leptos::prelude::{signal, ClassAttribute, Get, IntoAny, OnAttribute, Read, RenderHtml, RwSignal, Set, Write};
+use leptos::prelude::{ClassAttribute, Effect, IntoAny, OnAttribute, Read, RenderHtml, RwSignal, Set, Update, Write};
 use leptos::{island, view, IntoView};
 use leptos::__reexports::wasm_bindgen_futures::spawn_local;
 use leptos::prelude::ElementChild;
 use leptos_router::hooks;
-use crate::front::module_home::links::Links;
+use crate::front::modules::components::Backable;
+use crate::front::modules::link::Link;
+use crate::front::modules::ModuleHolder;
 use crate::front::utils::fluent::FluentManager::FluentManager;
 use crate::front::utils::usersData::UserData;
 use crate::HWebTrace;
@@ -15,7 +17,7 @@ use crate::HWebTrace;
 #[island]
 pub fn Home() -> impl IntoView {
 	let editMode = RwSignal::new(false);
-
+	let moduleContent = RwSignal::new(ModuleHolder::new());
 
 	let editModeSwap = move |_| {
 		let mut content = editMode.write();
@@ -39,10 +41,23 @@ pub fn Home() -> impl IntoView {
 		});
 	};
 
+	Effect::new(move || {
+		moduleContent.update(|holder|{
+			let holder = holder.links_get_mut();
+				holder.push(Link::new("google".to_string(),"https://google.fr".to_string()));
+				holder.push(Link::new("reddit".to_string(),"https://reddit.com".to_string()));
+		});
+	});
+
 	view! {
 		<div class="home_header">
 			<div class="left">
-				<Links editMode=editMode/>
+				{move || {
+					//HWebTrace!("home {}",*editMode.read());
+					let binding = moduleContent.read();
+					let tmp = binding.links_get();
+					tmp.draw(editMode)
+				}}
 			</div>
 			<div class="right">
 				<i class="iconoir-key" on:click=disconnect></i>

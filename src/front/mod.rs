@@ -1,4 +1,4 @@
 pub mod utils;
 pub mod pages;
-mod layout;
-mod module_home;
+pub mod layout;
+pub mod modules;

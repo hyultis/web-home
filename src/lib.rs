@@ -8,6 +8,7 @@
 pub mod entry;
 mod front;
 mod api;
+pub mod global_security;
 
 #[cfg(feature = "hydrate")]
 #[wasm_bindgen::prelude::wasm_bindgen]

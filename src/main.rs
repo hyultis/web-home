@@ -4,17 +4,15 @@
 #![allow(unused_variables)]
 #![allow(non_camel_case_types)]
 
-use axum::extract::Request;
 use axum::middleware;
-use axum::middleware::Next;
-use axum::response::Response;
 use Hconfig::IO::json::WrapperJson;
-use http::header::*;
+use Htrace::HTraceError;
 use time::Duration;
 use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
+use crate::global_security::generate_salt;
 
 mod api;
-
+pub mod global_security;
 
 #[cfg(feature = "ssr")]
 #[tokio::main]
@@ -53,6 +51,18 @@ async fn main() {
 	HConfigManager::singleton()
 		.create::<WrapperJson>("htrace")
 		.expect("bug from hconfig");
+	HConfigManager::singleton()
+		.create::<WrapperJson>("site")
+		.expect("bug from hconfig");
+
+	// set default site config
+	if let Some(mut siteConfig) = HConfigManager::singleton().get("site")
+	{
+		let config = siteConfig.value_mut();
+		helper::preFillConfig(config,"salt",generate_salt().expect("Cannot generate a salt for website (site.json/salt)"));
+		helper::preFillConfig(config,"allow_registration",true);
+		HTraceError!(config.file_save());
+	}
 
 	let mut global_context = Context::default();
 	global_context.module_add("cmd",CommandLine::new(CommandLineConfig::default()));
@@ -87,8 +97,8 @@ async fn main() {
             move || shell(leptos_options.clone())
         })
         .fallback(leptos_axum::file_and_error_handler(shell))
-	    .layer(middleware::from_fn(tracing_request))
-	    .layer(middleware::from_fn(http_good_practice))
+	    .layer(middleware::from_fn(helper::tracing_request))
+	    .layer(middleware::from_fn(helper::http_good_practice))
 	    .layer(session_layer)
         .with_state(leptos_options);
 
@@ -100,41 +110,62 @@ async fn main() {
 }
 
 #[cfg(feature = "ssr")]
-async fn tracing_request(
-	request: Request,
-	next: Next,
-) -> Response {
-	use Htrace::HTrace;
+mod helper {
+	use axum::extract::Request;
+	use axum::middleware::Next;
+	use axum::response::Response;
+	use Hconfig::HConfig::HConfig;
+	use Hconfig::tinyjson::JsonValue;
+	use http::header::*;
 
-	let method = request.method().to_string();
-	let uri = request.uri().to_string();
+	pub fn preFillConfig(config: &mut HConfig,fieldName: impl Into<String>, data: impl Into<JsonValue>)
+	{
+		let fieldName = fieldName.into();
+		if match config.value_get(&fieldName) {
+			None => true,
+			Some(JsonValue::String(ref content)) if content.is_empty() => true,
+			Some(_) => false
+		} {
+			config.value_set(&fieldName,data);
+		}
+	}
 
-	let response = next.run(request).await;
+	pub(crate) async fn tracing_request(
+		request: Request,
+		next: Next,
+	) -> Response {
+		use Htrace::HTrace;
 
-	HTrace!("Request {} on {} : {}", method, uri, response.status());
+		let method = request.method().to_string();
+		let uri = request.uri().to_string();
 
-	response
-}
+		let response = next.run(request).await;
+
+		HTrace!("Request {} on {} : {}", method, uri, response.status());
+
+		response
+	}
 
 
-async fn http_good_practice(
-	request: Request,
-	next: Next,
-) -> Response {
-	let mut response = next.run(request).await;
+	pub(crate) async fn http_good_practice(
+		request: Request,
+		next: Next,
+	) -> Response {
+		let mut response = next.run(request).await;
 
-	response.headers_mut().insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
-	response.headers_mut().insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static("frame-ancestors 'none'"));
-	response.headers_mut().insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
-	response.headers_mut().insert(STRICT_TRANSPORT_SECURITY, HeaderValue::from_static("max-age=63072000; includeSubDomains; preload"));
-	response.headers_mut().insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+		response.headers_mut().insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+		response.headers_mut().insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static("frame-ancestors 'none'"));
+		response.headers_mut().insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+		response.headers_mut().insert(STRICT_TRANSPORT_SECURITY, HeaderValue::from_static("max-age=63072000; includeSubDomains; preload"));
+		response.headers_mut().insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
 
-	response
+		response
+	}
 }
 
 #[cfg(not(feature = "ssr"))]
 pub fn main() {
-    // no client-side main function
-    // unless we want this to work with e.g., Trunk for pure client-side testing
-    // see lib.rs for hydration function instead
+	// no client-side main function
+	// unless we want this to work with e.g., Trunk for pure client-side testing
+	// see lib.rs for hydration function instead
 }

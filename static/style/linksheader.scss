@@ -1,0 +1,50 @@
+
+.linksheader {}
+.linksheader a {
+	display: inline-block;
+	padding: 0 0.5em;
+	margin: 0 0.1em;
+	border: 1px solid var(--maincolor);
+	color: var(--defaultfontcolor);
+	border-radius: 5px;
+	background-color: var(--backgroundcolor);
+}
+
+
+.linksheader a:hover {
+	cursor: pointer;
+	box-shadow: 0 0 10px var(--maincolor);
+}
+
+.linksheader .button {
+	display: inline-block;
+	padding: 0 0.5em;
+	margin: 0 0.1em;
+	border: 1px solid var(--maincolor);
+	color: var(--defaultfontcolor);
+	border-radius: 5px;
+	background-color: var(--backgroundcolor);
+}
+
+.linksheader .button i {
+	cursor: grab;
+}
+
+.linksheader .add {
+	cursor: pointer;
+}
+
+.linksheader .ghost {
+	opacity: 0.3;
+}
+
+.linksheader .drop {
+	box-shadow: var(--urlcolor) 0 0 3px 1px;
+}
+
+.linksheader [class^="iconoir-"]::before,
+.linksheader [class*=" iconoir-"]::before {
+	display: inline-block;
+	vertical-align: sub;
+	margin-right: 5px;
+}

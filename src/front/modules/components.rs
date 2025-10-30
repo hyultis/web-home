@@ -1,4 +1,4 @@
-use leptos::prelude::{AnyView, RwSignal};
+use leptos::prelude::{AnyView, ArcRwSignal, RwSignal};
 use time::UtcDateTime;
 use serde::{Deserialize, Serialize};
 
@@ -40,8 +40,7 @@ impl Default for Cache
 /// struct that can manage cache
 pub trait Cacheable
 {
-	fn cache_get(&self) -> &Cache;
-	fn cache_get_mut(&mut self) -> &mut Cache;
+	fn cache_get(&self) -> ArcRwSignal<Cache>;
 }
 
 /// struct that can be sent to / retrieved from backend

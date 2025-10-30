@@ -1,4 +1,5 @@
-use leptos::prelude::{ArcRwSignal, ClassAttribute, Effect, Get, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Write};
+use std::ops::Deref;
+use leptos::prelude::{ArcRwSignal, ClassAttribute, Effect, Get, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update, Write};
 use crate::front::modules::components::{Backable, Cache, Cacheable};
 use leptos::prelude::{AnyView, CollectView, ElementChild, IntoAny, Read, RwSignal};
 use leptos::{view, IntoView};
@@ -25,7 +26,7 @@ impl Link
 pub struct LinksHolder
 {
 	content: ArcRwSignal<Vec<Link>>,
-	_cache: Cache,
+	_cache: ArcRwSignal<Cache>,
 }
 
 impl LinksHolder
@@ -34,14 +35,16 @@ impl LinksHolder
 	{
 		Self {
 			content: ArcRwSignal::new(vec![]),
-			_cache: Default::default(),
+			_cache: ArcRwSignal::new(Default::default()),
 		}
 	}
 
 	pub fn push(&mut self, new: Link)
 	{
 		self.content.write().push(new);
-		self._cache.update();
+		self._cache.update(|cache|{
+			cache.update();
+		});
 	}
 
 	/*pub fn getAll(&self) -> &Vec<Link>
@@ -55,7 +58,9 @@ impl LinksHolder
 		{
 			self.content.write().swap(itemPos, itemPos - 1);
 		}
-		self._cache.update();
+		self._cache.update(|cache|{
+			cache.update();
+		});
 	}
 
 	pub fn move_down(&mut self, itemPos: usize)
@@ -64,7 +69,9 @@ impl LinksHolder
 		{
 			self.content.write().swap(itemPos, itemPos + 1);
 		}
-		self._cache.update();
+		self._cache.update(|cache|{
+			cache.update();
+		});
 	}
 
 	fn draw_link(link: &Link) -> impl IntoView
@@ -131,14 +138,9 @@ impl LinksHolder
 
 impl Cacheable for LinksHolder
 {
-	fn cache_get(&self) -> &Cache
+	fn cache_get(&self) -> ArcRwSignal<Cache>
 	{
-		&self._cache
-	}
-
-	fn cache_get_mut(&mut self) -> &mut Cache
-	{
-		&mut self._cache
+		return self._cache.clone();
 	}
 }
 
@@ -156,6 +158,7 @@ impl Backable for LinksHolder
 		let somethingIsDragging: RwSignal<bool> = RwSignal::new(false);
 
 		let content = self.content.clone();
+		let cache = self._cache.clone();
 		Effect::new(move |_| {
 			let Some(newTarget) = draggedTargetPosition.get() else {return};
 			let Some(Origin) = draggedOriginPosition.get() else {return};
@@ -164,7 +167,29 @@ impl Backable for LinksHolder
 			draggedTargetPosition.set(None);
 			draggedOriginPosition.set(None);
 
-			content.clone().write().swap(Origin, newTarget);
+			content.clone().update(|vec|{
+				let isAfter = newTarget < Origin;
+				let mut new = vec![];
+				let Some(moveLink) = vec.get(Origin).cloned() else {return};
+				vec.iter().enumerate().for_each(|(pos,link)|{
+					HWebTrace!("pos {}", pos);
+					if(pos==newTarget)
+					{
+						HWebTrace!("newTarget {}", newTarget);
+						new.push(moveLink.clone());
+					}
+					new.push(link.clone());
+				});
+
+				if(isAfter)
+				{new.remove(Origin+1);}
+				else
+				{new.remove(Origin);}
+				*vec = new;
+			});
+			cache.clone().update(|cache|{
+				cache.update();
+			});
 
 			HWebTrace!("need to move origin {} to target {}", Origin, newTarget);
 		});

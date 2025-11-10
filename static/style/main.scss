@@ -1,6 +1,7 @@
 @use "reset";
 @use "obfuscate";
 @use "linksheader";
+@use "dialog";
 //@use "menu";
 
 :root
@@ -16,6 +17,7 @@
 	--buttonbackgrounddanger: #981f00;
 	--buttonbackgroundwarn: #984200;
 	--buttonbackgroundok: #009814;
+	--animationduration: 0.5s;
 }
 
 

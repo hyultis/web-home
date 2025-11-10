@@ -19,11 +19,19 @@ page404_content = Désoler, cette page est introuvable. vous pouvez allez sur { 
 menu_home = Retour a l'accueil
 
 #login and sign
-LOGIN_USER_CONNECTED = Utilisateur connecté
-LOGIN_USER_DISCONNECTED = Utilisateur déconnecté
-LOGIN_USER_SIGNEDUP = Utilisateur inscrit
-LOGIN_USER_NOT_FOUND = Ce login n'existe pas
-LOGIN_USER_INVALID_PWD = Password invalide
-LOGIN_USER_ALREADY_EXISTS = Ce login existe déjà
-LOGIN_LOCKED = Ce login est verrouillé suite a de nombreuses tentatives de connexion
-SERVER_ERROR = Erreur serveur
+FRONTLOGIN_LOGIN_USER_CONNECTED = Utilisateur connecté
+FRONTLOGIN_LOGIN_USER_DISCONNECTED = Utilisateur déconnecté
+FRONTLOGIN_LOGIN_USER_SIGNEDUP = Utilisateur inscrit
+FRONTLOGIN_LOGIN_USER_NOT_FOUND = Ce login n'existe pas
+FRONTLOGIN_LOGIN_USER_INVALID_PWD = Password invalide
+FRONTLOGIN_LOGIN_USER_ALREADY_EXISTS = Ce login existe déjà
+FRONTLOGIN_LOGIN_LOCKED = Ce login est verrouillé suite a de nombreuses tentatives de connexion
+
+#global errors
+FRONTERROR_SERVER_ERROR = Erreur serveur
+FRONTERROR_MODULE_OUTDATED = Le module est plus vieux que la version serveur
+FRONTERROR_MODULE_NOTEXIST = Le module n'existe pas
+
+#front utility
+FRONTUI_VALID = Valider
+FRONTUI_CLOSE = Fermer

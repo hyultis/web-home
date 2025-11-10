@@ -9,7 +9,7 @@ use leptos_router::components::A;
 use leptos_router::*;
 use crate::front::utils::fluent::FluentManager::FluentManager;
 use crate::front::utils::translate::Translate;
-use crate::front::utils::usersData::UserData;
+use crate::front::utils::users_data::UserData;
 use crate::HWebTrace;
 
 #[derive(Clone)]
@@ -48,7 +48,7 @@ pub fn Inscription() -> impl IntoView {
 		});
 	};
 
-	let submitTranslate = FluentManager::getAsResource("pageRoot_form_submit_signup");
+	let submitTranslate = FluentManager::getAsResourceParamsLess("pageRoot_form_submit_signup");
 
 	view! {
 		<div class="centered_box">

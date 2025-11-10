@@ -1,8 +1,7 @@
 #[cfg(feature = "ssr")]
-mod user_back;
+pub mod user_back;
 #[cfg(feature = "ssr")]
 pub mod salt;
-
 
 pub mod components;
 
@@ -30,7 +29,7 @@ pub async fn API_user_login(generatedId: String, hashedPawd: String) -> Result<L
 	let result = match user_back::UserBackHelper::loginCheckAndCreate(generatedId, hashedPawd).await
 	{
 		Ok(result) => result,
-		Err(user_back::UserBackHelperError::Direct(err)) => return Ok(err),
+		Err(user_back::UserBackHelperError::LoginError(err)) => return Ok(err),
 		Err(error) => {
 			HTrace!("API_user_login error : {:?}",error);
 			return Ok(LoginStatus::SERVER_ERROR)
@@ -47,7 +46,7 @@ pub async fn API_user_sign(generatedId: String, hashedPawd: String) -> Result<Lo
 	{
 		Ok(true) => Ok(LoginStatus::USER_CONNECTED),
 		Ok(false) => Ok(LoginStatus::USER_ALREADY_EXISTS),
-		Err(user_back::UserBackHelperError::Direct(err)) => Ok(err),
+		Err(user_back::UserBackHelperError::LoginError(err)) => Ok(err),
 		Err(error) => {
 			HTrace!("API_user_login error : {:?}",error);
 			Ok(LoginStatus::SERVER_ERROR)

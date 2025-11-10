@@ -1,11 +1,14 @@
-use std::ops::Deref;
-use leptos::prelude::{ArcRwSignal, ClassAttribute, Effect, Get, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update, Write};
+use leptos::prelude::{BindAttribute, GetUntracked};
+use leptos::prelude::{use_context, ArcRwSignal, Callback, ClassAttribute, Effect, Get, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update, Write};
 use crate::front::modules::components::{Backable, Cache, Cacheable};
 use leptos::prelude::{AnyView, CollectView, ElementChild, IntoAny, Read, RwSignal};
 use leptos::{view, IntoView};
+use leptos::ev::MouseEvent;
 use leptos::html::{Div, I};
 use leptos_use::{use_draggable_with_options, use_mouse_in_element, UseDraggableOptions, UseDraggableReturn, UseMouseInElementReturn};
 use serde::{Deserialize, Serialize};
+use crate::api::modules::components::ModuleContent;
+use crate::front::utils::dialog::DialogManager;
 use crate::HWebTrace;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -26,7 +29,8 @@ impl Link
 pub struct LinksHolder
 {
 	content: ArcRwSignal<Vec<Link>>,
-	_cache: ArcRwSignal<Cache>,
+	_update: ArcRwSignal<Cache>,
+	_sended: ArcRwSignal<Cache>,
 }
 
 impl LinksHolder
@@ -35,14 +39,15 @@ impl LinksHolder
 	{
 		Self {
 			content: ArcRwSignal::new(vec![]),
-			_cache: ArcRwSignal::new(Default::default()),
+			_update: ArcRwSignal::new(Default::default()),
+			_sended: Default::default(),
 		}
 	}
 
 	pub fn push(&mut self, new: Link)
 	{
 		self.content.write().push(new);
-		self._cache.update(|cache|{
+		self._update.update(|cache|{
 			cache.update();
 		});
 	}
@@ -58,7 +63,7 @@ impl LinksHolder
 		{
 			self.content.write().swap(itemPos, itemPos - 1);
 		}
-		self._cache.update(|cache|{
+		self._update.update(|cache|{
 			cache.update();
 		});
 	}
@@ -69,7 +74,7 @@ impl LinksHolder
 		{
 			self.content.write().swap(itemPos, itemPos + 1);
 		}
-		self._cache.update(|cache|{
+		self._update.update(|cache|{
 			cache.update();
 		});
 	}
@@ -81,7 +86,11 @@ impl LinksHolder
 		};
 	}
 
-	fn draw_editable_link(link: &Link, pos: usize, draggedOriginPosition: RwSignal<Option<usize>>, draggedTargetPosition: RwSignal<Option<usize>>, somethingIsDragging: RwSignal<bool>) -> impl IntoView
+	fn draw_editable_link(link: &Link, pos: usize,
+	                      draggedOriginPosition: RwSignal<Option<usize>>,
+	                      draggedTargetPosition: RwSignal<Option<usize>>,
+	                      somethingIsDragging: RwSignal<bool>,
+	                      content: ArcRwSignal<Vec<Link>>) -> impl IntoView
 	{
 		// drop zone
 		let target = NodeRef::<Div>::new();
@@ -115,6 +124,8 @@ impl LinksHolder
 			..
 		} = use_draggable_with_options(el,config);
 
+		let fnRemove = Self::removeLinkPopupFn(content,pos);
+
 
 		return view! {
 			<div class="button ghost" style=move || {
@@ -122,7 +133,7 @@ impl LinksHolder
 				if(is_dragging.get()) {show = "display: inline-block;";}
 				format!("position: fixed; {} {}", style.get(),show)
 			}>
-				<i  class="iconoir-arrow-separate"></i>{link.label.clone()}
+				<i  class="iconoir-arrow-separate grabbable"></i>{link.label.clone()}
 			</div>
 			<div class={move || {
 				let mut classDrop = "";
@@ -130,17 +141,80 @@ impl LinksHolder
 				if somethingIsDragging.get() && !is_outside.get() && targetPos != pos as i32 {classDrop = " drop"}
 				format!("button{}",classDrop)
 			}} node_ref=target>
-				<i node_ref=el class="iconoir-arrow-separate" on:click={move |_| {}}></i>{link.label.clone()}
+				<i node_ref=el class="iconoir-arrow-separate grabbable"></i>{link.label.clone()}<i class="iconoir-xmark subbuttonremove" on:click={fnRemove}></i>
 			</div>
+		};
+	}
+
+	fn removeLinkPopupFn(content: ArcRwSignal<Vec<Link>>, pos: usize) -> impl Fn(MouseEvent)
+	{
+		let dialog = use_context::<DialogManager>().expect("DialogManager missing");
+		let content = content.clone();
+
+		return move |_| {
+			let content = content.clone();
+			dialog.open("Supprimer un lien ?", move || {
+				view!{
+				<span/>
+			}.into_any()
+			}, Some(Callback::new(move |_| {
+				content.update(|links|{
+					links.remove(pos);
+				});
+			})), None);
+		};
+	}
+
+	fn addLinkPopupFn(&self) -> impl Fn(MouseEvent)
+	{
+		let dialog = use_context::<DialogManager>().expect("DialogManager missing");
+		let content = self.content.clone();
+
+		return move |_| {
+			let label = ArcRwSignal::new("".to_string());
+			let url = ArcRwSignal::new("".to_string());
+
+			let labelDialog = label.clone();
+			let urlDialog = url.clone();
+			let content = content.clone();
+			dialog.open("Ajouter un lien", move || {
+
+				let innerLabel = RwSignal::new("".to_string());
+				let innerUrl = RwSignal::new("".to_string());
+
+				let labelEffect = labelDialog.clone();
+				let urlEffect = urlDialog.clone();
+				Effect::new(move |_| {
+					labelEffect.clone().update(|e| *e = innerLabel.get());
+					urlEffect.clone().update(|e| *e = innerUrl.get());
+				});
+
+				view!{
+				<div>
+					<label>
+						<span>Label</span>
+						<input type="text" placeholder="Label" bind:value=innerLabel/>
+					</label>
+					<label>
+						<span>Url</span>
+						<input type="text" placeholder="Url" bind:value=innerUrl/>
+					</label>
+				</div>
+			}.into_any()
+			}, Some(Callback::new(move |_| {
+				content.update(|links|{
+					links.push(Link::new(label.clone().get(),url.clone().get()));
+				});
+			})), None);
 		};
 	}
 }
 
 impl Cacheable for LinksHolder
 {
-	fn cache_get(&self) -> ArcRwSignal<Cache>
+	fn cache_mustUpdate(&self) -> bool
 	{
-		return self._cache.clone();
+		return self._update.get().isNewer(&self._sended.get());
 	}
 }
 
@@ -153,12 +227,14 @@ impl Backable for LinksHolder
 
 	fn draw(&self, editMode: RwSignal<bool>) -> AnyView
 	{
+		let addLinkFn = self.addLinkPopupFn();
+
 		let draggedOriginPosition: RwSignal<Option<usize>> = RwSignal::new(None);
 		let draggedTargetPosition: RwSignal<Option<usize>> = RwSignal::new(None);
 		let somethingIsDragging: RwSignal<bool> = RwSignal::new(false);
 
 		let content = self.content.clone();
-		let cache = self._cache.clone();
+		let cache = self._update.clone();
 		Effect::new(move |_| {
 			let Some(newTarget) = draggedTargetPosition.get() else {return};
 			let Some(Origin) = draggedOriginPosition.get() else {return};
@@ -168,23 +244,30 @@ impl Backable for LinksHolder
 			draggedOriginPosition.set(None);
 
 			content.clone().update(|vec|{
-				let isAfter = newTarget < Origin;
+				let isAfter = newTarget > Origin;
 				let mut new = vec![];
 				let Some(moveLink) = vec.get(Origin).cloned() else {return};
+				let last = vec.len() -1;
 				vec.iter().enumerate().for_each(|(pos,link)|{
-					HWebTrace!("pos {}", pos);
-					if(pos==newTarget)
+					if(!isAfter && pos==newTarget)
 					{
-						HWebTrace!("newTarget {}", newTarget);
+						//HWebTrace!("newTarget before {}", newTarget);
 						new.push(moveLink.clone());
 					}
-					new.push(link.clone());
+
+					if(pos!=Origin) {
+						new.push(link.clone());
+					}
+					if(isAfter && (pos==newTarget || (newTarget>last && pos==last))){
+						//HWebTrace!("newTarget after {}", newTarget);
+						new.push(moveLink.clone());
+					}
 				});
 
-				if(isAfter)
+				/*if(!isAfter)
 				{new.remove(Origin+1);}
 				else
-				{new.remove(Origin);}
+				{new.remove(Origin);}*/
 				*vec = new;
 			});
 			cache.clone().update(|cache|{
@@ -206,27 +289,36 @@ impl Backable for LinksHolder
 				.enumerate()
 				.map(|(key,link)|
 					if editMode.get()
-						{return Self::draw_editable_link(link,key,draggedOriginPosition,draggedTargetPosition,somethingIsDragging).into_any();}
+						{return Self::draw_editable_link(&link,key,draggedOriginPosition,draggedTargetPosition,somethingIsDragging, self.content.clone()).into_any();}
 					else
-						{return Self::draw_link(link).into_any();}
+						{return Self::draw_link(&link).into_any();}
 				)
 				.collect_view()
 			}
-			{editMode.read().then(|| view!{<div class="button add" on:click={move |_| {}}><i class="iconoir-plus-circle"></i>add</div>})}
+			{editMode.read().then(|| view!{<div class="button add" on:click=addLinkFn><i class="iconoir-plus-circle"></i>add</div>})}
 			</div>
 		}.into_any()
 	}
 
-	fn export(&self) -> String
+	fn export(&self) -> ModuleContent
 	{
-		return serde_json::to_string(&self.content).unwrap();
+		return ModuleContent{
+			name: "links".to_string(),
+			timestamp: self._update.get_untracked().get(),
+			content: serde_json::to_string(&self.content).unwrap(),
+		};
 	}
 
-	fn import(&mut self, importSerial: String)
+	fn import(&mut self, import: ModuleContent)
 	{
-		if let Ok(content) = serde_json::from_str(&importSerial)
-		{
-			self.content = content;
-		}
+		let Ok(content) = serde_json::from_str(&import.content) else {return};
+
+		self.content = content;
+		self._update.update(|cache|{
+			cache.update_from(import.timestamp);
+		});
+		self._sended.update(|cache|{
+			cache.update_from(import.timestamp);
+		});
 	}
 }

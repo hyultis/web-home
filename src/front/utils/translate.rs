@@ -7,7 +7,7 @@ use leptos::prelude::{Get, IntoAny, Read};
 use leptos::suspense::Transition;
 use leptos::prelude::ElementChild;
 use crate::front::utils::fluent::FluentManager::FluentManager;
-use crate::front::utils::usersData::UserData;
+use crate::front::utils::users_data::UserData;
 
 #[component]
 pub fn TranslateCurrentLang() -> impl IntoView {
@@ -56,9 +56,9 @@ pub fn TranslateFn(
 	{
 		params.insert("children".to_string(),splitted.to_string());
 	}
-	let params = Arc::new(params);
 
-	let translate = FluentManager::getAsResource(key());
+	let params = Arc::new(params);
+	let translate = FluentManager::getAsResource(key(),params);
 
 	let altkey = key.clone();
 	view! {

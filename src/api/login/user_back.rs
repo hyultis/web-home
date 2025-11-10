@@ -8,7 +8,7 @@ use Hconfig::IO::json::WrapperJson;
 use Hconfig::tinyjson::JsonValue;
 use Htrace::components::level::Level;
 use Htrace::{HTrace, HTraceError};
-use leptos::prelude::ServerFnErrorErr;
+use leptos::prelude::{ServerFnError, ServerFnErrorErr};
 use leptos_axum::extract;
 use sha3::{Digest, Sha3_256};
 use time::macros::format_description;
@@ -23,14 +23,25 @@ pub enum UserBackHelperError
 {
 	HConfigError(Errors),
 	ServerError(ServerFnErrorErr),
-	Direct(LoginStatus),
+	LoginError(LoginStatus),
+}
+
+impl Into<ServerFnError> for UserBackHelperError
+{
+	fn into(self) -> ServerFnError {
+		match self {
+			UserBackHelperError::HConfigError(err) => ServerFnError::new(format!("HConfigError: {}",err)),
+			UserBackHelperError::ServerError(err) => ServerFnError::new(format!("ServerError: {}",err)),
+			UserBackHelperError::LoginError(err) => ServerFnError::new(format!("LoginError: {}",err)),
+		}
+	}
 }
 
 pub struct UserBackHelper;
 
 impl UserBackHelper {
 	/// Check in the session if the user have to much try something (connection or sign up)
-	pub async fn checkSession(keyTime: &str, keyNb: &str, maxRetry: u8, delayreset: Duration) -> (Result<(Session, u8), UserBackHelperError>)
+	pub async fn checkSession(keyTime: &str, keyNb: &str, maxRetry: u8, delayreset: Duration) -> Result<(Session, u8), UserBackHelperError>
 	{
 		let formatDesc = format_description!("[unix_timestamp precision:millisecond]");
 		let session = match extract::<Session>().await {
@@ -51,7 +62,7 @@ impl UserBackHelper {
 		if (retryValue >= maxRetry)
 		{
 			let timestamp = OffsetDateTime::now_utc().unix_timestamp();
-			return Err(UserBackHelperError::Direct(LoginStatus::LOCKED(timestamp)));
+			return Err(UserBackHelperError::LoginError(LoginStatus::LOCKED(timestamp)));
 		}
 
 		return Ok((session, retryValue));
@@ -113,7 +124,7 @@ impl UserBackHelper {
 
 		HTraceError!("UserBackHelper.loginCheckAndCreate fail to insert SESSION_LOGIN_NBTRY : {}",session.insert(SESSION_LOGIN_NBTRY, retryValue+1).await);
 		HTraceError!("UserBackHelper.loginCheckAndCreate fail to insert SESSION_LOGIN_NBTRY_LAST : {}",session.insert(SESSION_LOGIN_NBTRY_LAST, OffsetDateTime::now_utc().unix_timestamp()).await);
-		return Err(UserBackHelperError::Direct(LoginStatus::USER_INVALID_PWD));
+		return Err(UserBackHelperError::LoginError(LoginStatus::USER_INVALID_PWD));
 	}
 
 	/// get config file corresponding to the user
@@ -126,7 +137,7 @@ impl UserBackHelper {
 			if let Err(_) = File::open(filepath.clone())
 			{
 				println!("trying open : {}",filepath);
-				return Err(UserBackHelperError::Direct(LoginStatus::USER_NOT_FOUND));
+				return Err(UserBackHelperError::LoginError(LoginStatus::USER_NOT_FOUND));
 			}
 		}
 

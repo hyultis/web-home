@@ -8,7 +8,7 @@ use leptos_router::components::A;
 use leptos_router::hooks;
 use crate::front::utils::fluent::FluentManager::FluentManager;
 use crate::front::utils::translate::Translate;
-use crate::front::utils::usersData::UserData;
+use crate::front::utils::users_data::UserData;
 use crate::HWebTrace;
 
 #[island]
@@ -46,7 +46,7 @@ pub fn Connection() -> impl IntoView {
 		});
 	};
 
-	let submitTranslate = FluentManager::getAsResource("pageRoot_form_submit_login");
+	let submitTranslate = FluentManager::getAsResourceParamsLess("pageRoot_form_submit_login");
 
 	view! {
 		<div class="centered_box">

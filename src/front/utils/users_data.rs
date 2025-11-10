@@ -40,7 +40,8 @@ use base64ct::{Base64, Encoding};
 pub struct UserData
 {
 	lang: String,
-	userSalt: Option<String>
+	userSalt: Option<String>,
+	generatedId: Option<String>
 }
 
 impl UserData {
@@ -66,6 +67,11 @@ impl UserData {
 		}
 	}
 
+	pub fn login_get(&self) -> Option<String>
+	{
+		return self.generatedId.clone();
+	}
+
 	pub fn login_isConnected(&self) -> bool
 	{
 		return self.userSalt.is_some();
@@ -81,6 +87,7 @@ impl UserData {
 		{
 			Ok(LoginStatus::USER_CONNECTED) => {
 				self.userSalt = Some(user_salt);
+				self.generatedId = Some(generatedId);
 				None
 			},
 			Ok(LoginStatus::SERVER_ERROR) => Some("SERVER_ERROR".to_string()),
@@ -189,6 +196,7 @@ impl Default for UserData
 		Self {
 			lang: "EN".to_string(),
 			userSalt: None,
+			generatedId: None,
 		}
 	}
 }

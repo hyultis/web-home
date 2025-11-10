@@ -1,0 +1,77 @@
+.dialog-backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(0,0,0,0.5);
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	opacity: 1;
+	transition: opacity 0.2s ease;
+}
+
+.dialog-window {
+	background: var(--backgroundcolor);
+	color: var(--defaultfontcolor);
+	padding: 1em;
+	border-radius: 8px;
+	min-width: 25em;
+	max-width: 90%;
+	box-shadow: 0 0 15px rgba(0,0,0,0.4);
+	animation: open var(--animationduration) normal linear;
+}
+
+.dialog-backdrop.closing {
+	animation: close var(--animationduration) normal linear;
+}
+
+.dialog-window h2 {
+	font-size: 1.2em;
+	text-align: center;
+	margin-bottom: 0.5em;
+}
+
+.dialog-buttons {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5em;
+	margin-top: 1em;
+}
+
+.dialog-buttons .close {
+	background-color: var(--buttonbackgroundwarn);
+}
+
+.dialog-buttons .validate {
+	background-color: var(--buttonbackgroundok);
+}
+.dialog-buttons button {
+	border: 1px solid var(--maincolor);
+	border-radius: 5px;
+	padding:  0.25em 0.5em;
+	cursor: pointer;
+}
+
+@keyframes open {
+	0%{
+		transform: translateY(-150vh);
+	}
+	80%{
+		transform: translateY(25px);
+	}
+	90%{
+		transform: translateY(-10px);
+	}
+	100%{
+		transform: translateY(0px);
+	}
+}
+
+@keyframes close {
+	0%{
+		opacity: 1;
+	}
+	100%{
+		display: none;
+		opacity: 0;
+	}
+}

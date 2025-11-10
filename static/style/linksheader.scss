@@ -13,7 +13,6 @@
 
 .linksheader a:hover {
 	cursor: pointer;
-	box-shadow: 0 0 10px var(--maincolor);
 }
 
 .linksheader .button {
@@ -26,9 +25,10 @@
 	background-color: var(--backgroundcolor);
 }
 
-.linksheader .button i {
+.linksheader .button .grabbable {
 	cursor: grab;
 }
+
 
 .linksheader .add {
 	cursor: pointer;
@@ -39,7 +39,20 @@
 }
 
 .linksheader .drop {
-	box-shadow: var(--urlcolor) 0 0 3px 1px;
+	cursor: cell;
+	animation: glow 5s infinite;
+}
+
+.linksheader .subbuttonremove{
+	cursor: pointer;
+	margin-left: 0.5em;
+	background-color: var(--buttonbackgrounddanger);
+	padding-left: 0.3em;
+	border: 1px solid var(--maincolor);
+}
+
+.linksheader .subbuttonremove:hover {
+	background-color: var(--buttonbackgroundwarn);
 }
 
 .linksheader [class^="iconoir-"]::before,
@@ -47,4 +60,22 @@
 	display: inline-block;
 	vertical-align: sub;
 	margin-right: 5px;
+}
+
+@keyframes glow {
+	0%{
+		box-shadow: 0px 0px 3px 3px #FF9139;
+	}
+	25%{
+		box-shadow: 0px 0px 3px 5px #FFBB41;
+	}
+	50%{
+		box-shadow: 0px 0px 3px 2px #FF9139;
+	}
+	75%{
+		box-shadow: 0px 0px 3px 4px #FFBB41;
+	}
+	100%{
+		box-shadow: 0px 0px 3px 1px #FF9139;
+	}
 }

@@ -6,7 +6,7 @@ use intl_memoizer::concurrent::IntlLangMemoizer;
 use leptos::logging::log;
 use leptos::prelude::{Read, Resource};
 use crate::api::translateBooks::API_translate_getBook;
-use crate::front::utils::usersData::UserData;
+use crate::front::utils::users_data::UserData;
 use crate::HWebTrace;
 
 struct BookHolder
@@ -27,26 +27,7 @@ impl FluentManager {
 		return SINGLETON.get_or_init(|| FluentManager::new());
 	}
 
-	/// Asynchronously translates a given key into the specified language, utilizing the default (empty) set
-	/// of parameters.
-	///
-	/// # Parameters
-	/// - `lang`: A value that can be converted into a `String` representing the target language code
-	///   (e.g., "en" for English, "fr" for French).
-	/// - `key`: A value that can be converted into a `String` representing the translation key or identifier.
-	///
-	/// # Returns
-	/// A `String` containing the translated message.
-	///
-	/// # Example
-	/// ```rust
-	/// let result = instance.translateParamsLess("en", "greeting_key").await;
-	/// println!("{}", result);  // Outputs the translated message for "greeting_key" in English
-	/// ```
-	///
-	/// # Notes
-	/// This method is a shorthand for calling `translate` with an empty parameter map. If your translation
-	/// depends on parameters, consider using the `translate` method directly.
+	/// Same as translate() without the params
 	pub async fn translateParamsLess(&self, lang: impl Into<String>, key: impl Into<String>) -> String
 	{
 		return self.translate(lang,key,Arc::new(HashMap::new())).await;
@@ -58,35 +39,6 @@ impl FluentManager {
 	/// - `lang`: A type that can be converted into a `String`, representing the target language code (e.g., "en", "fr").
 	/// - `key`: A type that can be converted into a `String`, representing the message identifier or key to be translated.
 	/// - `params`: An `Arc<HashMap<String, String>>` containing key-value pairs for dynamic parameter substitution in the translated message.
-	///
-	/// # Returns
-	/// A `String` containing the translated and formatted message. If the language, key, or formatting resources are missing, the `key` will be returned as a fallback.
-	///
-	/// # Behavior
-	/// 1. Validates whether the target language resources are loaded. If not, it dynamically adds the language resource asynchronously.
-	/// 2. Attempts to retrieve the corresponding translation bundle for the specified language.
-	/// 3. Fetches the message associated with the key from the translation bundle.
-	/// 4. Substitutes dynamic parameters within the message, if present.
-	/// 5. Formats the message and returns the result.
-	///
-	/// # Logging and Errors
-	/// - Logs an error if the translation bundle for the language does not exist.
-	/// - Logs an error if the specified key does not have a corresponding message.
-	/// - Logs an error if the message template exists but has no value.
-	/// - Logs a vector of errors encountered during the message formatting process.
-	///
-	/// # Example
-	/// ```rust
-	/// use std::sync::Arc;
-	/// use std::collections::HashMap;
-	///
-	/// let params = Arc::new(HashMap::from([("name".to_string(), "Alice".to_string())]));
-	/// let translated = my_translator.translate("en", "greeting", params).await;
-	/// assert_eq!(translated, "Hello, Alice!");
-	/// ```
-	///
-	/// # Note
-	/// This function assumes that the necessary language resources are either preloaded or can be dynamically fetched using the `addResource` method.
 	pub async fn translate(&self, lang: impl Into<String>, key: impl Into<String>, params: Arc<HashMap<String,String>>) -> String
 	{
 		let lang = lang.into();
@@ -99,7 +51,7 @@ impl FluentManager {
 
 		let bindingMap = self._resources.read().unwrap();
 		let Some(bundle) = bindingMap.get(&lang) else {
-			HWebTrace!("missing book");
+			HWebTrace!("missing book {}",lang);
 			return key;
 		};
 		let Some(msg) = bundle.content.get_message(key.as_str()) else {
@@ -127,23 +79,40 @@ impl FluentManager {
 		return result.to_string();
 	}
 
-	pub fn getAsResource(name: impl Into<String>) -> Resource<String>
+	/// Creates a `Resource<String>` which provides translations for a given string based on the user's language preference.
+	///
+	/// This function takes a name of a string (such as a key for a translation) and returns a
+	/// `Resource` that resolves the current language of the user and provides the translated string.
+	///
+	/// # Parameters
+	///
+	/// - `name`: A value that implements `Into<String>`. Represents the key or identifier for the
+	///   string to be translated.
+	pub fn getAsResource(name: impl Into<String>, params: Arc<HashMap<String,String>>) -> Resource<String>
 	{
 		let name = name.into();
 		return Resource::new(
 			move || {
 				let (userData, _) = UserData::cookie_signalGet();
 				let mut lang = "EN".to_string();
-				if let Some(userDataContent) = &*userData.read()
+				if let Some(userDataContent) = userData.try_read()
 				{
-					lang = userDataContent.lang_get().clone();
+					if let Some(userDataContent) = &*userDataContent
+					{
+						lang = userDataContent.lang_get().clone();
+					}
 				}
 				lang
 			},
 			move |lang| {
-				FluentManager::singleton().translateParamsLess(lang, name.clone())
+				FluentManager::singleton().translate(lang, name.clone(), params.clone())
 			}
 		);
+	}
+
+	pub fn getAsResourceParamsLess(name: impl Into<String>) -> Resource<String>
+	{
+		Self::getAsResource(name,Arc::new(HashMap::new()))
 	}
 
 	//////// PRIVATE

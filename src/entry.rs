@@ -10,8 +10,9 @@ use leptos::__reexports::wasm_bindgen_futures::spawn_local;
 use crate::front::pages::home::Home;
 use crate::front::pages::connection::Connection;
 use crate::front::pages::inscription::Inscription;
+use crate::front::utils::dialog::{DialogHost, DialogManager};
 use crate::front::utils::translate::Translate;
-use crate::front::utils::usersData::UserData;
+use crate::front::utils::users_data::UserData;
 pub fn shell(options: LeptosOptions) -> impl IntoView {
 	//	<meta http-equiv="Content-Security-Policy" modules="default-src https: * 'unsafe-inline' 'unsafe-eval' 'strict-dynamic' 'wasm-unsafe-eval'; script-src-elem *"/>
 	view! {
@@ -41,6 +42,8 @@ pub fn App() -> impl IntoView {
 	provide_meta_context();
 	provide_toaster();
 
+	let dialog_manager = DialogManager::new();
+	provide_context(dialog_manager.clone());
 
 	Effect::new(move |_| {
 		// set default userData
@@ -101,6 +104,7 @@ pub fn App() -> impl IntoView {
 					</Routes>
 				</section>
 			</Router>
+            <DialogHost manager=dialog_manager />
 		</div>
 	}
 }

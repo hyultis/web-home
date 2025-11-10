@@ -1,36 +1,50 @@
-use leptoaster::{expect_toaster, ToasterContext};
-use leptos::prelude::{use_context, ArcRwSignal, Callback, ClassAttribute, Effect, IntoAny, OnAttribute, Read, RenderHtml, RwSignal, Set, Update, Write};
-use leptos::{island, view, IntoView};
-use leptos::__reexports::wasm_bindgen_futures::spawn_local;
-use leptos::prelude::ElementChild;
-use leptos_router::hooks;
 use crate::front::modules::components::Backable;
 use crate::front::modules::link::Link;
 use crate::front::modules::ModuleHolder;
-use crate::front::utils::dialog::DialogManager;
-use crate::front::utils::users_data::UserData;
-use crate::HWebTrace;
-use std::ops::DerefMut;
-use leptos::ev::MouseEvent;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
+use crate::front::utils::dialog::DialogManager;
 use crate::front::utils::fluent::FluentManager::FluentManager;
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
+use crate::front::utils::users_data::UserData;
+use crate::HWebTrace;
+use leptoaster::{expect_toaster, ToasterContext};
+use leptos::__reexports::wasm_bindgen_futures::spawn_local;
+use leptos::ev::MouseEvent;
+use leptos::prelude::ElementChild;
+use leptos::prelude::{
+	use_context, ArcRwSignal, Callback, ClassAttribute, Effect, IntoAny, OnAttribute, Read,
+	RenderHtml, RwSignal, Set, Update, Write,
+};
+use leptos::{island, view, IntoView};
+use leptos_router::hooks;
+use std::ops::DerefMut;
 // https://iconoir.com/
 // plus
 
 #[island]
-pub fn Home() -> impl IntoView {
+pub fn Home() -> impl IntoView
+{
 	let editMode = RwSignal::new(false);
 	let moduleContent = ArcRwSignal::new(ModuleHolder::new());
 	let dialog = use_context::<DialogManager>().expect("DialogManager missing");
 	let toaster = expect_toaster();
 
-	let editModeValidateFn = editMode_validate(moduleContent.clone(), editMode.clone(), toaster.clone(), dialog.clone());
+	let editModeValidateFn = editMode_validate(
+		moduleContent.clone(),
+		editMode.clone(),
+		toaster.clone(),
+		dialog.clone(),
+	);
 
-	let editModeCancelFn = editMode_cancel(moduleContent.clone(), editMode.clone(), toaster.clone(), dialog.clone());
+	let editModeCancelFn = editMode_cancel(
+		moduleContent.clone(),
+		editMode.clone(),
+		toaster.clone(),
+		dialog.clone(),
+	);
 
 	let editModeActivateFn = move |_| {
-		editMode.update(|content|{
+		editMode.update(|content| {
 			*content = true;
 		});
 	};
@@ -42,9 +56,12 @@ pub fn Home() -> impl IntoView {
 
 		spawn_local(async move {
 			let (userData, setUserData) = UserData::cookie_signalGet();
-			let mut userData = userData.read().clone().unwrap_or(UserData::new(&"EN".to_string()));
+			let mut userData = userData
+				.read()
+				.clone()
+				.unwrap_or(UserData::new(&"EN".to_string()));
 			userData.login_disconnect().await;
-			toastingSuccess(toaster,"LOGIN_USER_DISCONNECTED").await;
+			toastingSuccess(toaster, "LOGIN_USER_DISCONNECTED").await;
 			HWebTrace!("user disconnected");
 			setUserData.set(Some(userData));
 			navigate("/", Default::default());
@@ -52,14 +69,34 @@ pub fn Home() -> impl IntoView {
 	};
 
 	let moduleContentInnerInitialLoad = moduleContent.clone();
+	let toasterInnerInitialLoad = toaster.clone();
 	Effect::new(move || {
-		moduleContentInnerInitialLoad.update(|holder|{
-			let holder = holder.links_get_mut();
-				holder.push(Link::new("google".to_string(),"https://google.fr".to_string()));
-				holder.push(Link::new("reddit".to_string(),"https://reddit.com".to_string()));
-			holder.push(Link::new("moncul".to_string(),"https://reddit.com".to_string()));
-			holder.push(Link::new("data".to_string(),"https://reddit.com".to_string()));
-		});
+			let moduleContentInnerInitialLoad = moduleContentInnerInitialLoad.clone();
+			let toasterInnerInitialLoad = toasterInnerInitialLoad.clone();
+
+			spawn_local(async move {
+
+				HWebTrace!("home spawn_local IN");
+				let Some(mut guard) = moduleContentInnerInitialLoad.try_write() else {
+					HWebTrace!("home spawn_local KO");
+					return
+				};
+				let holder: &mut ModuleHolder = guard.deref_mut();
+
+				let Some((login, lang)) = UserData::loginLang_get_from_cookie()
+				else
+				{
+					return;
+				};
+				let error = (*holder).editMode_cancel(login, true).await;
+				if let Some(err) = error
+				{
+					let translated = FluentManager::singleton()
+						.translateParamsLess(lang, err.to_string())
+						.await;
+					toastingErr(toasterInnerInitialLoad, translated).await;
+				}
+			});
 	});
 
 	let moduleContentInnerView = moduleContent.clone();
@@ -76,8 +113,8 @@ pub fn Home() -> impl IntoView {
 			<div class="right">
 				<i class="iconoir-key" on:click=disconnectFn></i>
 				{move || {
-                    let editModeValidateFn = editModeValidateFn.clone();
-                    let editModeCancelFn = editModeCancelFn.clone();
+					let editModeValidateFn = editModeValidateFn.clone();
+					let editModeCancelFn = editModeCancelFn.clone();
 					if *editMode.read()
 					{
 						view!{
@@ -96,92 +133,126 @@ pub fn Home() -> impl IntoView {
 	}
 }
 
-fn editMode_cancel(moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
-                     editModeInnerValidate: RwSignal<bool>,
-                     toasterInnerValidate: ToasterContext,
-                     dialog: DialogManager) -> impl Fn(MouseEvent) + Clone
+fn editMode_cancel(
+	moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
+	editModeInnerValidate: RwSignal<bool>,
+	toasterInnerValidate: ToasterContext,
+	dialog: DialogManager,
+) -> impl Fn(MouseEvent) + Clone
 {
 	return move |_| {
 		let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 		let editModeInnerValidate = editModeInnerValidate.clone();
 		let toasterInnerValidate = toasterInnerValidate.clone();
 
-		dialog.open("Annuler les changements ?", move || {
-			view!{
-				<span/>
-			}.into_any()
-		}, Some(Callback::new(move |_| {
-			let moduleContentInnerValidate = moduleContentInnerValidate.clone();
-			let editModeInnerValidate = editModeInnerValidate.clone();
-			let toasterInnerValidate = toasterInnerValidate.clone();
-			spawn_local(async move {
-				let Some(mut guard) = moduleContentInnerValidate.try_write() else {return};
-				let (userData, setUserData) = UserData::cookie_signalGet();
-				let userData = userData.read().clone().unwrap_or(UserData::new(&"EN".to_string()));
-				let Some(login) = userData.login_get() else {return};
-				let modules: &mut ModuleHolder = guard.deref_mut();
-				let error = (*modules).editMode_validate(login).await;
-				editModeInnerValidate.update(|content| {
-					*content = false;
+		dialog.open(
+			"Annuler les changements ?",
+			move || {
+				view! {
+					<span/>
+				}
+				.into_any()
+			},
+			Some(Callback::new(move |_| {
+				let moduleContentInnerValidate = moduleContentInnerValidate.clone();
+				let editModeInnerValidate = editModeInnerValidate.clone();
+				let toasterInnerValidate = toasterInnerValidate.clone();
+				spawn_local(async move {
+					let Some(mut guard) = moduleContentInnerValidate.try_write()
+					else
+					{
+						return;
+					};
+					let Some((login, lang)) = UserData::loginLang_get_from_cookie()
+					else
+					{
+						return;
+					};
+					let modules: &mut ModuleHolder = guard.deref_mut();
+					let error = (*modules).editMode_cancel(login, false).await;
+					editModeInnerValidate.update(|content| {
+						*content = false;
+					});
+
+					if let Some(err) = error
+					{
+						let translated = FluentManager::singleton()
+							.translateParamsLess(lang, err.to_string())
+							.await;
+						toastingErr(toasterInnerValidate, translated).await;
+					}
+					else
+					{
+						let translated = FluentManager::singleton()
+							.translateParamsLess(lang, AllFrontUIEnum::VALID.to_string())
+							.await;
+						toastingSuccess(toasterInnerValidate, translated).await;
+					}
 				});
-
-				if let Some(err) = error
-				{
-					let translated = FluentManager::singleton().translateParamsLess(userData.lang_get(),err.to_string()).await;
-					toastingErr(toasterInnerValidate,translated).await;
-				}
-				else
-				{
-					let translated = FluentManager::singleton().translateParamsLess(userData.lang_get(),AllFrontUIEnum::VALID.to_string()).await;
-					toastingSuccess(toasterInnerValidate,translated).await;
-				}
-			});
-
-		})), None);
+			})),
+			None,
+		);
 	};
 }
 
-fn editMode_validate(moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
-                     editModeInnerValidate: RwSignal<bool>,
-                     toasterInnerValidate: ToasterContext,
-                     dialog: DialogManager) -> impl Fn(MouseEvent) + Clone
+fn editMode_validate(
+	moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
+	editModeInnerValidate: RwSignal<bool>,
+	toasterInnerValidate: ToasterContext,
+	dialog: DialogManager,
+) -> impl Fn(MouseEvent) + Clone
 {
 	return move |_| {
 		let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 		let editModeInnerValidate = editModeInnerValidate.clone();
 		let toasterInnerValidate = toasterInnerValidate.clone();
 
-		dialog.open("Enregistrer les changements ?", move || {
-			view!{
-				<span/>
-			}.into_any()
-		}, Some(Callback::new(move |_| {
-			let moduleContentInnerValidate = moduleContentInnerValidate.clone();
-			let editModeInnerValidate = editModeInnerValidate.clone();
-			let toasterInnerValidate = toasterInnerValidate.clone();
-			spawn_local(async move {
-				let Some(mut guard) = moduleContentInnerValidate.try_write() else {return};
-				let (userData, setUserData) = UserData::cookie_signalGet();
-				let userData = userData.read().clone().unwrap_or(UserData::new(&"EN".to_string()));
-				let Some(login) = userData.login_get() else {return};
-				let modules: &mut ModuleHolder = guard.deref_mut();
-				let error = (*modules).editMode_validate(login).await;
-				editModeInnerValidate.update(|content| {
-					*content = false;
+		dialog.open(
+			"Enregistrer les changements ?",
+			move || {
+				view! {
+					<span/>
+				}
+				.into_any()
+			},
+			Some(Callback::new(move |_| {
+				let moduleContentInnerValidate = moduleContentInnerValidate.clone();
+				let editModeInnerValidate = editModeInnerValidate.clone();
+				let toasterInnerValidate = toasterInnerValidate.clone();
+				spawn_local(async move {
+					let Some(mut guard) = moduleContentInnerValidate.try_write()
+					else
+					{
+						return;
+					};
+					let Some((login, lang)) = UserData::loginLang_get_from_cookie()
+					else
+					{
+						return;
+					};
+					let modules: &mut ModuleHolder = guard.deref_mut();
+					let error = (*modules).editMode_validate(login).await;
+					editModeInnerValidate.update(|content| {
+						*content = false;
+					});
+
+					if let Some(err) = error
+					{
+						let translated = FluentManager::singleton()
+							.translateParamsLess(lang, err.to_string())
+							.await;
+						toastingErr(toasterInnerValidate, translated).await;
+					}
+					else
+					{
+						let translated = FluentManager::singleton()
+							.translateParamsLess(lang, AllFrontUIEnum::VALID.to_string())
+							.await;
+						toastingSuccess(toasterInnerValidate, translated).await;
+					}
 				});
-
-				if let Some(err) = error
-				{
-					let translated = FluentManager::singleton().translateParamsLess(userData.lang_get(),err.to_string()).await;
-					toastingErr(toasterInnerValidate,translated).await;
-				}
-				else
-				{
-					let translated = FluentManager::singleton().translateParamsLess(userData.lang_get(),AllFrontUIEnum::VALID.to_string()).await;
-					toastingSuccess(toasterInnerValidate,translated).await;
-				}
-			});
-
-		})), None);
+			})),
+			None,
+		);
 	};
 }

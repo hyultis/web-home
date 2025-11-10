@@ -90,7 +90,7 @@ impl LinksHolder
 	                      draggedOriginPosition: RwSignal<Option<usize>>,
 	                      draggedTargetPosition: RwSignal<Option<usize>>,
 	                      somethingIsDragging: RwSignal<bool>,
-	                      content: ArcRwSignal<Vec<Link>>) -> impl IntoView
+	                      content: ArcRwSignal<Vec<Link>>, cache: ArcRwSignal<Cache>) -> impl IntoView
 	{
 		// drop zone
 		let target = NodeRef::<Div>::new();
@@ -124,7 +124,7 @@ impl LinksHolder
 			..
 		} = use_draggable_with_options(el,config);
 
-		let fnRemove = Self::removeLinkPopupFn(content,pos);
+		let fnRemove = Self::removeLinkPopupFn(content,cache,pos);
 
 
 		return view! {
@@ -146,13 +146,15 @@ impl LinksHolder
 		};
 	}
 
-	fn removeLinkPopupFn(content: ArcRwSignal<Vec<Link>>, pos: usize) -> impl Fn(MouseEvent)
+	fn removeLinkPopupFn(content: ArcRwSignal<Vec<Link>>, cache: ArcRwSignal<Cache>, pos: usize) -> impl Fn(MouseEvent)
 	{
 		let dialog = use_context::<DialogManager>().expect("DialogManager missing");
 		let content = content.clone();
+		let cache = cache.clone();
 
 		return move |_| {
 			let content = content.clone();
+			let cache = cache.clone();
 			dialog.open("Supprimer un lien ?", move || {
 				view!{
 				<span/>
@@ -160,6 +162,9 @@ impl LinksHolder
 			}, Some(Callback::new(move |_| {
 				content.update(|links|{
 					links.remove(pos);
+				});
+				cache.update(|cache|{
+					cache.update();
 				});
 			})), None);
 		};
@@ -169,6 +174,7 @@ impl LinksHolder
 	{
 		let dialog = use_context::<DialogManager>().expect("DialogManager missing");
 		let content = self.content.clone();
+		let cache = self._update.clone();
 
 		return move |_| {
 			let label = ArcRwSignal::new("".to_string());
@@ -177,6 +183,7 @@ impl LinksHolder
 			let labelDialog = label.clone();
 			let urlDialog = url.clone();
 			let content = content.clone();
+			let cache = cache.clone();
 			dialog.open("Ajouter un lien", move || {
 
 				let innerLabel = RwSignal::new("".to_string());
@@ -204,6 +211,9 @@ impl LinksHolder
 			}, Some(Callback::new(move |_| {
 				content.update(|links|{
 					links.push(Link::new(label.clone().get(),url.clone().get()));
+					cache.update(|cache|{
+						cache.update();
+					});
 				});
 			})), None);
 		};
@@ -220,7 +230,7 @@ impl Cacheable for LinksHolder
 
 impl Backable for LinksHolder
 {
-	fn name() -> String
+	fn name(&self) -> String
 	{
 		"links".to_string()
 	}
@@ -289,7 +299,7 @@ impl Backable for LinksHolder
 				.enumerate()
 				.map(|(key,link)|
 					if editMode.get()
-						{return Self::draw_editable_link(&link,key,draggedOriginPosition,draggedTargetPosition,somethingIsDragging, self.content.clone()).into_any();}
+						{return Self::draw_editable_link(&link,key,draggedOriginPosition,draggedTargetPosition,somethingIsDragging, self.content.clone(), self._update.clone()).into_any();}
 					else
 						{return Self::draw_link(&link).into_any();}
 				)

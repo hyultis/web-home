@@ -2,6 +2,7 @@ use leptos::prelude::{AnyView, RwSignal};
 use time::UtcDateTime;
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::ModuleContent;
+use crate::HWebTrace;
 
 #[derive(Clone, Debug, Serialize,Deserialize)]
 pub struct Cache
@@ -57,7 +58,7 @@ pub trait Cacheable
 /// struct that can be sent to / retrieved from backend
 pub trait Backable
 {
-	fn name() -> String where Self: Sized;
+	fn name(&self) -> String;
 	fn draw(&self, editMode: RwSignal<bool>) -> AnyView;
 
 	fn export(&self) -> ModuleContent;

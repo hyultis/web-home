@@ -31,6 +31,15 @@ impl ModuleContent
 		}
 	}
 
+	pub fn newFromName(name: String) -> Self
+	{
+		Self {
+			name,
+			timestamp: 0,
+			content: "".to_string()
+		}
+	}
+
 	#[cfg(feature = "ssr")]
 	pub fn update(&self, mut config: Hconfig::HConfig::HConfig) -> Result<(), ModuleErrors>
 	{
@@ -44,7 +53,7 @@ impl ModuleContent
 
 		let configPath = format!("modules/{}", self.name);
 
-		let mut moduleRoot = config.value_get_mut(configPath.clone());
+		let mut moduleRoot = config.value_get_mut(&configPath);
 		let mut lasttimestamp = 0;
 		if let Some(JsonValue::Object(ref mut content)) = moduleRoot.as_mut()
 		{

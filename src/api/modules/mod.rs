@@ -25,12 +25,12 @@ pub async fn API_module_update(generatedId: String, content: ModuleContent) -> R
 }
 
 #[server]
-pub async fn API_module_retrieve(generatedId: String, content: ModuleContent) -> Result<ModuleReturn, ServerFnError>
+pub async fn API_module_retrieve(generatedId: String, moduleName: String) -> Result<ModuleReturn, ServerFnError>
 {
 	use crate::api::login::user_back::UserBackHelper;
 	let config = UserBackHelper::getUserConfig(generatedId,false).map_err(|err| ServerFnError::new(format!("{:?}",err)))?;
 
-	let mut content = content;
+	let mut content = ModuleContent::newFromName(moduleName);
 	content.retrieve(config).map_err(|err| ServerFnError::new(format!("{:?}",err)))?;
 
 	return Ok(ModuleReturn::UPDATED(content));

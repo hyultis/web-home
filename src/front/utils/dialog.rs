@@ -66,8 +66,8 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 								tmp()
 							}</p>
 							<div class="dialog-buttons">
-								<button class="validate" on:click=validateFn.clone()><Translate key={AllFrontUIEnum::VALID.to_string()}/>"Valider"</button>
-								<button class="close" on:click=closeFn.clone()><Translate key={AllFrontUIEnum::CLOSE.to_string()}/>"Fermer"</button>
+								<button class="validate" on:click=validateFn.clone()><Translate key={AllFrontUIEnum::VALID.to_string()}/></button>
+								<button class="close" on:click=closeFn.clone()><Translate key={AllFrontUIEnum::CLOSE.to_string()}/></button>
 							</div>
 						</div>
 					</div>

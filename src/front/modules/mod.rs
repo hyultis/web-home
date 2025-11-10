@@ -56,21 +56,25 @@ impl ModuleHolder
 		return Some(AllFrontErrorEnum::MODULE_NOTEXIST);
 	}
 
-	pub async fn editMode_cancel(&mut self, login:String) -> Option<AllFrontErrorEnum>
+	pub async fn editMode_cancel(&mut self, login:String, forceUpdate: bool) -> Option<AllFrontErrorEnum>
 	{
-		if(self._links.cache_mustUpdate())
+		if(forceUpdate || self._links.cache_mustUpdate())
 		{
-			let module = self._links.export();
-			match API_module_retrieve(login, module).await
+			let moduleName = self._links.name();
+			match API_module_retrieve(login, moduleName).await
 			{
-				Ok(ModuleReturn::OK) => return None,
+				Ok(ModuleReturn::UPDATED(moduleContent)) => {
+
+					self._links.import(moduleContent);
+					return None;
+				},
 				Ok(ModuleReturn::OUTDATED) => {return Some(AllFrontErrorEnum::MODULE_OUTDATED);}
 				Err(err) => {return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}",err)));}
 				_ => {}
 			}
 		}
 
-		return Some(AllFrontErrorEnum::MODULE_NOTEXIST);
+		return None;
 	}
 
 	pub fn links_get(&self) -> &LinksHolder

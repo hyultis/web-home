@@ -26,7 +26,6 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 		..
 	} = use_timeout_fn(
 		move |_| {
-			HWebTrace!("trace close");
 			fnManager.innerClose();
 		},
 		duration,
@@ -82,7 +81,7 @@ pub struct DialogData
 {
 	pub title: String,
 	pub body: Arc<dyn Fn() -> AnyView + Send + Sync + 'static>,
-	pub on_validate: Option<Callback<()>>,
+	pub on_validate: Option<Callback<(),bool>>,
 	pub on_close: Option<Callback<()>>,
 	pub is_closing: bool,
 }
@@ -105,8 +104,8 @@ impl DialogManager
 	/// Ouvre une popup sans body
 	pub fn openSimple(
 		&self,
-		title: &str,
-		on_validate: Option<Callback<()>>,
+		title: impl ToString,
+		on_validate: Option<Callback<(),bool>>,
 		on_close: Option<Callback<()>>,
 	)
 	{
@@ -122,9 +121,9 @@ impl DialogManager
 	/// Ouvre une popup avec le contenu fourni
 	pub fn open(
 		&self,
-		title: &str,
+		title: impl ToString,
 		body: impl Fn() -> AnyView + Send + Sync + 'static,
-		on_validate: Option<Callback<()>>,
+		on_validate: Option<Callback<(),bool>>,
 		on_close: Option<Callback<()>>,
 	)
 	{
@@ -153,14 +152,19 @@ impl DialogManager
 	/// Valide la popup
 	pub fn validate(&self, start: impl Fn(()) + Clone + Send + Sync)
 	{
+		let mut isValidated = true;
 		if let Some(d) = self.dialog.get_untracked()
 		{
 			if let Some(cb) = d.on_validate
 			{
-				cb.run(());
+				isValidated = cb.run(());
 			}
 		}
-		self.innerAnimateClose(start);
+		HWebTrace!("isValidated {}",isValidated);
+		if(isValidated)
+		{
+			self.innerAnimateClose(start);
+		}
 	}
 
 	/// internal

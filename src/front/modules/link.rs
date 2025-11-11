@@ -1,5 +1,8 @@
-use leptos::prelude::{BindAttribute, GetUntracked};
-use leptos::prelude::{use_context, ArcRwSignal, Callback, ClassAttribute, Effect, Get, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update, Write};
+use std::collections::HashMap;
+use std::sync::Arc;
+use leptoaster::{expect_toaster, ToastLevel};
+use leptos::prelude::{BindAttribute, GetUntracked, Write};
+use leptos::prelude::{use_context, ArcRwSignal, Callback, ClassAttribute, Effect, Get, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update};
 use crate::front::modules::components::{Backable, Cache, Cacheable};
 use leptos::prelude::{AnyView, CollectView, ElementChild, IntoAny, Read, RwSignal};
 use leptos::{view, IntoView};
@@ -7,9 +10,14 @@ use leptos::ev::MouseEvent;
 use leptos::html::{Div, I};
 use leptos_use::{use_draggable_with_options, use_mouse_in_element, UseDraggableOptions, UseDraggableReturn, UseMouseInElementReturn};
 use serde::{Deserialize, Serialize};
+use url::Url;
 use crate::api::modules::components::ModuleContent;
+use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::dialog::DialogManager;
+use crate::front::utils::toaster_helpers::{toastingErr, toastingParams};
 use crate::HWebTrace;
+use std::ops::DerefMut;
+use leptos::__reexports::wasm_bindgen_futures::spawn_local;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Link
@@ -42,41 +50,6 @@ impl LinksHolder
 			_update: ArcRwSignal::new(Default::default()),
 			_sended: Default::default(),
 		}
-	}
-
-	pub fn push(&mut self, new: Link)
-	{
-		self.content.write().push(new);
-		self._update.update(|cache|{
-			cache.update();
-		});
-	}
-
-	/*pub fn getAll(&self) -> &Vec<Link>
-	{
-		return &self.content.read();
-	}*/
-
-	pub fn move_up(&mut self, itemPos: usize)
-	{
-		if itemPos > 0
-		{
-			self.content.write().swap(itemPos, itemPos - 1);
-		}
-		self._update.update(|cache|{
-			cache.update();
-		});
-	}
-
-	pub fn move_down(&mut self, itemPos: usize)
-	{
-		if itemPos + 1 < self.content.read().len()
-		{
-			self.content.write().swap(itemPos, itemPos + 1);
-		}
-		self._update.update(|cache|{
-			cache.update();
-		});
 	}
 
 	fn draw_link(link: &Link) -> impl IntoView
@@ -155,17 +128,14 @@ impl LinksHolder
 		return move |_| {
 			let content = content.clone();
 			let cache = cache.clone();
-			dialog.open("Supprimer un lien ?", move || {
-				view!{
-				<span/>
-			}.into_any()
-			}, Some(Callback::new(move |_| {
+			dialog.openSimple("Supprimer un lien ?", Some(Callback::new(move |_| {
 				content.update(|links|{
 					links.remove(pos);
 				});
 				cache.update(|cache|{
 					cache.update();
 				});
+				return true;
 			})), None);
 		};
 	}
@@ -175,6 +145,7 @@ impl LinksHolder
 		let dialog = use_context::<DialogManager>().expect("DialogManager missing");
 		let content = self.content.clone();
 		let cache = self._update.clone();
+		let toaster = expect_toaster();
 
 		return move |_| {
 			let label = ArcRwSignal::new("".to_string());
@@ -184,6 +155,7 @@ impl LinksHolder
 			let urlDialog = url.clone();
 			let content = content.clone();
 			let cache = cache.clone();
+			let toaster = toaster.clone();
 			dialog.open("Ajouter un lien", move || {
 
 				let innerLabel = RwSignal::new("".to_string());
@@ -209,12 +181,56 @@ impl LinksHolder
 				</div>
 			}.into_any()
 			}, Some(Callback::new(move |_| {
-				content.update(|links|{
-					links.push(Link::new(label.clone().get(),url.clone().get()));
-					cache.update(|cache|{
-						cache.update();
+				let label = label.clone().get();
+				let url = url.clone().get();
+				let toaster = toaster.clone();
+
+				if(url.is_empty()) {
+					let mut params= HashMap::new();
+					params.insert("input".to_string(), "url".to_string());
+
+					spawn_local(async move {
+						toastingParams(toaster.clone(), AllFrontUIEnum::MUST_NOT_EMPTY, ToastLevel::Error, Arc::new(params)).await;
 					});
+					return false;
+				};
+				if(label.is_empty()) {
+					let mut params= HashMap::new();
+					params.insert("input".to_string(), "label".to_string());
+
+					spawn_local(async move {
+						toastingParams(toaster.clone(), AllFrontUIEnum::MUST_NOT_EMPTY, ToastLevel::Error, Arc::new(params)).await;
+					});
+					return false;
+				};
+
+				if(Url::parse(&url).is_err())
+				{
+					spawn_local(async move {
+						toastingErr(toaster.clone(), AllFrontUIEnum::INVALID_URL).await;
+					});
+					return false;
+				}
+
+
+				let Some(mut guard) = content.try_write()
+				else
+				{
+					return false;
+				};
+				let links: &mut Vec<Link> = guard.deref_mut();
+
+				// remove if already exists
+				if let Some(pos) = links.iter().enumerate().filter(|(_,link)|link.label==label).map(|(pos,link)|pos).next()
+				{
+					links.remove(pos);
+				}
+
+				links.push(Link::new(label,url));
+				cache.update(|cache|{
+					cache.update();
 				});
+				return true;
 			})), None);
 		};
 	}

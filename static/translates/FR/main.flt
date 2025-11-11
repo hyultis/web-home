@@ -19,6 +19,7 @@ page404_content = Désoler, cette page est introuvable. vous pouvez allez sur { 
 menu_home = Retour a l'accueil
 
 #login and sign
+FRONTLOGIN_LOGIN_USER_WANT_DISCONNECTED = Voulez-vous vous déconnecté ?
 FRONTLOGIN_LOGIN_USER_CONNECTED = Utilisateur connecté
 FRONTLOGIN_LOGIN_USER_DISCONNECTED = Utilisateur déconnecté
 FRONTLOGIN_LOGIN_USER_SIGNEDUP = Utilisateur inscrit
@@ -35,3 +36,5 @@ FRONTERROR_MODULE_NOTEXIST = Le module n'existe pas
 #front utility
 FRONTUI_VALID = Valider
 FRONTUI_CLOSE = Fermer
+FRONTUI_MUST_NOT_EMPTY = { $input } ne doit pas être vide
+FRONTUI_INVALID_URL = format d'url invalide

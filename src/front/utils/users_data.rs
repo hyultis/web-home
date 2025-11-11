@@ -9,6 +9,7 @@ use crate::api::login::{API_user_login, API_user_salt, API_user_sign};
 use crate::api::login::components::{LoginStatus, SaltReturn};
 use crate::global_security::{generate_salt_raw, hash};
 use base64ct::{Base64, Encoding};
+use crate::front::utils::all_front_enum::AllFrontLoginEnum;
 
 /// note about salt, hash and secure send/storage client data
 ///
@@ -90,9 +91,9 @@ impl UserData {
 				self.generatedId = Some(generatedId);
 				None
 			},
-			Ok(LoginStatus::SERVER_ERROR) => Some("SERVER_ERROR".to_string()),
-			Ok(reason) => Some(format!("LOGIN_{}", reason)),
-			Err(_) => Some("SERVER_ERROR".to_string()),
+			Ok(LoginStatus::SERVER_ERROR) => Some("FRONTERROR_SERVER_ERROR".to_string()),
+			Ok(reason) => Some(AllFrontLoginEnum::fromLoginStatus(reason).to_string()),
+			Err(_) => Some("FRONTERROR_SERVER_ERROR".to_string()),
 		};
 	}
 
@@ -105,9 +106,9 @@ impl UserData {
 
 		return match API_user_sign(generatedId, hash(user_salt)).await {
 			Ok(LoginStatus::USER_CONNECTED) => None,
-			Ok(LoginStatus::SERVER_ERROR) => Some("SERVER_ERROR".to_string()),
-			Ok(reason) => Some(format!("LOGIN_{}", reason)),
-			Err(_) => Some("SERVER_ERROR".to_string()),
+			Ok(LoginStatus::SERVER_ERROR) => Some("FRONTERROR_SERVER_ERROR".to_string()),
+			Ok(reason) => Some(AllFrontLoginEnum::fromLoginStatus(reason).to_string()),
+			Err(_) => Some("FRONTERROR_SERVER_ERROR".to_string()),
 		}
 	}
 

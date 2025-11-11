@@ -1,9 +1,7 @@
 use crate::front::modules::components::Backable;
-use crate::front::modules::link::Link;
 use crate::front::modules::ModuleHolder;
-use crate::front::utils::all_front_enum::AllFrontUIEnum;
+use crate::front::utils::all_front_enum::{AllFrontLoginEnum, AllFrontUIEnum};
 use crate::front::utils::dialog::DialogManager;
-use crate::front::utils::fluent::FluentManager::FluentManager;
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
 use crate::front::utils::users_data::UserData;
 use crate::HWebTrace;
@@ -54,18 +52,24 @@ pub fn Home() -> impl IntoView
 		let navigate = hooks::use_navigate();
 		let toaster = toasterInnerDisconnect.clone();
 
-		spawn_local(async move {
-			let (userData, setUserData) = UserData::cookie_signalGet();
-			let mut userData = userData
-				.read()
-				.clone()
-				.unwrap_or(UserData::new(&"EN".to_string()));
-			userData.login_disconnect().await;
-			toastingSuccess(toaster, "LOGIN_USER_DISCONNECTED").await;
-			HWebTrace!("user disconnected");
-			setUserData.set(Some(userData));
-			navigate("/", Default::default());
-		});
+		dialog.openSimple(
+			AllFrontLoginEnum::LOGIN_USER_WANT_DISCONNECTED, Some(Callback::new(move |_| {
+				let navigate = navigate.clone();
+				let toaster = toaster.clone();
+				spawn_local(async move {
+					let (userData, setUserData) = UserData::cookie_signalGet();
+					let mut userData = userData
+						.read()
+						.clone()
+						.unwrap_or(UserData::new(&"EN".to_string()));
+					userData.login_disconnect().await;
+					toastingSuccess(toaster, AllFrontLoginEnum::LOGIN_USER_DISCONNECTED).await;
+					HWebTrace!("user disconnected");
+					setUserData.set(Some(userData));
+					navigate("/", Default::default());
+				});
+				return true;
+			})), None);
 	};
 
 	let moduleContentInnerInitialLoad = moduleContent.clone();
@@ -91,10 +95,7 @@ pub fn Home() -> impl IntoView
 				let error = (*holder).editMode_cancel(login, true).await;
 				if let Some(err) = error
 				{
-					let translated = FluentManager::singleton()
-						.translateParamsLess(lang, err.to_string())
-						.await;
-					toastingErr(toasterInnerInitialLoad, translated).await;
+					toastingErr(toasterInnerInitialLoad, err.to_string()).await;
 				}
 			});
 	});
@@ -176,19 +177,14 @@ fn editMode_cancel(
 
 					if let Some(err) = error
 					{
-						let translated = FluentManager::singleton()
-							.translateParamsLess(lang, err.to_string())
-							.await;
-						toastingErr(toasterInnerValidate, translated).await;
+						toastingErr(toasterInnerValidate, err).await;
 					}
 					else
 					{
-						let translated = FluentManager::singleton()
-							.translateParamsLess(lang, AllFrontUIEnum::VALID.to_string())
-							.await;
-						toastingSuccess(toasterInnerValidate, translated).await;
+						toastingSuccess(toasterInnerValidate, AllFrontUIEnum::VALID).await;
 					}
 				});
+				return true;
 			})),
 			None,
 		);
@@ -220,12 +216,12 @@ fn editMode_validate(
 				let editModeInnerValidate = editModeInnerValidate.clone();
 				let toasterInnerValidate = toasterInnerValidate.clone();
 				spawn_local(async move {
-					let Some(mut guard) = moduleContentInnerValidate.try_write()
+					let Some((login, lang)) = UserData::loginLang_get_from_cookie()
 					else
 					{
 						return;
 					};
-					let Some((login, lang)) = UserData::loginLang_get_from_cookie()
+					let Some(mut guard) = moduleContentInnerValidate.try_write()
 					else
 					{
 						return;
@@ -238,19 +234,14 @@ fn editMode_validate(
 
 					if let Some(err) = error
 					{
-						let translated = FluentManager::singleton()
-							.translateParamsLess(lang, err.to_string())
-							.await;
-						toastingErr(toasterInnerValidate, translated).await;
+						toastingErr(toasterInnerValidate, err.to_string()).await;
 					}
 					else
 					{
-						let translated = FluentManager::singleton()
-							.translateParamsLess(lang, AllFrontUIEnum::VALID.to_string())
-							.await;
-						toastingSuccess(toasterInnerValidate, translated).await;
+						toastingSuccess(toasterInnerValidate, AllFrontUIEnum::VALID).await;
 					}
 				});
+				return true;
 			})),
 			None,
 		);

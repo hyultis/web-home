@@ -8,7 +8,7 @@ use crate::front::modules::components::{Backable, Cache, Cacheable};
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::translate::Translate;
 
-#[derive(Serialize,Deserialize,Default)]
+#[derive(Serialize,Deserialize,Default,Debug)]
 pub struct Todo
 {
 	content: ArcRwSignal<String>,
@@ -21,7 +21,7 @@ impl Todo
 	pub fn new() -> Self
 	{
 		Self {
-			content: ArcRwSignal::new("Todo!()".to_string()),
+			content: ArcRwSignal::new("".to_string()),
 			_update: ArcRwSignal::new(Default::default()),
 			_sended: Default::default(),
 		}
@@ -41,12 +41,20 @@ impl Cacheable for Todo
 	{
 		return self._update.get().isNewer(&self._sended.get());
 	}
+
+	fn cache_getUpdate(&self) -> ArcRwSignal<Cache> {
+		return self._update.clone();
+	}
+
+	fn cache_getSended(&self) -> ArcRwSignal<Cache> {
+		return self._sended.clone();
+	}
 }
 
 impl Backable for Todo
 {
-	fn name(&self) -> String {
-		"todo".to_string()
+	fn typeModule(&self) -> String {
+		"TODO".to_string()
 	}
 
 	fn draw(&self, _: RwSignal<bool>) -> AnyView {
@@ -64,9 +72,12 @@ impl Backable for Todo
 	fn export(&self) -> ModuleContent
 	{
 		return ModuleContent{
-			name: self.name(),
+			name: self.typeModule(),
+			typeModule: self.typeModule(),
 			timestamp: self._update.get_untracked().get(),
 			content: serde_json::to_string(&self.content).unwrap(),
+			pos: [0,0],
+			size: [0,0],
 		};
 	}
 
@@ -81,5 +92,13 @@ impl Backable for Todo
 		self._sended.update(|cache|{
 			cache.update_from(import.timestamp);
 		});
+	}
+
+	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> {
+		Some(Self {
+			content: ArcRwSignal::new(from.content.clone()),
+			_update: ArcRwSignal::new(Cache::newFrom(from.timestamp)),
+			_sended: ArcRwSignal::new(Cache::newFrom(from.timestamp)),
+		})
 	}
 }

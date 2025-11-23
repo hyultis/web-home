@@ -1,12 +1,12 @@
-use leptos::prelude::{OnTargetAttribute};
+use leptos::prelude::OnTargetAttribute;
 use leptos::prelude::{CollectView, Get, PropAttribute};
 use crate::front::modules::components::Backable;
-use crate::front::modules::{ModuleHolder, ModuleType};
+use crate::front::modules::ModuleHolder;
 use crate::front::utils::all_front_enum::{AllFrontLoginEnum, AllFrontUIEnum};
 use crate::front::utils::dialog::DialogManager;
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
 use crate::front::utils::users_data::UserData;
-use crate::{front, HWebTrace};
+use crate::{HWebTrace};
 use leptoaster::{expect_toaster, ToasterContext};
 use leptos::__reexports::wasm_bindgen_futures::spawn_local;
 use leptos::ev::MouseEvent;
@@ -20,6 +20,7 @@ use leptos_router::hooks;
 use std::ops::DerefMut;
 use strum::IntoEnumIterator;
 use crate::front::modules::module_positions::ModulePositions;
+use crate::front::modules::module_type::{ModuleType, ModuleTypeDiscriminants};
 use crate::front::modules::todo::Todo;
 // https://iconoir.com/
 // plus
@@ -153,7 +154,7 @@ pub fn Home() -> impl IntoView
 			<div class="modules">
 				{move || {
 					let Some(binding) = moduleContentInnerModuleView.clone().try_read() else {return view!{<span/>}.into_any()};
-					binding.blocks_get().iter().map( |d|d.draw(editMode)).collect_view().into_any()
+					binding.blocks_get().iter().map( |(_,d)|d.draw(editMode)).collect_view().into_any()
 				}}
 			</div>
 		</div>
@@ -301,7 +302,7 @@ fn editMode_AddBlock(moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 							    }
 							    prop:value=move || innerSelectedType.get().to_string()>
 								{move ||{
-									front::modules::ModuleTypeDiscriminants::iter().map(|x| {
+									ModuleTypeDiscriminants::iter().map(|x| {
 										view!{<option value={x.to_string()}>{x.to_string()}</option>}.into_any()
 									}).collect_view()
 								}}
@@ -321,7 +322,7 @@ fn editMode_AddBlock(moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 						_ => return
 					};
 
-					modules.blocks_get_mut().push(ModulePositions::new(moduleType));
+					modules.blocks_insert(ModulePositions::new(moduleType));
 				});
 
 				return true;

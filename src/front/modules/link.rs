@@ -242,11 +242,19 @@ impl Cacheable for LinksHolder
 	{
 		return self._update.get().isNewer(&self._sended.get());
 	}
+
+	fn cache_getUpdate(&self) -> ArcRwSignal<Cache> {
+		self._update.clone()
+	}
+
+	fn cache_getSended(&self) -> ArcRwSignal<Cache> {
+		self._sended.clone()
+	}
 }
 
 impl Backable for LinksHolder
 {
-	fn name(&self) -> String
+	fn typeModule(&self) -> String
 	{
 		"links".to_string()
 	}
@@ -329,9 +337,12 @@ impl Backable for LinksHolder
 	fn export(&self) -> ModuleContent
 	{
 		return ModuleContent{
-			name: self.name(),
+			name: self.typeModule(),
+			typeModule: self.typeModule(),
 			timestamp: self._update.get_untracked().get(),
 			content: serde_json::to_string(&self.content).unwrap(),
+			pos: [0,0],
+			size: [0,0],
 		};
 	}
 
@@ -346,5 +357,9 @@ impl Backable for LinksHolder
 		self._sended.update(|cache|{
 			cache.update_from(import.timestamp);
 		});
+	}
+
+	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> {
+		Some(Self::new())
 	}
 }

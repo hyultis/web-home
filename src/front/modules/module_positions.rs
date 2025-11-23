@@ -4,19 +4,19 @@ use leptos::prelude::{AnyView, ClassAttribute, IntoAny, RwSignal};
 use leptos::{view};
 use leptos_use::core::Position;
 use leptos_use::{use_draggable_with_options, UseDraggableOptions, UseDraggableReturn};
-use crate::front::modules::components::Backable;
-use crate::front::modules::ModuleType;
+use crate::api::modules::components::ModuleContent;
+use crate::front::modules::{moduleContent};
 
-pub struct ModulePositions<ModuleType>
+pub struct ModulePositions<module: moduleContent>
 {
 	_pos: ArcRwSignal<[i32;2]>,
 	_size: ArcRwSignal<[u32;2]>,
-	_module: ModuleType
+	_module: module
 }
 
-impl ModulePositions<ModuleType>
+impl<module: moduleContent> ModulePositions<module>
 {
-	pub fn new(module: ModuleType) -> Self
+	pub fn new(module: module) -> Self
 	{
 		Self {
 			_pos: ArcRwSignal::new([0,0]),
@@ -25,7 +25,16 @@ impl ModulePositions<ModuleType>
 		}
 	}
 
-	pub fn inner(&self) -> &ModuleType
+	pub fn newFromModuleContent(from: ModuleContent, module: module) -> Self
+	{
+		Self {
+			_pos: ArcRwSignal::new(from.pos.clone()),
+			_size: ArcRwSignal::new(from.size.clone()),
+			_module: module
+		}
+	}
+
+	pub fn inner(&self) -> &module
 	{
 		return &self._module;
 	}
@@ -37,13 +46,31 @@ impl ModulePositions<ModuleType>
 		return format!("left: {}px; top: {}px; width: {}px; height: {}px;", pos[0], pos[1], size[0], size[1]);
 	}
 
+	pub fn export(&self) -> ModuleContent
+	{
+		let mut export = self._module.export();
+		export.pos = self._pos.get();
+		export.size = self._size.get();
+		return export;
+	}
+
+	pub fn import(&mut self, import: ModuleContent)
+	{
+		self._pos.update(|pos|{
+			pos[0] = import.pos[0];
+			pos[1] = import.pos[1];
+		});
+		self._size.update(|size|{
+			size[0] = import.size[0];
+			size[1] = import.size[1];
+		});
+		self._module.import(import);
+	}
+
 	pub fn draw(&self, editMode: RwSignal<bool>) -> AnyView
 	{
-		let view = move |module: &ModuleType,editMode| {
-			match module {
-				ModuleType::RSS(_) => view!{<div>{"RSS"}</div>}.into_any(),
-				ModuleType::TODO(todo) => todo.draw(editMode)
-			}
+		let view = move |module: &module,editMode| {
+			module.draw(editMode);
 		};
 
 		let pos = self._pos.clone();
@@ -70,7 +97,7 @@ impl ModulePositions<ModuleType>
 				}
 				else
 				{
-					view!{<div class="module" style={move || Self::intoStyle(pos.clone(), size.clone())}>
+					view!{<div class="module" style={move || format!("position: relative;{}",Self::intoStyle(pos.clone(), size.clone()))}>
 					{view(&self._module,editMode)}
 					</div>
 					}.into_any()
@@ -98,10 +125,12 @@ impl ModulePositions<ModuleType>
 		} = use_draggable_with_options(el,config);
 
 		let posMove = self._pos.clone();
+		let cache = self._module.cache_getUpdate();
 		Effect::new(move |_| {
 			if !is_dragging.get() {return;}
 			let newPosX = position.get().x as i32;
 			let newPosY = position.get().y as i32;
+			cache.update(|data| data.update());
 			posMove.update(|size|{
 				size[0] = newPosX;
 				size[1] = newPosY;
@@ -131,10 +160,12 @@ impl ModulePositions<ModuleType>
 
 		let posMove = self._pos.clone();
 		let posSize = self._size.clone();
+		let cache = self._module.cache_getUpdate();
 		Effect::new(move |_| {
 			if !is_dragging.get() {return;}
 			let newSizeX = position.get().x as i32 - posMove.clone().get()[0];
 			let newSizeY = position.get().y as i32 - posMove.clone().get()[1];
+			cache.update(|data| data.update());
 			posSize.update(|size|{
 				size[0] = newSizeX.max(150) as u32;
 				size[1] = newSizeY.max(150) as u32;

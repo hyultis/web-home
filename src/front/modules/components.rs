@@ -1,4 +1,4 @@
-use leptos::prelude::{AnyView, RwSignal};
+use leptos::prelude::{AnyView, ArcRwSignal, RwSignal};
 use time::UtcDateTime;
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::ModuleContent;
@@ -19,6 +19,13 @@ impl Cache
 	pub fn update_from(&mut self, value: i64)
 	{
 		self.lastUpdate = value;
+	}
+
+	pub fn newFrom(value: i64) -> Self
+	{
+		Self {
+			lastUpdate: value
+		}
 	}
 
 	/// if this cache is older than other
@@ -52,14 +59,18 @@ impl Default for Cache
 pub trait Cacheable
 {
 	fn cache_mustUpdate(&self) -> bool;
+	fn cache_getUpdate(&self) -> ArcRwSignal<Cache>;
+	fn cache_getSended(&self) -> ArcRwSignal<Cache>;
 }
 
 /// struct that can be sent to / retrieved from backend
 pub trait Backable
 {
-	fn name(&self) -> String;
+	fn typeModule(&self) -> String;
 	fn draw(&self, editMode: RwSignal<bool>) -> AnyView;
 
 	fn export(&self) -> ModuleContent;
 	fn import(&mut self, import: ModuleContent);
+
+	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> where Self: Sized;
 }

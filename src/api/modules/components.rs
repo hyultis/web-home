@@ -14,20 +14,27 @@ pub struct ModuleContent
 {
 	// name of the content or child content
 	pub name: String,
+	// name of the content or child content
+	pub typeModule: String,
 	// timestamp of the last update of the content or child content
 	pub timestamp: i64,
 	// content (crypted)
-	pub content: String
+	pub content: String,
+	pub pos: [i32; 2],
+	pub size: [u32; 2],
 }
 
 impl ModuleContent
 {
-	pub fn new(name: String, updatetime: i64, content: String) -> Self
+	pub fn new(name: String,typeModule: String) -> Self
 	{
 		Self {
 			name,
-			timestamp: updatetime,
-			content
+			typeModule,
+			timestamp: 0,
+			content: "".to_string(),
+			pos: [0,0],
+			size: [0,0],
 		}
 	}
 
@@ -35,8 +42,11 @@ impl ModuleContent
 	{
 		Self {
 			name,
+			typeModule: "".to_string(),
 			timestamp: 0,
-			content: "".to_string()
+			content: "".to_string(),
+			pos: [0,0],
+			size: [0,0],
 		}
 	}
 
@@ -71,6 +81,11 @@ impl ModuleContent
 		let mut content = HashMap::new();
 		content.insert("timestamp".to_string(), JsonValue::Number(self.timestamp as f64));
 		content.insert("content".to_string(), JsonValue::String(self.content.clone()));
+		content.insert("type".to_string(), JsonValue::String(self.typeModule.clone()));
+		content.insert("posX".to_string(), JsonValue::Number(self.pos[0] as f64));
+		content.insert("posY".to_string(), JsonValue::Number(self.pos[1] as f64));
+		content.insert("sizeX".to_string(), JsonValue::Number(self.size[0] as f64));
+		content.insert("sizeY".to_string(), JsonValue::Number(self.size[1] as f64));
 
 		config.value_set(&configPath,JsonValue::Object(content));
 		config.file_save().map_err(|err| ModuleErrors::ConfigError(err))?;
@@ -91,7 +106,42 @@ impl ModuleContent
 		if let Some(JsonValue::String(content) ) = content.get("content"){
 			self.content = content.clone();
 		}
+		if let Some(JsonValue::String(content) ) = content.get("type"){
+			self.typeModule = content.clone();
+		}
+		self.pos = [0,0];
+		if let Some(JsonValue::Number(content) ) = content.get("posX"){
+			self.pos[0] = *content as i32;
+		}
+		if let Some(JsonValue::Number(content) ) = content.get("posY"){
+			self.pos[1] = *content as i32;
+		}
+		self.size = [0,0];
+		if let Some(JsonValue::Number(content) ) = content.get("sizeX"){
+			self.size[0] = *content as u32;
+		}
+		if let Some(JsonValue::Number(content) ) = content.get("sizeY"){
+			self.size[1] = *content as u32;
+		}
 
 		return Ok(());
+	}
+
+	#[cfg(feature = "ssr")]
+	pub fn retrieveMissingModule(config: Hconfig::HConfig::HConfig, modules: Vec<String>) -> Result<Vec<String>, ModuleErrors>
+	{
+		use Hconfig::tinyjson::JsonValue;
+
+		let Some(JsonValue::Object(ref arrayOfcontent)) = config.value_get("modules") else {return Err(ModuleErrors::Empty)};
+
+		let mut returning = vec![];
+		arrayOfcontent.keys().cloned().for_each( |name|
+		{
+			if (!modules.contains(&name)) {
+				returning.push(name.clone());
+			}
+		});
+
+		return Ok(returning);
 	}
 }

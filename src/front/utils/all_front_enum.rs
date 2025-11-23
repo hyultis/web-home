@@ -21,6 +21,7 @@ pub enum AllFrontUIEnum
 	CLOSE,
 	MUST_NOT_EMPTY,
 	INVALID_URL,
+	UPDATE,
 }
 
 #[derive(strum_macros::Display)]

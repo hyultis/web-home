@@ -1,0 +1,92 @@
+.home_body
+{
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	height: 100vh;
+}
+
+.header
+{
+	font-size: 1em;
+	background-color: var(--maincolordarker);
+	border-bottom: 1px solid var(--maincolorlighter);
+	padding: 0.2em 1em;
+}
+
+.header .right i
+{
+	font-size: 1.5em;
+	cursor: pointer;
+	margin: 0 0.2em;
+	padding: 2px;
+}
+
+.header .right i:hover
+{
+	background-color: var(--buttonbackgroundwarn);
+	border-radius: 5px;
+}
+
+.header .button_danger:hover
+{
+	background-color: var(--buttonbackgrounddanger);
+}
+
+.header .button_ok:hover
+{
+	background-color: var(--buttonbackgroundok);
+}
+
+.header .left
+{
+	float: left;
+	display: flex;
+	flex-direction: row;
+	flex-wrap: nowrap;
+	justify-content: flex-start;
+	align-items: flex-start;
+	align-content: center;
+}
+
+.header .right
+{
+	float: right;
+	display: flex;
+	flex-direction: row-reverse;
+	flex-wrap: nowrap;
+	justify-content: flex-start;
+	align-items: flex-start;
+	align-content: center;
+}
+
+.modules
+{
+	flex: 1;
+	overflow: auto; /* c’est cette zone qui scrolle */
+	background: var(--backgroundcolor);
+	position: relative;
+}
+
+.module {
+	background: #444;
+	border: 1px solid #666;
+	border-radius: 8px;
+	color: white;
+	padding: 0.3em;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+
+.module_header {
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+	padding-bottom: 0.3em;
+}
+
+.module_header i {
+	cursor: pointer;
+}

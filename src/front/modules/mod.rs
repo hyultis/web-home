@@ -1,25 +1,33 @@
+use strum_macros::{EnumDiscriminants, EnumIter};
+use module_positions::ModulePositions;
 use crate::api::modules::{API_module_retrieve, API_module_update, ModuleReturn};
 use crate::front::modules::components::{Backable, Cacheable};
-use crate::front::modules::link::{LinksHolder};
+use crate::front::modules::link::LinksHolder;
+use crate::front::modules::todo::Todo;
 use crate::front::utils::all_front_enum::AllFrontErrorEnum;
 
 pub mod link;
 pub mod todo;
 pub mod rss;
 pub mod components;
+pub mod module_positions;
 
 pub trait moduleContent: Backable + Cacheable{}
 
+#[derive(EnumDiscriminants)]
+#[strum_discriminants(derive(strum_macros::Display,EnumIter))]
 pub enum ModuleType
 {
+	#[strum(to_string = "RSS")]
 	RSS(String),
-	TODO(String)
+	#[strum(to_string = "TODO")]
+	TODO(Todo)
 }
 
 pub struct ModuleHolder
 {
 	_links: LinksHolder,
-	_blocks: Vec<ModuleType>
+	_blocks: Vec<ModulePositions<ModuleType>>
 }
 
 impl ModuleHolder
@@ -46,14 +54,13 @@ impl ModuleHolder
 			let module = self._links.export();
 			match API_module_update(login, module).await
 			{
-				Ok(ModuleReturn::OK) => return None,
 				Ok(ModuleReturn::OUTDATED) => {return Some(AllFrontErrorEnum::MODULE_OUTDATED);}
 				Err(err) => {return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}",err)));}
-				_ => {}
+				_ => {} // ModuleReturn::OK here to go next stuff
 			}
 		}
 
-		return Some(AllFrontErrorEnum::MODULE_NOTEXIST);
+		return None;
 	}
 
 	pub async fn editMode_cancel(&mut self, login:String, forceUpdate: bool) -> Option<AllFrontErrorEnum>
@@ -87,7 +94,12 @@ impl ModuleHolder
 		return &mut self._links;
 	}
 
-	pub fn blocks_get_mut(&mut self) -> &mut Vec<ModuleType>
+	pub fn blocks_get(&self) -> &Vec<ModulePositions<ModuleType>>
+	{
+		return &self._blocks;
+	}
+
+	pub fn blocks_get_mut(&mut self) -> &mut Vec<ModulePositions<ModuleType>>
 	{
 		return &mut self._blocks;
 	}

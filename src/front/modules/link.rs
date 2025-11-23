@@ -329,7 +329,7 @@ impl Backable for LinksHolder
 	fn export(&self) -> ModuleContent
 	{
 		return ModuleContent{
-			name: "links".to_string(),
+			name: self.name(),
 			timestamp: self._update.get_untracked().get(),
 			content: serde_json::to_string(&self.content).unwrap(),
 		};

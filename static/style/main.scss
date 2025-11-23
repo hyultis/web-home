@@ -2,6 +2,7 @@
 @use "obfuscate";
 @use "linksheader";
 @use "dialog";
+@use "modules";
 //@use "menu";
 
 :root
@@ -111,57 +112,27 @@ footer
 	color: var(--urlcolor);
 }
 
-.home_header
-{
-	font-size: 1em;
-	background-color: var(--maincolordarker);
-	border-bottom: 1px solid var(--maincolorlighter);
-	padding: 0.2em 1em;
+select {
+	appearance: auto;          /* remet le style natif */
+
+	display: inline-block;
+	padding: 6px 10px;
+
+	border: 1px solid var(--maincolor);
+	border-radius: 4px;
+
+	min-height: 32px;          /* évite le collapse */
+	min-width: 120px;          /* optionnel */
+
+	margin-left: 10px;
 }
 
-.home_header .right i
-{
-	font-size: 1.5em;
-	cursor: pointer;
-	margin: 0 0.2em;
-	padding: 2px;
+textarea {
+	width: 100%;
+	height: 100%;
+	background-color: var(--backgroundcolor);
 }
 
-.home_header .right i:hover
-{
-	background-color: var(--buttonbackgroundwarn);
-	border-radius: 5px;
-}
-
-.home_header .button_danger:hover
-{
-	background-color: var(--buttonbackgrounddanger);
-}
-
-.home_header .button_ok:hover
-{
-	background-color: var(--buttonbackgroundok);
-}
-
-.home_header .left
-{
-	float: left;
-	display: flex;
-	flex-direction: row;
-	flex-wrap: nowrap;
-	justify-content: flex-start;
-	align-items: flex-start;
-	align-content: center;
-}
-
-
-.home_header .right
-{
-	float: right;
-	display: flex;
-	flex-direction: row-reverse;
-	flex-wrap: nowrap;
-	justify-content: flex-start;
-	align-items: flex-start;
-	align-content: center;
+.grabbable {
+	cursor: grab;
 }

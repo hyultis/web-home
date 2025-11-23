@@ -93,11 +93,9 @@ pub fn Home() -> impl IntoView
 		let toasterInnerInitialLoad = toasterInnerInitialLoad.clone();
 
 		spawn_local(async move {
-			HWebTrace!("home spawn_local IN");
 			let Some(mut guard) = moduleContentInnerInitialLoad.try_write()
 			else
 			{
-				HWebTrace!("home spawn_local KO");
 				return;
 			};
 			let holder: &mut ModuleHolder = guard.deref_mut();

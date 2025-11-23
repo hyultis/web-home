@@ -1,5 +1,6 @@
+use leptos::prelude::{OnTargetAttribute, Set};
 use leptos::ev::MouseEvent;
-use leptos::prelude::{ElementChild, GetUntracked, OnAttribute, Update};
+use leptos::prelude::{ElementChild, GetUntracked, OnAttribute, PropAttribute, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, ClassAttribute, Get, IntoAny, RwSignal};
 use leptos::view;
 use serde::{Deserialize, Serialize};
@@ -7,6 +8,7 @@ use crate::api::modules::components::ModuleContent;
 use crate::front::modules::components::{Backable, Cache, Cacheable};
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::translate::Translate;
+use crate::HWebTrace;
 
 #[derive(Serialize,Deserialize,Default,Debug)]
 pub struct Todo
@@ -60,10 +62,13 @@ impl Backable for Todo
 	fn draw(&self, _: RwSignal<bool>) -> AnyView {
 
 		let updateFn = self.updateFn();
-
+		let content = self.content.clone();
+		let contentWrite = self.content.clone();
 		view!{
 			<>
-			<textarea>{self.content.get()}</textarea><br/>
+			<textarea
+                prop:value=move || content.get()
+				on:input:target=move |ev| contentWrite.set(ev.target().value())>{content.get()}</textarea><br/>
 			<button class="validate" on:click=updateFn><Translate key={AllFrontUIEnum::UPDATE.to_string()}/></button>
 			</>
 		}.into_any()
@@ -75,7 +80,7 @@ impl Backable for Todo
 			name: self.typeModule(),
 			typeModule: self.typeModule(),
 			timestamp: self._update.get_untracked().get(),
-			content: serde_json::to_string(&self.content).unwrap(),
+			content: serde_json::to_string(&self.content.get_untracked()).unwrap(),
 			pos: [0,0],
 			size: [0,0],
 		};
@@ -83,7 +88,7 @@ impl Backable for Todo
 
 	fn import(&mut self, import: ModuleContent)
 	{
-		let Ok(content) = serde_json::from_str(&import.content) else {return};
+		let Ok(content) = serde_json::from_str(&import.content.clone()) else {return};
 
 		self.content = content;
 		self._update.update(|cache|{
@@ -95,8 +100,9 @@ impl Backable for Todo
 	}
 
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> {
+		let Ok(content) = serde_json::from_str(&from.content) else {return None};
 		Some(Self {
-			content: ArcRwSignal::new(from.content.clone()),
+			content: ArcRwSignal::new(content),
 			_update: ArcRwSignal::new(Cache::newFrom(from.timestamp)),
 			_sended: ArcRwSignal::new(Cache::newFrom(from.timestamp)),
 		})

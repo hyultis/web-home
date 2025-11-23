@@ -65,6 +65,7 @@ impl<module: moduleContent> ModulePositions<module>
 			size[0] = import.size[0];
 			size[1] = import.size[1];
 		});
+		HWebTrace!("module to import : {:?}",import);
 		self._module.import(import);
 	}
 

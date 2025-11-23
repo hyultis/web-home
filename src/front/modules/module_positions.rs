@@ -6,6 +6,7 @@ use leptos_use::core::Position;
 use leptos_use::{use_draggable_with_options, UseDraggableOptions, UseDraggableReturn};
 use crate::api::modules::components::ModuleContent;
 use crate::front::modules::{moduleContent};
+use crate::HWebTrace;
 
 pub struct ModulePositions<module: moduleContent>
 {
@@ -70,7 +71,7 @@ impl<module: moduleContent> ModulePositions<module>
 	pub fn draw(&self, editMode: RwSignal<bool>) -> AnyView
 	{
 		let view = move |module: &module,editMode| {
-			module.draw(editMode);
+			return module.draw(editMode);
 		};
 
 		let pos = self._pos.clone();

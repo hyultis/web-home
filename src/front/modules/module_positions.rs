@@ -40,11 +40,9 @@ impl<module: moduleContent> ModulePositions<module>
 		return &self._module;
 	}
 
-	fn intoStyle(pos: ArcRwSignal<[i32;2]>, size: ArcRwSignal<[u32;2]>) -> String
+	fn intoStyle(pos: [i32;2], size: [u32;2]) -> String
 	{
-		let pos = pos.get();
-		let size = size.get();
-		return format!("left: {}px; top: {}px; width: {}px; height: {}px;", pos[0], pos[1], size[0], size[1]);
+		return format!("position: absolute; left: {}px; top: {}px; width: {}px; height: {}px;", pos[0], pos[1], size[0], size[1]);
 	}
 
 	pub fn export(&self) -> ModuleContent
@@ -65,7 +63,6 @@ impl<module: moduleContent> ModulePositions<module>
 			size[0] = import.size[0];
 			size[1] = import.size[1];
 		});
-		HWebTrace!("module to import : {:?}",import);
 		self._module.import(import);
 	}
 
@@ -89,7 +86,7 @@ impl<module: moduleContent> ModulePositions<module>
 			{
 				if editMode.get()
 				{
-					view!{<div style={move || format!("position: relative;{}",Self::intoStyle(pos.clone(), size.clone()))}>
+					view!{<div style={move || Self::intoStyle(pos.clone().get(), size.clone().get())}>
 						<div class="module">
 						<div class="module_header"><i class="iconoir-path-arrow-solid" node_ref=elMove></i><i class="iconoir-xmark" on:click=removeFn></i></div>
 						{view(&self._module,editMode)}
@@ -99,7 +96,7 @@ impl<module: moduleContent> ModulePositions<module>
 				}
 				else
 				{
-					view!{<div class="module" style={move || format!("position: relative;{}",Self::intoStyle(pos.clone(), size.clone()))}>
+					view!{<div class="module" style={move || Self::intoStyle(pos.clone().get(), size.clone().get())}>
 					{view(&self._module,editMode)}
 					</div>
 					}.into_any()

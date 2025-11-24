@@ -8,7 +8,6 @@ use crate::api::modules::components::ModuleContent;
 use crate::front::modules::components::{Backable, Cache, Cacheable};
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::translate::Translate;
-use crate::HWebTrace;
 
 #[derive(Serialize,Deserialize,Default,Debug)]
 pub struct Todo
@@ -64,11 +63,18 @@ impl Backable for Todo
 		let updateFn = self.updateFn();
 		let content = self.content.clone();
 		let contentWrite = self.content.clone();
+		let contentCache = self._update.clone();
+
 		view!{
 			<>
 			<textarea
                 prop:value=move || content.get()
-				on:input:target=move |ev| contentWrite.set(ev.target().value())>{content.get()}</textarea><br/>
+				on:input:target=move |ev| {
+					contentCache.update(|cache|{
+						cache.update();
+					});
+					contentWrite.set(ev.target().value())
+				}>{content.get()}</textarea><br/>
 			<button class="validate" on:click=updateFn><Translate key={AllFrontUIEnum::UPDATE.to_string()}/></button>
 			</>
 		}.into_any()

@@ -1,4 +1,4 @@
-use leptos::prelude::{AnyView, ArcRwSignal, RwSignal};
+use leptos::prelude::{AnyView, ArcRwSignal, Callback, RwSignal};
 use time::UtcDateTime;
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::ModuleContent;
@@ -73,4 +73,11 @@ pub trait Backable
 	fn import(&mut self, import: ModuleContent);
 
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> where Self: Sized;
+}
+
+#[derive(Clone)]
+pub struct ModuleActionFn
+{
+	/// (moduleName/key, login)
+	pub updateFn: Callback<(String,String),()>
 }

@@ -159,6 +159,43 @@ pub fn Home() -> impl IntoView
 	}
 }
 
+fn module_update(
+	moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
+	toasterInnerValidate: ToasterContext,
+	//dialog: DialogManager
+)
+{
+
+	let updateFn=  move |login: String,moduleName: String| {
+		let moduleContentInnerValidate = moduleContentInnerValidate.clone();
+		let toasterInnerValidate = toasterInnerValidate.clone();
+
+		spawn_local(async move {
+			let Some(mut guard) = moduleContentInnerValidate.try_write()
+			else
+			{
+				return;
+			};
+			let Some((login, lang)) = UserData::loginLang_get_from_cookie()
+			else
+			{
+				return;
+			};
+			let modules: &mut ModuleHolder = guard.deref_mut();
+			let error = (*modules).module_update(login, moduleName).await;
+
+			if let Some(err) = error
+			{
+				toastingErr(toasterInnerValidate, err).await;
+			}
+			else
+			{
+				toastingSuccess(toasterInnerValidate, AllFrontUIEnum::UPDATE).await;
+			}
+		});
+	};
+}
+
 fn editMode_cancel(
 	moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 	editModeInnerValidate: RwSignal<bool>,

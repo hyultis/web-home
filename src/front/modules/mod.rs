@@ -1,27 +1,30 @@
-use std::collections::HashMap;
-use module_positions::ModulePositions;
-use module_type::ModuleType;
-use crate::api::modules::{API_module_retrieve, API_module_retrieveMissingModule, API_module_update, ModuleReturnRetrieve, ModuleReturnUpdate};
 use crate::api::modules::components::ModuleContent;
+use crate::api::modules::{
+	API_module_retrieve, API_module_retrieveMissingModule, API_module_update, ModuleReturnRetrieve,
+	ModuleReturnUpdate,
+};
 use crate::front::modules::components::{Backable, Cacheable};
 use crate::front::modules::link::LinksHolder;
 use crate::front::utils::all_front_enum::AllFrontErrorEnum;
 use crate::HWebTrace;
+use module_positions::ModulePositions;
+use module_type::ModuleType;
+use std::collections::HashMap;
 
-pub mod link;
-pub mod todo;
-pub mod rss;
 pub mod components;
+pub mod link;
 pub mod module_positions;
 pub(crate) mod module_type;
+pub mod rss;
+pub mod todo;
 
-pub trait moduleContent: Backable + Cacheable{}
+pub trait moduleContent: Backable + Cacheable {}
 
 pub struct ModuleHolder
 {
 	_links: LinksHolder,
-	_blocks: HashMap<String,ModulePositions<ModuleType>>,
-	_blockNb: usize
+	_blocks: HashMap<String, ModulePositions<ModuleType>>,
+	_blockNb: usize,
 }
 
 impl ModuleHolder
@@ -42,96 +45,180 @@ impl ModuleHolder
 		self._blockNb = 0;
 	}
 
-
-	pub async fn editMode_validate(&mut self, login:String) -> Option<AllFrontErrorEnum>
+	pub async fn editMode_validate(&mut self, login: String) -> Option<AllFrontErrorEnum>
 	{
-		if(self._links.cache_mustUpdate())
+		if (self._links.cache_mustUpdate())
 		{
 			let module = self._links.export();
 			match API_module_update(login.clone(), module).await
 			{
 				// TODO : when the module is outdated, we should update instead of returning an error
-				Ok(ModuleReturnUpdate::OUTDATED) => {return Some(AllFrontErrorEnum::MODULE_OUTDATED);}
-				Err(err) => {return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}",err)));}
-				_ => {} // ModuleReturn::OK here to go next stuff
+				Ok(ModuleReturnUpdate::OUTDATED) =>
+				{
+					return Some(AllFrontErrorEnum::MODULE_OUTDATED);
+				}
+				Err(err) =>
+				{
+					return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+				}
+				_ =>
+				{} // ModuleReturn::OK here to go next stuff
 			}
 		}
 
-
-		for (key,oneModule) in self._blocks.iter_mut()
+		for (key, oneModule) in self._blocks.iter_mut()
 		{
-			let mut module = oneModule.export();
-			module.name = key.clone();
-			match API_module_update(login.clone(), module).await
+			if (oneModule.inner().cache_mustUpdate())
 			{
-				// TODO : when the module is outdated, we should update instead of returning an error
-				Ok(ModuleReturnUpdate::OUTDATED) => {return Some(AllFrontErrorEnum::MODULE_OUTDATED);}
-				Err(err) => {return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}",err)));}
-				_ => {}
+				let mut module = oneModule.export();
+				module.name = key.clone();
+				match API_module_update(login.clone(), module).await
+				{
+					// TODO : when the module is outdated, we should update instead of returning an error
+					Ok(ModuleReturnUpdate::OUTDATED) =>
+					{
+						return Some(AllFrontErrorEnum::MODULE_OUTDATED);
+					}
+					Err(err) =>
+					{
+						return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+					}
+					_ =>
+					{}
+				}
 			}
 		}
 
 		return None;
 	}
 
-	pub async fn editMode_cancel(&mut self, login:String, forceUpdate: bool) -> Option<AllFrontErrorEnum>
+	pub async fn editMode_cancel(
+		&mut self,
+		login: String,
+		forceUpdate: bool,
+	) -> Option<AllFrontErrorEnum>
 	{
-		if(forceUpdate || self._links.cache_mustUpdate())
+		if (forceUpdate || self._links.cache_mustUpdate())
 		{
 			let moduleName = self._links.typeModule();
 			match API_module_retrieve(login.clone(), moduleName).await
 			{
-				Ok(ModuleReturnRetrieve::EMPTY) => {},
-				Ok(ModuleReturnRetrieve::UPDATED(moduleContent)) => self._links.import(moduleContent),
-				Err(err) => {return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}",err)));}
-			}
-		}
-
-		for (key,oneModule) in self._blocks.iter_mut()
-		{
-			if(forceUpdate || oneModule.inner().cache_mustUpdate())
-			{
-				let moduleName = format!("{}_{}", key, oneModule.inner().typeModule());
-				match API_module_retrieve(login.clone(), moduleName).await
+				Ok(ModuleReturnRetrieve::EMPTY) =>
+				{}
+				Ok(ModuleReturnRetrieve::UPDATED(moduleContent)) =>
 				{
-					Ok(ModuleReturnRetrieve::EMPTY) => {},
-					Ok(ModuleReturnRetrieve::UPDATED(moduleContent)) => {
-						oneModule.import(moduleContent);
-					},
-					Err(err) => { return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err))); }
+					self._links.import(moduleContent)
+				}
+				Err(err) =>
+				{
+					return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
 				}
 			}
 		}
 
-		let foundModules = match API_module_retrieveMissingModule(login.clone(), vec!["links".to_string()]).await
+		for (key, oneModule) in self._blocks.iter_mut()
 		{
-			Ok(foundModules) => foundModules,
-			Err(err) => { return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err))); }
-		};
+			if (forceUpdate || oneModule.inner().cache_mustUpdate())
+			{
+				let moduleName = format!("{}_{}", key, oneModule.inner().typeModule());
+				match API_module_retrieve(login.clone(), moduleName).await
+				{
+					Ok(ModuleReturnRetrieve::EMPTY) =>
+					{}
+					Ok(ModuleReturnRetrieve::UPDATED(moduleContent)) =>
+					{
+						oneModule.import(moduleContent);
+					}
+					Err(err) =>
+					{
+						return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+					}
+				}
+			}
+		}
+
+		let foundModules =
+			match API_module_retrieveMissingModule(login.clone(), vec!["links".to_string()]).await
+			{
+				Ok(foundModules) => foundModules,
+				Err(err) =>
+				{
+					return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+				}
+			};
 
 		for oneNewModuleName in foundModules
 		{
 			let split = oneNewModuleName.split("_").collect::<Vec<&str>>();
-			if let Some(rawNbFound) =split.get(0)
+			if let Some(rawNbFound) = split.get(0)
 			{
-				if let Ok(nbFound) = rawNbFound.parse::<usize>() {
-					if(self._blockNb <= nbFound)
-						{self._blockNb = nbFound+1;}
+				if let Ok(nbFound) = rawNbFound.parse::<usize>()
+				{
+					if (self._blockNb <= nbFound)
+					{
+						self._blockNb = nbFound + 1;
+					}
 				}
 			}
 
 			let oneModule = ModuleContent::newFromName(oneNewModuleName.clone());
 			match API_module_retrieve(login.clone(), oneNewModuleName.clone()).await
 			{
-				Ok(ModuleReturnRetrieve::EMPTY) => {},
-				Ok(ModuleReturnRetrieve::UPDATED(moduleContent)) => {
-					let Some(moduleType) = ModuleType::newFromModuleContent(&moduleContent) else {continue};
-					self._blocks.insert(oneNewModuleName,ModulePositions::newFromModuleContent(moduleContent,moduleType));
-				},
-				Err(err) => { return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err))); }
+				Ok(ModuleReturnRetrieve::EMPTY) =>
+				{}
+				Ok(ModuleReturnRetrieve::UPDATED(moduleContent)) =>
+				{
+					let Some(moduleType) = ModuleType::newFromModuleContent(&moduleContent)
+					else
+					{
+						continue;
+					};
+					self._blocks.insert(
+						oneNewModuleName,
+						ModulePositions::newFromModuleContent(moduleContent, moduleType),
+					);
+				}
+				Err(err) =>
+				{
+					return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+				}
 			}
 		}
-		HWebTrace!("_blockNb : {:?}",self._blockNb);
+		HWebTrace!("_blockNb : {:?}", self._blockNb);
+
+		return None;
+	}
+
+	pub async fn module_update(&mut self, login: String, name: String)
+		-> Option<AllFrontErrorEnum>
+	{
+		let Some(oneModule) = self._blocks.get(&name)
+		else
+		{
+			return None;
+		};
+
+		if (!oneModule.inner().cache_mustUpdate())
+		{
+			return None;
+		}
+
+		let mut module = oneModule.export();
+		module.name = name.clone();
+		match API_module_update(login.clone(), module).await
+		{
+			// TODO : when the module is outdated, we should update instead of returning an error
+			Ok(ModuleReturnUpdate::OUTDATED) =>
+			{
+				return Some(AllFrontErrorEnum::MODULE_OUTDATED);
+			}
+			Err(err) =>
+			{
+				return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+			}
+			_ =>
+			{}
+		}
 
 		return None;
 	}
@@ -146,15 +233,15 @@ impl ModuleHolder
 		return &mut self._links;
 	}
 
-	pub fn blocks_get(&self) -> &HashMap<String,ModulePositions<ModuleType>>
+	pub fn blocks_get(&self) -> &HashMap<String, ModulePositions<ModuleType>>
 	{
 		return &self._blocks;
 	}
 
-	pub fn blocks_insert(&mut self,newmodule: ModulePositions<ModuleType>)
+	pub fn blocks_insert(&mut self, newmodule: ModulePositions<ModuleType>)
 	{
-		let name = format!("{}_{}",self._blockNb,newmodule.inner().typeModule());
-		self._blocks.insert(name,newmodule);
-		self._blockNb+=1;
+		let name = format!("{}_{}", self._blockNb, newmodule.inner().typeModule());
+		self._blocks.insert(name, newmodule);
+		self._blockNb += 1;
 	}
 }

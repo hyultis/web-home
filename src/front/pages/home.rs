@@ -321,7 +321,8 @@ fn editMode_AddBlock(moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 				moduleContentInnerValidate.update(|modules| {
 
 					let moduleType = match selectedType.as_str() {
-						"TODO" => ModuleType::TODO(Todo::default()),
+						"TODO" => ModuleType::TODO(Default::default()),
+						"RSS" => ModuleType::RSS(Default::default()),
 						_ => return
 					};
 

@@ -91,11 +91,30 @@ input
 	color: var(--defaultfontcolor);
 }
 
-input[type=button]
+input[type=button], button
 {
 	background-color: var(--urlcolordarker);
 	margin: 0 auto;
 	cursor: pointer;
+	padding: 0.1em 0.3em;
+	border-radius: 3px;
+	margin-top: 0.3em;
+}
+
+.close {
+	background-color: var(--buttonbackgroundwarn);
+}
+
+.validate {
+	background-color: var(--buttonbackgroundok);
+}
+
+input[type=button], button:hover {
+	box-shadow: inset 0 0 1em #e7e7e7;
+}
+
+input[type=button], button:active {
+	box-shadow: inset 0 0 1em #000;
 }
 
 h1

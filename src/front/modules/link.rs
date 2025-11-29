@@ -18,6 +18,7 @@ use crate::front::utils::toaster_helpers::{toastingErr, toastingParams};
 use crate::HWebTrace;
 use std::ops::DerefMut;
 use leptos::__reexports::wasm_bindgen_futures::spawn_local;
+use crate::front::modules::module_actions::ModuleActionFn;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Link
@@ -259,7 +260,7 @@ impl Backable for LinksHolder
 		"links".to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>) -> AnyView
+	fn draw(&self, editMode: RwSignal<bool>,_: ModuleActionFn,_:String) -> AnyView
 	{
 		let addLinkFn = self.addLinkPopupFn();
 
@@ -340,7 +341,7 @@ impl Backable for LinksHolder
 			name: self.typeModule(),
 			typeModule: self.typeModule(),
 			timestamp: self._update.get_untracked().get(),
-			content: serde_json::to_string(&self.content).unwrap(),
+			content: serde_json::to_string(&self.content).unwrap_or_default(),
 			pos: [0,0],
 			size: [0,0],
 		};

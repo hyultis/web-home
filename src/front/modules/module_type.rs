@@ -3,9 +3,10 @@ use leptos::view;
 use strum_macros::EnumDiscriminants;
 use crate::api::modules::components::ModuleContent;
 use crate::front::modules::components::{Backable, Cache, Cacheable};
-use crate::front::modules::moduleContent;
+use crate::front::modules::{moduleContent};
 use crate::front::modules::todo::Todo;
 use strum_macros::EnumIter;
+use crate::front::modules::module_actions::ModuleActionFn;
 
 #[derive(EnumDiscriminants,Debug)]
 #[strum_discriminants(derive(strum_macros::Display,EnumIter))]
@@ -25,10 +26,10 @@ impl Backable for ModuleType {
 		}
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>) -> AnyView {
+	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn,currentName:String) -> AnyView {
 		match self {
 			ModuleType::RSS(_) => view!{<span/>}.into_any(),
-			ModuleType::TODO(todo) => todo.draw(editMode)
+			ModuleType::TODO(todo) => todo.draw(editMode,moduleActions,currentName)
 		}
 	}
 

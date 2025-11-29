@@ -8,6 +8,8 @@ use crate::api::modules::components::ModuleContent;
 use crate::front::modules::components::{Backable, Cache, Cacheable};
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::translate::Translate;
+use leptos::callback::Callable;
+use crate::front::modules::module_actions::ModuleActionFn;
 
 #[derive(Serialize,Deserialize,Default,Debug)]
 pub struct Todo
@@ -28,10 +30,10 @@ impl Todo
 		}
 	}
 
-	pub fn updateFn(&self) -> impl Fn(MouseEvent) + Clone
+	pub fn updateFn(&self,moduleActions: ModuleActionFn,currentName:String) -> impl Fn(MouseEvent) + Clone
 	{
 		return move |_| {
-
+			moduleActions.clone().updateFn.run((currentName.clone()));
 		}
 	}
 }
@@ -58,9 +60,9 @@ impl Backable for Todo
 		"TODO".to_string()
 	}
 
-	fn draw(&self, _: RwSignal<bool>) -> AnyView {
+	fn draw(&self, _: RwSignal<bool>,moduleActions: ModuleActionFn,currentName:String) -> AnyView {
 
-		let updateFn = self.updateFn();
+		let updateFn = self.updateFn(moduleActions,currentName);
 		let content = self.content.clone();
 		let contentWrite = self.content.clone();
 		let contentCache = self._update.clone();
@@ -86,7 +88,7 @@ impl Backable for Todo
 			name: self.typeModule(),
 			typeModule: self.typeModule(),
 			timestamp: self._update.get_untracked().get(),
-			content: serde_json::to_string(&self.content.get_untracked()).unwrap(),
+			content: serde_json::to_string(&self.content.get_untracked()).unwrap_or_default(),
 			pos: [0,0],
 			size: [0,0],
 		};

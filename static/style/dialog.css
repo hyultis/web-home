@@ -37,13 +37,6 @@
 	margin-top: 1em;
 }
 
-.dialog-buttons .close {
-	background-color: var(--buttonbackgroundwarn);
-}
-
-.dialog-buttons .validate {
-	background-color: var(--buttonbackgroundok);
-}
 .dialog-buttons button {
 	border: 1px solid var(--maincolor);
 	border-radius: 5px;

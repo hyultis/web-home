@@ -19,6 +19,7 @@ use leptos::{island, view, IntoView};
 use leptos_router::hooks;
 use std::ops::DerefMut;
 use strum::IntoEnumIterator;
+use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::modules::module_positions::ModulePositions;
 use crate::front::modules::module_type::{ModuleType, ModuleTypeDiscriminants};
 use crate::front::modules::todo::Todo;
@@ -115,14 +116,17 @@ pub fn Home() -> impl IntoView
 
 	let moduleContentInnerView = moduleContent.clone();
 	let moduleContentInnerModuleView = moduleContent.clone();
+	let moduleActions = ModuleActionFn::new(moduleContent.clone(),toaster.clone());
+	let moduleActionsInnerModuleView = moduleActions.clone();
 	view! {
 		<div class="home_body">
 			<div class="header">
 				<div class="left">
 					{move || {
+						let moduleContentDraw = moduleContentInnerView.clone();
 						let Some(binding) = moduleContentInnerView.clone().try_read() else {return view!{<span/>}.into_any()};
 						let tmp = binding.links_get();
-						tmp.draw(editMode)
+						tmp.draw(editMode,moduleActionsInnerModuleView.clone(),"links".to_string())
 					}}
 				</div>
 				<div class="right">
@@ -151,49 +155,13 @@ pub fn Home() -> impl IntoView
 			</div>
 			<div class="modules">
 				{move || {
+					let moduleContentIntoDraw = moduleContentInnerModuleView.clone();
 					let Some(binding) = moduleContentInnerModuleView.clone().try_read() else {return view!{<span/>}.into_any()};
-					binding.blocks_get().iter().map( |(_,d)|d.draw(editMode)).collect_view().into_any()
+					binding.blocks_get().iter().map( |(currentName,d)|d.draw(editMode,moduleActions.clone(),currentName.clone())).collect_view().into_any()
 				}}
 			</div>
 		</div>
 	}
-}
-
-fn module_update(
-	moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
-	toasterInnerValidate: ToasterContext,
-	//dialog: DialogManager
-)
-{
-
-	let updateFn=  move |login: String,moduleName: String| {
-		let moduleContentInnerValidate = moduleContentInnerValidate.clone();
-		let toasterInnerValidate = toasterInnerValidate.clone();
-
-		spawn_local(async move {
-			let Some(mut guard) = moduleContentInnerValidate.try_write()
-			else
-			{
-				return;
-			};
-			let Some((login, lang)) = UserData::loginLang_get_from_cookie()
-			else
-			{
-				return;
-			};
-			let modules: &mut ModuleHolder = guard.deref_mut();
-			let error = (*modules).module_update(login, moduleName).await;
-
-			if let Some(err) = error
-			{
-				toastingErr(toasterInnerValidate, err).await;
-			}
-			else
-			{
-				toastingSuccess(toasterInnerValidate, AllFrontUIEnum::UPDATE).await;
-			}
-		});
-	};
 }
 
 fn editMode_cancel(

@@ -11,6 +11,14 @@ use crate::global_security::{generate_salt_raw, hash};
 use base64ct::{Base64, Encoding};
 use crate::front::utils::all_front_enum::AllFrontLoginEnum;
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct UserDataCypher
+{
+	pub salt: String,
+	pub nonce: String,
+	pub content: String,
+}
+
 /// note about salt, hash and secure send/storage client data
 ///
 /// the objectif is to disallow the server to know anything about any client data
@@ -120,7 +128,7 @@ impl UserData {
 		key
 	}
 
-	pub fn data_crypt(&self, plaintext: String) -> Option<(String, String, String)>
+	pub fn crypt_with_password(&self, plaintext: &String) -> Option<UserDataCypher>
 	{
 		let Some(password) = &self.userSalt else {return None};
 		let Ok(salt) = generate_salt_raw() else {return None};
@@ -135,19 +143,20 @@ impl UserData {
 		let ciphertext = cipher.encrypt(&nonce, plaintext.as_bytes())
 			.expect("encryption failed");
 
-		Some((
-			Base64::encode_string(&salt),
-			Base64::encode_string(&nonce.as_slice()),
-			Base64::encode_string(&ciphertext),
-		))
+		Some(UserDataCypher {
+			salt: Base64::encode_string(&salt),
+			nonce: Base64::encode_string(& nonce.as_slice()),
+			content: Base64::encode_string(&ciphertext),
+		})
 	}
 
-	pub fn decrypt_with_password(
-		&self,
-		salt_b64: &str,
-		nonce_b64: &str,
-		ciphertext_b64: &str
-	) -> Option<String> {
+	pub fn decrypt_with_password(&self,content: &String) -> Option<String>
+	{
+		let Ok(content): Result<UserDataCypher,_> = serde_json::from_str(content) else {return None};
+		let salt_b64 = content.salt.as_str();
+		let nonce_b64 = content.nonce.as_str();
+		let ciphertext_b64 = content.content.as_str();
+
 		let Some(password) = &self.userSalt else {return None};
 		let Ok(salt) = generate_salt_raw() else {return None};
 

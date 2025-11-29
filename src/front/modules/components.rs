@@ -1,7 +1,8 @@
-use leptos::prelude::{AnyView, ArcRwSignal, Callback, RwSignal};
+use leptos::prelude::{AnyView, ArcRwSignal, RwSignal};
 use time::UtcDateTime;
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::ModuleContent;
+use crate::front::modules::module_actions::ModuleActionFn;
 
 #[derive(Clone, Debug, Serialize,Deserialize)]
 pub struct Cache
@@ -67,17 +68,10 @@ pub trait Cacheable
 pub trait Backable
 {
 	fn typeModule(&self) -> String;
-	fn draw(&self, editMode: RwSignal<bool>) -> AnyView;
+	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn,currentName: String) -> AnyView;
 
 	fn export(&self) -> ModuleContent;
 	fn import(&mut self, import: ModuleContent);
 
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> where Self: Sized;
-}
-
-#[derive(Clone)]
-pub struct ModuleActionFn
-{
-	/// (moduleName/key, login)
-	pub updateFn: Callback<(String,String),()>
 }

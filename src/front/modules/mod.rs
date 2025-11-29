@@ -10,6 +10,8 @@ use crate::HWebTrace;
 use module_positions::ModulePositions;
 use module_type::ModuleType;
 use std::collections::HashMap;
+use leptos::prelude::Read;
+use crate::front::utils::users_data::UserData;
 
 pub mod components;
 pub mod link;
@@ -17,6 +19,7 @@ pub mod module_positions;
 pub(crate) mod module_type;
 pub mod rss;
 pub mod todo;
+pub mod module_actions;
 
 pub trait moduleContent: Backable + Cacheable {}
 
@@ -50,19 +53,9 @@ impl ModuleHolder
 		if (self._links.cache_mustUpdate())
 		{
 			let module = self._links.export();
-			match API_module_update(login.clone(), module).await
+			if let Some(error) = Self::inner_update(login.clone(),module).await
 			{
-				// TODO : when the module is outdated, we should update instead of returning an error
-				Ok(ModuleReturnUpdate::OUTDATED) =>
-				{
-					return Some(AllFrontErrorEnum::MODULE_OUTDATED);
-				}
-				Err(err) =>
-				{
-					return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
-				}
-				_ =>
-				{} // ModuleReturn::OK here to go next stuff
+				return Some(error);
 			}
 		}
 
@@ -72,19 +65,9 @@ impl ModuleHolder
 			{
 				let mut module = oneModule.export();
 				module.name = key.clone();
-				match API_module_update(login.clone(), module).await
+				if let Some(error) = Self::inner_update(login.clone(),module).await
 				{
-					// TODO : when the module is outdated, we should update instead of returning an error
-					Ok(ModuleReturnUpdate::OUTDATED) =>
-					{
-						return Some(AllFrontErrorEnum::MODULE_OUTDATED);
-					}
-					Err(err) =>
-					{
-						return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
-					}
-					_ =>
-					{}
+					return Some(error);
 				}
 			}
 		}
@@ -101,18 +84,12 @@ impl ModuleHolder
 		if (forceUpdate || self._links.cache_mustUpdate())
 		{
 			let moduleName = self._links.typeModule();
-			match API_module_retrieve(login.clone(), moduleName).await
+
+			if let Some(error) =  Self::inner_retrieve(login.clone(), moduleName.clone(),&mut self._links, |module, moduleContent| {
+				module.import(moduleContent);
+			}).await
 			{
-				Ok(ModuleReturnRetrieve::EMPTY) =>
-				{}
-				Ok(ModuleReturnRetrieve::UPDATED(moduleContent)) =>
-				{
-					self._links.import(moduleContent)
-				}
-				Err(err) =>
-				{
-					return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
-				}
+				return Some(error);
 			}
 		}
 
@@ -121,18 +98,11 @@ impl ModuleHolder
 			if (forceUpdate || oneModule.inner().cache_mustUpdate())
 			{
 				let moduleName = format!("{}_{}", key, oneModule.inner().typeModule());
-				match API_module_retrieve(login.clone(), moduleName).await
+				if let Some(error) =  Self::inner_retrieve(login.clone(), moduleName.clone(),oneModule, |module, moduleContent| {
+					module.import(moduleContent);
+				}).await
 				{
-					Ok(ModuleReturnRetrieve::EMPTY) =>
-					{}
-					Ok(ModuleReturnRetrieve::UPDATED(moduleContent)) =>
-					{
-						oneModule.import(moduleContent);
-					}
-					Err(err) =>
-					{
-						return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
-					}
+					return Some(error);
 				}
 			}
 		}
@@ -161,27 +131,19 @@ impl ModuleHolder
 				}
 			}
 
-			let oneModule = ModuleContent::newFromName(oneNewModuleName.clone());
-			match API_module_retrieve(login.clone(), oneNewModuleName.clone()).await
+			if let Some(error) = Self::inner_retrieve(login.clone(), oneNewModuleName.clone(),&mut (), |_,moduleContent| {
+				let Some(moduleType) = ModuleType::newFromModuleContent(&moduleContent)
+				else
+				{
+					return;
+				};
+				self._blocks.insert(
+					oneNewModuleName,
+					ModulePositions::newFromModuleContent(moduleContent, moduleType),
+				);
+			}).await
 			{
-				Ok(ModuleReturnRetrieve::EMPTY) =>
-				{}
-				Ok(ModuleReturnRetrieve::UPDATED(moduleContent)) =>
-				{
-					let Some(moduleType) = ModuleType::newFromModuleContent(&moduleContent)
-					else
-					{
-						continue;
-					};
-					self._blocks.insert(
-						oneNewModuleName,
-						ModulePositions::newFromModuleContent(moduleContent, moduleType),
-					);
-				}
-				Err(err) =>
-				{
-					return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
-				}
+				return Some(error);
 			}
 		}
 		HWebTrace!("_blockNb : {:?}", self._blockNb);
@@ -189,6 +151,48 @@ impl ModuleHolder
 		return None;
 	}
 
+	pub async fn module_retrieve(&mut self, login: String, name: String)
+	                           -> Option<AllFrontErrorEnum>
+	{
+		let Some(oneModule) = self._blocks.get_mut(&name)
+		else
+		{
+			return None;
+		};
+
+		if (!oneModule.inner().cache_mustUpdate())
+		{
+			return None;
+		}
+
+		return Self::inner_retrieve(login.clone(), name.clone(),oneModule, |module, moduleContent| {
+			module.import(moduleContent);
+		}).await;
+	}
+
+	async fn inner_retrieve<T>(login: String, moduleName: String, sendInner: T, module: impl FnOnce(T,ModuleContent)) -> Option<AllFrontErrorEnum>
+	{
+		match API_module_retrieve(login.clone(), moduleName).await
+		{
+			Ok(ModuleReturnRetrieve::EMPTY) =>
+				{}
+			Ok(ModuleReturnRetrieve::UPDATED(mut moduleContent)) =>
+				{
+					Self::import_decrypt_content(&mut moduleContent);
+					module(sendInner,moduleContent);
+				}
+			Err(err) =>
+				{
+					return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+				}
+		}
+
+		return None;
+	}
+
+	/// This function is used to update the module on the server.
+	/// It will encrypt the content of the module before sending it to the server.
+	/// It will return an error if the module is outdated or if the server returns an error.
 	pub async fn module_update(&mut self, login: String, name: String)
 		-> Option<AllFrontErrorEnum>
 	{
@@ -205,19 +209,26 @@ impl ModuleHolder
 
 		let mut module = oneModule.export();
 		module.name = name.clone();
+
+		return Self::inner_update(login,module).await;
+	}
+
+	async fn inner_update(login: String, mut module: ModuleContent) -> Option<AllFrontErrorEnum>
+	{
+		Self::import_crypt_content(&mut module);
 		match API_module_update(login.clone(), module).await
 		{
 			// TODO : when the module is outdated, we should update instead of returning an error
 			Ok(ModuleReturnUpdate::OUTDATED) =>
-			{
-				return Some(AllFrontErrorEnum::MODULE_OUTDATED);
-			}
+				{
+					return Some(AllFrontErrorEnum::MODULE_OUTDATED);
+				}
 			Err(err) =>
-			{
-				return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
-			}
+				{
+					return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+				}
 			_ =>
-			{}
+				{}
 		}
 
 		return None;
@@ -243,5 +254,27 @@ impl ModuleHolder
 		let name = format!("{}_{}", self._blockNb, newmodule.inner().typeModule());
 		self._blocks.insert(name, newmodule);
 		self._blockNb += 1;
+	}
+
+	/// This function is used to decrypt the content of a moduleContent before generating the module
+	/// return if the content have been correctly decrypted
+	fn import_decrypt_content(moduleContent: &mut ModuleContent) -> bool
+	{
+		let (userData, _) = UserData::cookie_signalGet();
+		let Some(userData) = &*userData.read() else {return false};
+		let Some(result) = userData.decrypt_with_password(&moduleContent.content) else {return false};
+		moduleContent.content = result;
+		return true;
+	}
+
+	/// This function is used to encrypt the content of a moduleContent before sending it to the server
+	/// return if the content have been correctly encrypted
+	fn import_crypt_content(moduleContent: &mut ModuleContent) -> bool
+	{
+		let (userData, _) = UserData::cookie_signalGet();
+		let Some(userData) = &*userData.read() else {return false};
+		let Some(result) = userData.crypt_with_password(&moduleContent.content) else {return false};
+		moduleContent.content = serde_json::to_string(&result).unwrap_or_default();
+		return true;
 	}
 }

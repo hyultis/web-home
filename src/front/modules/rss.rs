@@ -25,10 +25,9 @@ struct RssContent
 #[derive(Default)]
 pub struct Rss
 {
-	content: ArcRwSignal<RssContent>,
+	config: ArcRwSignal<RssContent>,
 	#[serde(skip_serializing,skip_deserializing)]
-	rssContent: ArcRwSignal<Option<Feed>>,
-	rssLastUpdate: ArcRwSignal<Cache>,
+	rssContent: ArcRwSignal<Option<(u64,Feed)>>,
 	_update: ArcRwSignal<Cache>,
 	_sended: ArcRwSignal<Cache>,
 }
@@ -38,42 +37,37 @@ impl Rss
 	pub fn new() -> Self
 	{
 		Self {
-			content: Default::default(),
+			config: Default::default(),
 			rssContent: Default::default(),
-			rssLastUpdate: Default::default(),
 			_update: Default::default(),
 			_sended: Default::default(),
 		}
 	}
 
-	async fn sync(rssContent: ArcRwSignal<Option<Feed>>, rssLastUpdate: ArcRwSignal<Cache>)
+	async fn sync(rssContent: ArcRwSignal<Option<(u64,Feed)>>)
 	{
 
 		let url = "https://www.lemonde.fr/rss/une.xml";
 		// 1. fetch(...)
 		let Ok(window) = web_sys::window().ok_or("no window") else {return};
-		let Ok(returnData) = API_proxys_wget(url.to_string()).await else {return};
-		let proxys_return::UPDATED(text) = returnData else {return};
+		let oldTime = rssContent.get_untracked().map(|content| content.0);
+		let Ok(returnData) = API_proxys_wget(url.to_string(),oldTime).await else {return};
+		let proxys_return::UPDATED(time,text) = returnData else {return};
 		let Ok(feed) = parser::parse(text.as_bytes()) else {return};
 
 		rssContent.update(|rssContent| {
-			*rssContent = Some(feed);
-			rssLastUpdate.update(|cache|{
-				cache.update();
-			});
+			*rssContent = Some((time,feed));
 		})
 	}
 
 	fn refreshFn(&self) -> impl Fn(MouseEvent) + Clone
 	{
-		let content = self.content.clone();
+		let content = self.config.clone();
 		let rssContent = self.rssContent.clone();
-		let rssLastUpdate = self.rssLastUpdate.clone();
 		return move |_| {
 			let rssContent = rssContent.clone();
-			let rssLastUpdate = rssLastUpdate.clone();
 			spawn_local( async move {
-				Self::sync(rssContent.clone(),rssLastUpdate.clone()).await;
+				Self::sync(rssContent.clone()).await;
 			});
 		}
 	}
@@ -106,7 +100,7 @@ impl Backable for Rss
 		let refreshFn = self.refreshFn();
 
 		view! {{
-				self.rssContent.get().map(|mut rssContent|{
+				self.rssContent.get().map(|(_,mut rssContent)|{
 					let title = rssContent.title.clone();
 					let link = rssContent.title.clone().map(|title|title.src).flatten();
 
@@ -146,7 +140,7 @@ impl Backable for Rss
 			name: self.typeModule(),
 			typeModule: self.typeModule(),
 			timestamp: self._update.get_untracked().get(),
-			content: serde_json::to_string(&self.content.get_untracked()).unwrap_or_default(),
+			content: serde_json::to_string(&self.config.get_untracked()).unwrap_or_default(),
 			pos: [0,0],
 			size: [0,0],
 		};
@@ -156,7 +150,7 @@ impl Backable for Rss
 	{
 		let Ok(content) = serde_json::from_str(&import.content.clone()) else {return};
 
-		self.content = content;
+		self.config = content;
 		self._update.update(|cache|{
 			cache.update_from(import.timestamp);
 		});
@@ -168,9 +162,8 @@ impl Backable for Rss
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> {
 		let Ok(content) = serde_json::from_str(&from.content) else {return None};
 		Some(Self {
-			content: ArcRwSignal::new(content),
+			config: ArcRwSignal::new(content),
 			rssContent: Default::default(),
-			rssLastUpdate: Default::default(),
 			_update: ArcRwSignal::new(Cache::newFrom(from.timestamp)),
 			_sended: ArcRwSignal::new(Cache::newFrom(from.timestamp)),
 		})

@@ -9,6 +9,7 @@ use Hconfig::IO::json::WrapperJson;
 use Htrace::HTraceError;
 use time::Duration;
 use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
+use crate::api::proxys::proxy_cache::CACHE_DIR;
 use crate::global_security::generate_salt;
 
 mod api;
@@ -45,6 +46,7 @@ async fn main() {
 	let _ = fs::create_dir("./config");
 	let _ = fs::create_dir("./config/users");
 	let _ = fs::create_dir("./dynamic");
+	let _ = fs::create_dir(CACHE_DIR);
 	let _ = fs::remove_dir_all("./dynamic/traces");
 
 	HConfigManager::singleton().confPath_set("./config");

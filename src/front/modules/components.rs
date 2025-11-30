@@ -3,7 +3,6 @@ use time::UtcDateTime;
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::ModuleContent;
 use crate::front::modules::module_actions::ModuleActionFn;
-use crate::HWebTrace;
 
 #[derive(Clone, Debug, Serialize,Deserialize)]
 pub struct Cache
@@ -105,7 +104,6 @@ pub fn distant_time(timestamp: i64) -> DISTANT_TIME_RESULT
 	let mut key = ORDERED_TIME.get(0).unwrap().1.to_string();
 
 	for (max,I18lKey) in ORDERED_TIME {
-		HWebTrace!("distance : {}, key {}",distance,I18lKey);
 		key = I18lKey.to_string();
 		if(distance<max as i64)	{break;}
 		distance = distance/max as i64;

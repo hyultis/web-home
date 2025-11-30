@@ -1,18 +1,34 @@
+use std::time::SystemTime;
 use leptos::prelude::ServerFnError;
 use leptos::server;
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
+use crate::global_security::hash;
 
 #[derive(Serialize,Deserialize)]
 pub enum proxys_return {
 	NOT_MODIFIED,
-	UPDATED(String)
+	UPDATED(u64,String)
 }
 
 #[server]
-pub async fn API_proxys_wget(url: String) -> Result<proxys_return, ServerFnError>
+pub async fn API_proxys_wget(url: String, lastUpdate: Option<u64>) -> Result<proxys_return, ServerFnError>
 {
 	// TODO : add cache
 	use reqwest::Client;
+	use crate::api::proxys::proxy_cache::ProxyCache;
+
+	let urlHash = hash(url.clone());
+	let cache = ProxyCache::get("wget").map_err(|err| ServerFnError::new(format!("{:?}",err)))?;
+	if let Some(cacheTime) = cache.content_lastUpdate(&urlHash)
+	{
+		if let Some(clientTime) = lastUpdate
+		{
+			if clientTime <= cacheTime + 60 * 5 {
+				return Ok(proxys_return::NOT_MODIFIED);
+			}
+		}
+	}
 
 	let client = Client::new();
 	let response = inner::fetch_rss_with_cache(&url, None,None).await?;
@@ -20,15 +36,18 @@ pub async fn API_proxys_wget(url: String) -> Result<proxys_return, ServerFnError
 
 	match response.status {
 		304 => {
+			cache.content_updateTime(&urlHash,SystemTime::now());
 			return Ok(proxys_return::NOT_MODIFIED);
 		}
 		200 => {
-			return Ok(proxys_return::UPDATED(content));
+			cache.save(&urlHash,content.clone());
+			let duration = SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("[API_proxys_wget] Time went backwards ?!");
+			return Ok(proxys_return::UPDATED(duration.as_secs(), content));
 		}
 		_ => {}
 	}
 
-	return Err(ServerFnError::new("SERVEUR_ERROR"));
+	return Err(ServerFnError::new("SERVER_ERROR"));
 }
 
 #[cfg(feature = "ssr")]

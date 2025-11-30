@@ -20,6 +20,7 @@ pub(crate) mod module_type;
 pub mod rss;
 pub mod todo;
 pub mod module_actions;
+pub mod weather;
 
 pub trait moduleContent: Backable + Cacheable {}
 

@@ -4,6 +4,7 @@ pub mod translateBooks;
 pub mod Htrace;
 pub mod login;
 pub mod modules;
+pub mod proxys;
 //pub mod ApiError;
 
 // LOGIN and SIGNUP const

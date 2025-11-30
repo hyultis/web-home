@@ -3,6 +3,7 @@ use time::UtcDateTime;
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::ModuleContent;
 use crate::front::modules::module_actions::ModuleActionFn;
+use crate::HWebTrace;
 
 #[derive(Clone, Debug, Serialize,Deserialize)]
 pub struct Cache
@@ -74,4 +75,44 @@ pub trait Backable
 	fn import(&mut self, import: ModuleContent);
 
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> where Self: Sized;
+}
+
+// represent each unity of time, from the lowest to the highest
+// (60,"SEC") => the first element is the max unity of time (0 = no max), the second element is the name of the unity of time
+const ORDERED_TIME: [(u8, &str);6] = [
+	(60,"SEC"),
+	(60,"MIN"),
+	(24,"HOUR"),
+	(30,"DAY"),
+	(12,"MON"),
+	(0,"YEAR"),
+];
+
+pub enum DISTANT_TIME_RESULT
+{
+	FUTUR(u64,String),
+	PAST(u64,String),
+}
+
+/// return a string representing the distance between now and the timestamp, in the form of "12 DAYS" or "12 MONTHS" or "12 YEARS" or "12 HOURS" or "12 MINUTES" or "12 SECONDS"
+pub fn distant_time(timestamp: i64) -> DISTANT_TIME_RESULT
+{
+	let now = UtcDateTime::now().unix_timestamp();
+	let distance = now-timestamp;
+
+	let ifpast = distance<0;
+	let mut distance = distance.abs();
+	let mut key = ORDERED_TIME.get(0).unwrap().1.to_string();
+
+	for (max,I18lKey) in ORDERED_TIME {
+		HWebTrace!("distance : {}, key {}",distance,I18lKey);
+		key = I18lKey.to_string();
+		if(distance<max as i64)	{break;}
+		distance = distance/max as i64;
+	}
+
+	return match ifpast {
+		true => DISTANT_TIME_RESULT::PAST(distance as u64,format!("DISTANT_TIME_RESULT_{}",key)),
+		false => DISTANT_TIME_RESULT::FUTUR(distance as u64,format!("DISTANT_TIME_RESULT_{}",key)),
+	};
 }

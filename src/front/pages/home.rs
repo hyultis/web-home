@@ -22,7 +22,6 @@ use strum::IntoEnumIterator;
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::modules::module_positions::ModulePositions;
 use crate::front::modules::module_type::{ModuleType, ModuleTypeDiscriminants};
-use crate::front::modules::todo::Todo;
 // https://iconoir.com/
 // plus
 

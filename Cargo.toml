@@ -44,6 +44,7 @@ feed-rs = "2.3.1"
 web-sys = "0.3.81"
 wasm-bindgen-futures = "0.4.54"
 js-sys = "0.3.81"
+reqwest = { version = "0.12.24", optional = true }
 
 [features]
 hydrate = [
@@ -63,7 +64,8 @@ ssr = [
 
     "dep:Hconfig",
     "dep:Htrace",
-    "dep:getrandom"
+    "dep:getrandom",
+    "dep:reqwest"
 ]
 
 # Defines a size-optimized profile for the WASM bundle in release mode

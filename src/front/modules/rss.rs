@@ -1,14 +1,14 @@
-use leptos::prelude::{ClassAttribute, ElementChild, OnAttribute};
+use leptos::prelude::{ClassAttribute, CollectView, ElementChild, OnAttribute};
 use feed_rs::model::Feed;
 use feed_rs::parser;
 use leptos::prelude::{AnyView, ArcRwSignal, Get, GetUntracked, IntoAny, RwSignal, Update};
 use leptos::view;
 use serde::{Deserialize, Serialize};
-use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::spawn_local;
-use web_sys::{MouseEvent, Response};
+use wasm_bindgen_futures::{spawn_local};
+use web_sys::{MouseEvent};
 use crate::api::modules::components::ModuleContent;
-use crate::front::modules::components::{Backable, Cache, Cacheable};
+use crate::api::proxys::wget::{proxys_return, API_proxys_wget};
+use crate::front::modules::components::{distant_time, Backable, Cache, Cacheable, DISTANT_TIME_RESULT};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::translate::Translate;
@@ -48,23 +48,12 @@ impl Rss
 
 	async fn sync(rssContent: ArcRwSignal<Option<Feed>>, rssLastUpdate: ArcRwSignal<Cache>)
 	{
+
 		let url = "https://www.lemonde.fr/rss/une.xml";
 		// 1. fetch(...)
 		let Ok(window) = web_sys::window().ok_or("no window") else {return};
-		let Ok(resp_value) = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(url)).await else {return};
-		let Ok(resp): Result<Response,_> = resp_value.dyn_into() else {return};
-
-		// 2. Lire le body -> ArrayBuffer -> Vec<u8>
-		let Ok(buf_promise) = resp.array_buffer() else {return};
-		let Ok(buf) = wasm_bindgen_futures::JsFuture::from(buf_promise).await else {return};
-		let array = js_sys::Uint8Array::new(&buf);
-		let mut bytes = vec![0; array.length() as usize];
-		array.copy_to(&mut bytes);
-
-		// 3. Convertir en &str
-		let Ok(text) = str::from_utf8(&bytes) else {return};
-
-		// 4. Parser WASM-compatible
+		let Ok(returnData) = API_proxys_wget(url.to_string()).await else {return};
+		let proxys_return::UPDATED(text) = returnData else {return};
 		let Ok(feed) = parser::parse(text.as_bytes()) else {return};
 
 		rssContent.update(|rssContent| {
@@ -117,7 +106,7 @@ impl Backable for Rss
 		let refreshFn = self.refreshFn();
 
 		view! {{
-				self.rssContent.get().map(|rssContent|{
+				self.rssContent.get().map(|mut rssContent|{
 					let title = rssContent.title.clone();
 					let link = rssContent.title.clone().map(|title|title.src).flatten();
 
@@ -126,6 +115,23 @@ impl Backable for Rss
 						<h1>{rssContent.title.clone().map(|title|title.content)}</h1>
 						{ link.map(|link|{view!{<a href={link.clone()}>{link.clone()}</a>}})}
 						<span>{rssContent.description.map(|desc| desc.content)}</span>
+						<table>
+						{   rssContent.entries.sort_by(|a,b| a.published.cmp(&b.published).reverse());
+							rssContent.entries.iter().enumerate()
+							.filter(|(num,_)| *num < 10)
+							.map(|(_,entry)|{
+								view!{
+									<tr>
+										<td>{match distant_time(entry.published.clone().unwrap().timestamp()){
+											DISTANT_TIME_RESULT::FUTUR(time,key) => {view!{{time}<Translate key={key}/>}}
+											DISTANT_TIME_RESULT::PAST(time,key) => {view!{{time}<Translate key={key}/>}}
+										}}</td>
+										<td><a href={entry.links.first().clone().unwrap().href.clone()} rel="noopener noreferrer nofollow" target="_blank">{entry.title.clone().unwrap().content}</a></td>
+									</tr>
+								}
+							}).collect_view()
+						}
+						</table>
 						</>
 					}.into_any()
 				})

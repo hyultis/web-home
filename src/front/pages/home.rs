@@ -21,7 +21,7 @@ use std::ops::DerefMut;
 use strum::IntoEnumIterator;
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::modules::module_positions::ModulePositions;
-use crate::front::modules::module_type::{ModuleType, ModuleTypeDiscriminants};
+use crate::front::modules::module_type::{ModuleTypeDiscriminants, StringToModuleType};
 // https://iconoir.com/
 // plus
 
@@ -319,12 +319,7 @@ fn editMode_AddBlock(moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 
 				moduleContentInnerValidate.update(|modules| {
 
-					let moduleType = match selectedType.as_str() {
-						"TODO" => ModuleType::TODO(Default::default()),
-						"RSS" => ModuleType::RSS(Default::default()),
-						_ => return
-					};
-
+					let Some(moduleType) = StringToModuleType(selectedType) else {return;};
 					modules.blocks_insert(ModulePositions::new(moduleType));
 				});
 

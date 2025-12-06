@@ -5,8 +5,10 @@ use crate::front::modules::components::{Backable, Cache, Cacheable};
 use crate::front::modules::{moduleContent};
 use crate::front::modules::todo::Todo;
 use strum_macros::EnumIter;
+use crate::front::modules::mail::Mail;
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::modules::rss::Rss;
+use crate::front::modules::weather::Weather;
 
 #[derive(EnumDiscriminants,Debug)]
 #[strum_discriminants(derive(strum_macros::Display,EnumIter))]
@@ -15,36 +17,65 @@ pub enum ModuleType
 	#[strum(to_string = "RSS")]
 	RSS(Rss),
 	#[strum(to_string = "TODO")]
-	TODO(Todo)
+	TODO(Todo),
+	#[strum(to_string = "MAIL")]
+	MAIL(Mail),
+	#[strum(to_string = "WEATHER")]
+	WEATHER(Weather),
+}
+
+impl ModuleType {
+	pub fn intoBackable(&self) -> Box<&dyn Backable> {
+		match self {
+			ModuleType::RSS(x) => Box::new(x),
+			ModuleType::TODO(x) => Box::new(x),
+			ModuleType::MAIL(x) => Box::new(x),
+			ModuleType::WEATHER(x) => Box::new(x),
+		}
+	}
+
+	pub fn intoBackableMut(&mut self) -> Box<&mut dyn Backable> {
+		match self {
+			ModuleType::RSS(x) => Box::new(x),
+			ModuleType::TODO(x) => Box::new(x),
+			ModuleType::MAIL(x) => Box::new(x),
+			ModuleType::WEATHER(x) => Box::new(x),
+		}
+	}
+
+	pub fn intoCachable(&self) -> Box<&dyn Cacheable> {
+		match self {
+			ModuleType::RSS(x) => Box::new(x),
+			ModuleType::TODO(x) => Box::new(x),
+			ModuleType::MAIL(x) => Box::new(x),
+			ModuleType::WEATHER(x) => Box::new(x),
+		}
+	}
 }
 
 impl Backable for ModuleType {
 	fn typeModule(&self) -> String {
-		match self {
-			ModuleType::RSS(rss) => rss.typeModule(),
-			ModuleType::TODO(todo) => todo.typeModule()
-		}
+		return self.intoBackable().typeModule();
 	}
 
 	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn,currentName:String) -> AnyView {
-		match self {
-			ModuleType::RSS(rss) => rss.draw(editMode,moduleActions,currentName),
-			ModuleType::TODO(todo) => todo.draw(editMode,moduleActions,currentName)
-		}
+		return self.intoBackable().draw(editMode,moduleActions,currentName);
+	}
+
+	fn refresh_time(&self) -> u64 {
+		return self.intoBackable().refresh_time();
+	}
+
+	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String) {
+		self.intoBackable().refresh(moduleActions,currentName);
 	}
 
 	fn export(&self) -> ModuleContent {
-		return match self {
-			ModuleType::RSS(rss) => rss.export(),
-			ModuleType::TODO(todo) => todo.export()
-		}
+		return self.intoBackable().export();
 	}
 
 	fn import(&mut self, import: ModuleContent) {
-		match self {
-			ModuleType::RSS(rss) => rss.import(import),
-			ModuleType::TODO(todo) => todo.import(import)
-		}
+		return self.intoBackableMut().import(import);
 	}
 
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> {
@@ -55,6 +86,12 @@ impl Backable for ModuleType {
 			"TODO" => {
 				Todo::newFromModuleContent(from).map(|content| Self::TODO(content))
 			},
+			"WEATHER" => {
+				Weather::newFromModuleContent(from).map(|content| Self::WEATHER(content))
+			},
+			"MAIL" => {
+				Mail::newFromModuleContent(from).map(|content| Self::MAIL(content))
+			},
 			&_ => panic!("ModuleType::newFromModuleContent : unknown module type {}", from.typeModule)
 		}
 	}
@@ -62,28 +99,30 @@ impl Backable for ModuleType {
 
 impl Cacheable for ModuleType {
 	fn cache_mustUpdate(&self) -> bool {
-		match self {
-			ModuleType::RSS(rss) => rss.cache_mustUpdate(),
-			ModuleType::TODO(todo) => todo.cache_mustUpdate()
-		}
+		return self.intoCachable().cache_mustUpdate();
 	}
 
 	fn cache_getUpdate(&self) -> ArcRwSignal<Cache> {
-		match self {
-			ModuleType::RSS(rss) => rss.cache_getUpdate(),
-			ModuleType::TODO(todo) => todo.cache_getUpdate()
-		}
+		return self.intoCachable().cache_getUpdate();
 	}
 
 	fn cache_getSended(&self) -> ArcRwSignal<Cache> {
-		match self {
-			ModuleType::RSS(rss) => rss.cache_getSended(),
-			ModuleType::TODO(todo) => todo.cache_getSended()
-		}
+		return self.intoCachable().cache_getSended();
 	}
 }
 
 impl moduleContent for ModuleType
 {
 
+}
+
+pub fn StringToModuleType(from: impl AsRef<str>) -> Option<ModuleType>
+{
+	match from.as_ref() {
+		"RSS" => Some(ModuleType::RSS(Default::default())),
+		"TODO" => Some(ModuleType::TODO(Default::default())),
+		"WEATHER" => Some(ModuleType::WEATHER(Default::default())),
+		"MAIL" => Some(ModuleType::MAIL(Default::default())),
+		&_ => None
+	}
 }

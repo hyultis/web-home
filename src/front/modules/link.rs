@@ -335,6 +335,14 @@ impl Backable for LinksHolder
 		}.into_any()
 	}
 
+	fn refresh_time(&self) -> u64 {
+		0
+	}
+
+	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String) {
+
+	}
+
 	fn export(&self) -> ModuleContent
 	{
 		return ModuleContent{

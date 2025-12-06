@@ -21,6 +21,7 @@ pub mod rss;
 pub mod todo;
 pub mod module_actions;
 pub mod weather;
+mod mail;
 
 pub trait moduleContent: Backable + Cacheable {}
 
@@ -66,6 +67,7 @@ impl ModuleHolder
 			{
 				let mut module = oneModule.export();
 				module.name = key.clone();
+				HWebTrace!("editMode_validate on module : {:?}", key);
 				if let Some(error) = Self::inner_update(login.clone(),module).await
 				{
 					return Some(error);

@@ -9,6 +9,7 @@
 {
 	--defaultfontcolor: #e8e8e8;
 	--backgroundcolor: #1b1b1b;
+	--backgroundcolorlighter: hsl(from var(--backgroundcolor) h s calc(l + 7));
 	--maincolor: #808080;
 	--maincolordarker: hsl(from var(--maincolor) h s calc(l - 25));
 	--maincolorlighter: hsl(from var(--maincolor) h s calc(l + 25));
@@ -121,6 +122,13 @@ h1
 {
 	font-size: 2em;
 	margin: 0.5em 0;
+}
+
+h2
+{
+	font-size: 1.5em;
+	margin-bottom: 0.5em;
+	text-align: center;
 }
 
 footer

@@ -14,7 +14,7 @@ impl Cache
 {
 	pub fn update(&mut self)
 	{
-		self.lastUpdate = UtcDateTime::now().unix_timestamp_nanos() as i64;
+		self.lastUpdate = Self::now();
 	}
 
 	pub fn update_from(&mut self, value: i64)
@@ -45,13 +45,18 @@ impl Cache
 	{
 		self.lastUpdate
 	}
+
+	pub fn now() -> i64
+	{
+		UtcDateTime::now().unix_timestamp_nanos() as i64
+	}
 }
 
 impl Default for Cache
 {
 	fn default() -> Self {
 		Self {
-			lastUpdate: UtcDateTime::now().unix_timestamp_nanos() as i64,
+			lastUpdate: Self::now(),
 		}
 	}
 }
@@ -69,6 +74,9 @@ pub trait Backable
 {
 	fn typeModule(&self) -> String;
 	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn,currentName: String) -> AnyView;
+
+	fn refresh_time(&self) -> u64;
+	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String);
 
 	fn export(&self) -> ModuleContent;
 	fn import(&mut self, import: ModuleContent);

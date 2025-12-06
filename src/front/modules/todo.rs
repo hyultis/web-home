@@ -69,7 +69,7 @@ impl Backable for Todo
 
 		view!{
 			<>
-			<textarea
+			<textarea class="module_todo"
                 prop:value=move || content.get()
 				on:input:target=move |ev| {
 					contentCache.update(|cache|{
@@ -80,6 +80,14 @@ impl Backable for Todo
 			<button class="validate" on:click=updateFn><Translate key={AllFrontUIEnum::UPDATE.to_string()}/></button>
 			</>
 		}.into_any()
+	}
+
+	fn refresh_time(&self) -> u64 {
+		0
+	}
+
+	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String) {
+		moduleActions.clone().updateFn.run((currentName.clone()));
 	}
 
 	fn export(&self) -> ModuleContent

@@ -23,12 +23,10 @@ Hconfig = {  version = "2.0", optional = true }
 Htrace = {  version = "2.0", optional = true }
 dashmap = {version = "6.1.0", features = ["rayon"]}
 serde = { version = "1.0", features = ["derive"] }
-thiserror = "2"
 http = "1"
 leptos-use = { version = "0.16.3", features = ["use_locales","use_cookie","storage","use_draggable","use_mouse_in_element","use_geolocation"] }
 fluent = { version = "0.17.0" }
 intl-memoizer = "0.5.2"
-unic-langid = { version = "0.9.5", features = ["unic-langid-macros"] }
 anyhow = "1.0.95"
 time = { version = "0.3", features = ["macros","wasm-bindgen"] }
 sha3 = {  version = "0.10.8", features = ["default"] }
@@ -38,14 +36,16 @@ rust-argon2 = "3.0"
 aes-gcm = "0.11.0-rc.1"
 serde_json = "1.0.145"
 strum = "0.27.2"
-strum_macros = "0.27"
 url = "2.5.7"
+strum_macros = "0.27"
 feed-rs = "2.3.1"
 web-sys = "0.3.81"
 wasm-bindgen-futures = "0.4.54"
 js-sys = "0.3.81"
 reqwest = { version = "0.12.24", optional = true }
 simd-json = { version = "0.17.0"}
+imap = {  version = "3.0.0-alpha.15", optional = true }
+imap-proto = { version = "0.16.6", optional = true}
 
 [features]
 hydrate = [
@@ -66,7 +66,9 @@ ssr = [
     "dep:Hconfig",
     "dep:Htrace",
     "dep:getrandom",
-    "dep:reqwest"
+    "dep:reqwest",
+    "dep:imap",
+    "dep:imap-proto",
 ]
 
 # Defines a size-optimized profile for the WASM bundle in release mode

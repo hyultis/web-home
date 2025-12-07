@@ -159,11 +159,25 @@ impl<module: moduleContent> ModulePositions<module>
 
 		let posMove = self._pos.clone();
 		let posSize = self._size.clone();
+		let size = self._module.size();
 		let cache = self._module.cache_getUpdate();
 		Effect::new(move |_| {
 			if !is_dragging.get() {return;}
-			let newSizeX = position.get().x as i32 - posMove.clone().get()[0];
-			let newSizeY = position.get().y as i32 - posMove.clone().get()[1];
+			let mut newSizeX = position.get().x as i32 - posMove.clone().get()[0];
+			if let Some(max) = size.x_max {
+				if(newSizeX > max as i32) {newSizeX = max as i32}
+			}
+			if let Some(min) = size.x_min {
+				if (newSizeX < min as i32) { newSizeX = min as i32 }
+			}
+
+			let mut newSizeY = position.get().y as i32 - posMove.clone().get()[1];
+			if let Some(max) = size.y_max {
+				if(newSizeY > max as i32) {newSizeY = max as i32}
+			}
+			if let Some(min) = size.y_min {
+				if(newSizeY < min as i32) {newSizeY = min as i32}
+			}
 			cache.update(|data| data.update());
 			posSize.update(|size|{
 				size[0] = newSizeX.max(150) as u32;

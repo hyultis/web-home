@@ -5,7 +5,7 @@ use leptos::prelude::{AnyView, ArcRwSignal, ClassAttribute, Get, IntoAny, RwSign
 use leptos::view;
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::ModuleContent;
-use crate::front::modules::components::{Backable, Cache, Cacheable};
+use crate::front::modules::components::{Backable, Cache, Cacheable, ModuleSizeContrainte};
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::translate::Translate;
 use leptos::callback::Callable;
@@ -122,5 +122,9 @@ impl Backable for Todo
 			_update: ArcRwSignal::new(Cache::newFrom(from.timestamp)),
 			_sended: ArcRwSignal::new(Cache::newFrom(from.timestamp)),
 		})
+	}
+
+	fn size(&self) -> ModuleSizeContrainte {
+		ModuleSizeContrainte::default()
 	}
 }

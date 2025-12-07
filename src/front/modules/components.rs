@@ -82,6 +82,28 @@ pub trait Backable
 	fn import(&mut self, import: ModuleContent);
 
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> where Self: Sized;
+
+	fn size(&self) -> ModuleSizeContrainte;
+}
+
+pub struct ModuleSizeContrainte
+{
+	pub x_min: Option<u32>,
+	pub x_max: Option<u32>,
+	pub y_min: Option<u32>,
+	pub y_max: Option<u32>,
+}
+
+impl Default for ModuleSizeContrainte
+{
+	fn default() -> Self {
+		Self {
+			x_min: None,
+			x_max: None,
+			y_min: None,
+			y_max: None,
+		}
+	}
 }
 
 // represent each unity of time, from the lowest to the highest

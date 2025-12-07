@@ -1,17 +1,15 @@
-use std::ops::Deref;
-use js_sys::Function;
-use leptos::prelude::{ClassAttribute, CollectView, Effect, ElementChild, Get, GetUntracked, OnAttribute, PropAttribute, Read, ReadUntracked, StyleAttribute, Update};
+use js_sys::{Array, Intl, Object, Reflect};
+use leptos::prelude::{ClassAttribute, CollectView, Effect, ElementChild, Get, GetUntracked, OnAttribute, PropAttribute, StyleAttribute, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, IntoAny, RwSignal};
 use leptos::view;
-use leptos_use::{use_geolocation, UseGeolocationReturn};
 use serde::{Deserialize, Serialize};
 use simd_json::borrowed::Value;
 use simd_json::prelude::ValueAsScalar;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{spawn_local, JsFuture};
-use web_sys::{window, Geolocation, Position, PositionError, Response};
+use web_sys::{window, Position, PositionError, Response};
 use crate::api::modules::components::ModuleContent;
-use crate::front::modules::components::{Backable, Cache, Cacheable};
+use crate::front::modules::components::{Backable, Cache, Cacheable, ModuleSizeContrainte};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::translate::Translate;
 use crate::HWebTrace;
@@ -96,7 +94,6 @@ impl Backable for Weather
 	}
 
 	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, currentName: String) -> AnyView {
-		HWebTrace!("draw weather");
 		let config = self.config.clone();
 		let refreshContent = self.weatherContent.clone();
 		Effect::new(move ||{
@@ -125,7 +122,6 @@ impl Backable for Weather
 
 					let configLocate = configLocate.clone();
 					let on_success = Closure::once(move |pos: Position| {
-						HWebTrace!("success : {:?}", pos.coords());
 						configLocate.update(|conf| {
 							conf.longitude = pos.coords().longitude();
 							conf.latitude = pos.coords().latitude();
@@ -151,19 +147,22 @@ impl Backable for Weather
 				let cacheLink = self._update.clone();
 				let cacheMax = self._update.clone();
 				view!{
-					<label for="weather_latitude"><Translate key="module_weather_latitude"/></label><input type="text" name="weather_latitude" prop:value={configLatitude.get().latitude} on:input:target=move |ev| {
+				<div class="module_weather_config">
+					<label for="weather_latitude"><Translate key="MODULE_WEATHER_POSITION"/></label><br/>
+					<input type="text" name="weather_latitude" prop:value={configLatitude.get().latitude} on:input:target=move |ev| {
 						configLatitude.update(|inner|inner.latitude = ev.target().value().parse::<f64>().unwrap_or(0.0));
 						cacheTitle.update(|cache| cache.update());
-					} />
-					<label for="weather_longitude"><Translate key="module_weather_longitude"/></label><input type="text" name="weather_longitude" prop:value={configLongitude.get().longitude}  on:input:target=move |ev| {
+					} />/
+					<input type="text" prop:value={configLongitude.get().longitude}  on:input:target=move |ev| {
 						configLongitude.update(|inner|inner.longitude = ev.target().value().parse::<f64>().unwrap_or(0.0));
 						cacheLink.update(|cache| cache.update());
 					}/><br/>
-					<button on:click={locateFn}><Translate key="module_weather_locate"/></button>
-					<label for="weather_maxday"><Translate key="module_weather_maxday"/></label><input type="number" min="1" max="7" name="weather_maxday" prop:value={configMaxDay.get().maxday}  on:input:target=move |ev| {
+					<button on:click={locateFn}><Translate key="MODULE_WEATHER_LOCATE"/></button><br/>
+					<label for="weather_maxday"><Translate key="MODULE_WEATHER_MAXDAY"/></label><input type="number" min="1" max="7" name="weather_maxday" prop:value={configMaxDay.get().maxday}  on:input:target=move |ev| {
 						configMaxDay.update(|inner|inner.maxday = ev.target().value().parse::<u8>().unwrap_or(3));
 						cacheMax.update(|cache| cache.update());
-					}/><br/>
+					}/>
+				</div>
 				}.into_any()
 			}
 			else
@@ -179,7 +178,8 @@ impl Backable for Weather
 									<img src={format!("weather/{}.png",days.codeIntoImg())} alt={days.codeIntoImg()} /><br/>
 									<Translate key={days.codeIntoTranslate()}/><br/>
 									<span style={Self::celsiusToColor(days.temp_min)}>{days.temp_min}{units.clone().temp}</span>{" - "}<span style={Self::celsiusToColor(days.temp_max)}>{days.temp_max}{units.clone().temp}</span><br/>
-									<i class="iconoir-wind"/>{" "}{days.wind}{units.clone().wind}{" - "}<i class="iconoir-heavy-rain"/>{" "}{days.precipitation}{units.clone().precipitation}
+									<i class="iconoir-wind"/>{" "}{days.wind}{units.clone().wind}<br/>
+									<i class="iconoir-heavy-rain"/>{" "}{days.precipitation}{units.clone().precipitation}
 								</div>
 							}
 						}).collect_view()
@@ -235,6 +235,15 @@ impl Backable for Weather
 			_update: ArcRwSignal::new(Cache::newFrom(from.timestamp)),
 			_sended: ArcRwSignal::new(Cache::newFrom(from.timestamp)),
 		})
+	}
+
+	fn size(&self) -> ModuleSizeContrainte {
+		ModuleSizeContrainte{
+			x_min: Some(150),
+			x_max: None,
+			y_min: Some(175),
+			y_max: None,
+		}
 	}
 }
 
@@ -314,67 +323,41 @@ async fn sync_weather_api(config: ArcRwSignal<WeatherConfig>,weatherContent: Arc
 		}
 	}
 
+	let options = Intl::DateTimeFormat::new(&Array::new(), &Object::new()).resolved_options();
+	let mut timezone = "".to_string();
+	if let Ok(reflect) = Reflect::get(&options, &JsValue::from("timeZone"))
+	{
+		if let Some(timezoneRaw) = reflect.as_string()
+		{
+			timezone = format!("&timezone={}",timezoneRaw);
+		}
+	}
+
 	let config = config.get_untracked();
 	let url = format!(
-		"https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=temperature_2m_min,temperature_2m_max,precipitation_probability_max,wind_speed_10m_max,weather_code&timezone=auto&forecast_days={}&wind_speed_unit=ms&format=json&timeformat=unixtime",
-		config.latitude, config.longitude, config.maxday
+		"https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=temperature_2m_min,temperature_2m_max,precipitation_probability_max,wind_speed_10m_max,weather_code{}&forecast_days={}&wind_speed_unit=ms&format=json&timeformat=unixtime",
+		config.latitude, config.longitude, timezone, config.maxday
 	);
 
-	/* result =
+	let text = if(true)
 	{
-		"latitude":43.62,
-		"longitude":3.8799996,
-		"generationtime_ms":0.12803077697753906,
-		"utc_offset_seconds":3600,
-		"timezone":"Europe/Paris",
-		"timezone_abbreviation":"GMT+1",
-		"elevation":58.0,
-		"daily_units":{
-			"time":"unixtime",
-			"temperature_2m_min":"°C",
-			"temperature_2m_max":"°C",
-			"precipitation_probability_max":"%",
-			"wind_speed_10m_max":"m/s"
-		},
-		"daily":{
-			"time":[
-				1764975600,
-				1765062000,
-				1765148400
-			],
-			"temperature_2m_min":[
-				3.6,
-				8.5,
-				6.8
-			],
-			"temperature_2m_max":[
-				12.2,
-				17.5,
-				16.3
-			],
-			"precipitation_probability_max":[
-				38,
-				5,
-				1
-			],
-			"wind_speed_10m_max":[
-				2.12,
-				2.01,
-				1.89
-			]
-		}
-	}*/
+		// debug
+		"{\"latitude\":42.98,\"longitude\":3.12,\"generationtime_ms\":0.26226043701171875,\"utc_offset_seconds\":3600,\"timezone\":\"Europe/Paris\",\"timezone_abbreviation\":\"GMT+1\",\"elevation\":81.0,\"daily_units\":{\"time\":\"unixtime\",\"temperature_2m_min\":\"°C\",\"temperature_2m_max\":\"°C\",\"precipitation_probability_max\":\"%\",\"wind_speed_10m_max\":\"m/s\",\"weather_code\":\"wmo code\"},\"daily\":{\"time\":[1764975600,1765062000,1765148400,1765234800,1765321200,1765407600,1765494000],\"temperature_2m_min\":[3.7,8.4,7.0,10.7,10.6,6.4,6.1],\"temperature_2m_max\":[11.4,17.4,16.5,14.3,14.4,17.3,12.3],\"precipitation_probability_max\":[38,5,0,58,51,14,42],\"wind_speed_10m_max\":[2.10,2.27,2.36,3.98,2.84,1.87,3.36],\"weather_code\":[80,45,45,80,80,45,3]}}".to_string()
+	}
+	else
+	{
+		let Ok(window) = web_sys::window().ok_or("no window") else {return};
+		let Ok(resp_value) = JsFuture::from(window.fetch_with_str(&url)).await else {return};
+		let Ok(resp): Result<Response,_> = resp_value.dyn_into() else {return};
 
-	/*let Ok(window) = web_sys::window().ok_or("no window") else {return};
-	let Ok(resp_value) = JsFuture::from(window.fetch_with_str(&url)).await else {return};
-	let Ok(resp): Result<Response,_> = resp_value.dyn_into() else {return};
-
-	// On récupère le body en texte (JSON)
-	let Ok(text_promise) = resp.text().map_err(|_| "text() failed") else {return};
-	let Ok(text_js) = JsFuture::from(text_promise).await else {return};
-	let Ok(text) = text_js
-		.as_string()
-		.ok_or("response text is not a string") else {return};*/
+		// On récupère le body en texte (JSON)
+		let Ok(text_promise) = resp.text().map_err(|_| "text() failed") else {return};
+		let Ok(text_js) = JsFuture::from(text_promise).await else {return};
+		let Ok(text) = text_js
+			.as_string()
+			.ok_or("response text is not a string") else {return};
+		text
+	};
 
 	let mut weatherResult = WeatherApiResult{
 		unit: tempUnit {
@@ -386,13 +369,9 @@ async fn sync_weather_api(config: ArcRwSignal<WeatherConfig>,weatherContent: Arc
 		lastUpdate: Default::default(),
 	};
 
-	// debug
-	let text = "{\"latitude\":43.62,\"longitude\":3.8799996,\"generationtime_ms\":0.13124942779541016,\"utc_offset_seconds\":3600,\"timezone\":\"Europe/Paris\",\"timezone_abbreviation\":\"GMT+1\",\"elevation\":58.0,\"daily_units\":{\"time\":\"unixtime\",\"temperature_2m_min\":\"°C\",\"temperature_2m_max\":\"°C\",\"precipitation_probability_max\":\"%\",\"wind_speed_10m_max\":\"m/s\",\"weather_code\":\"wmo code\"},\"daily\":{\"time\":[1764975600,1765062000,1765148400],\"temperature_2m_min\":[3.6,8.5,7.2],\"temperature_2m_max\":[11.6,16.8,16.5],\"precipitation_probability_max\":[38,5,0],\"wind_speed_10m_max\":[1.71,1.80,2.58],\"weather_code\":[80,45,45]}}".to_string();
-
 	let mut data = text.into_bytes();
 	match simd_json::to_borrowed_value(&mut data) {
 		Ok(Value::Object(obj)) => {
-			HWebTrace!("parsed");
 			for (key, value) in obj.into_iter() {
 				match key.as_ref() {
 					"daily_units" => {
@@ -431,7 +410,7 @@ fn json_read_daily(result: &mut WeatherApiResult, json: &Value)
 			"time" => {
 				if let Value::Array(value) = value {
 					times = value.iter()
-						.map(|v| {v.as_u64().unwrap_or(0)})
+						.map(|v| {v.as_u64().unwrap_or(0)+(12*3600)})
 						.collect::<Vec<u64>>();
 				}
 			}

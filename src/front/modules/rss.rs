@@ -1,4 +1,4 @@
-use leptos::prelude::OnTargetAttribute;
+use leptos::prelude::{OnTargetAttribute, StyleAttribute};
 use leptos::prelude::{ClassAttribute, CollectView, ElementChild, PropAttribute};
 use feed_rs::model::{Feed, Link, Text};
 use feed_rs::parser;
@@ -7,8 +7,8 @@ use leptos::view;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen_futures::{spawn_local};
 use crate::api::modules::components::ModuleContent;
-use crate::api::proxys::wget::{proxys_return, API_proxys_wget};
-use crate::front::modules::components::{distant_time, Backable, Cache, Cacheable, DISTANT_TIME_RESULT};
+use crate::api::proxys::wget::{API_proxys_wget};
+use crate::front::modules::components::{distant_time, Backable, Cache, Cacheable, ModuleSizeContrainte, DISTANT_TIME_RESULT};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::translate::Translate;
 
@@ -69,11 +69,11 @@ impl Rss
 		// 1. fetch(...)
 		let Ok(window) = web_sys::window().ok_or("no window") else {return};
 		let oldTime = rssContent.get_untracked().map(|content| content.0);
-		let Ok(returnData) = API_proxys_wget(url.to_string(),oldTime).await else {return};
-		if(returnData==proxys_return::BLANKURL) {
-			return;
-		}
-		let proxys_return::UPDATED(time,text) = returnData else {return};
+		let result = API_proxys_wget(url.to_string(),oldTime).await;
+		let Ok((time,text)) = result else {
+			let error = result.unwrap_err();
+			return
+		};
 		let Ok(feed) = parser::parse(text.as_bytes()) else {return};
 
 		rssContent.update(|rssContent| {
@@ -164,19 +164,19 @@ impl Backable for Rss
 				let cacheLink = self._update.clone();
 				let cacheMax = self._update.clone();
 				view!{
-					<label for="rss_title"><Translate key="module_rss_title"/></label><input type="text" name="rss_title" prop:value={rssDataTitle.get().title} on:input:target=move |ev| {
+					<label for="rss_title"><Translate key="MODULE_RSS_TITLE"/><input type="text" style="display:block;width:100%" name="rss_title" prop:value={rssDataTitle.get().title} on:input:target=move |ev| {
 						rssDataTitle.update(|inner|inner.title = ev.target().value());
 						cacheTitle.update(|cache| cache.update());
-					} />
-					<label for="rss_link"><Translate key="module_rss_link"/></label><input type="text" name="rss_link" prop:value={rssDataLink.get().link}  on:input:target=move |ev| {
+					} /></label>
+					<label for="rss_link"><Translate key="MODULE_RSS_LINK"/><input type="text" style="display:block;width:100%" name="rss_link" prop:value={rssDataLink.get().link}  on:input:target=move |ev| {
 						rssDataLink.update(|inner|inner.link = ev.target().value());
 						cacheLink.update(|cache| cache.update());
-					}/><br/>
-					<label for="rss_maxline"><Translate key="module_rss_maxline"/></label><input type="number" min="1" max="50" name="rss_maxline" prop:value={rssDataMax.get().maxline}  on:input:target=move |ev| {
+					}/></label><br/>
+					<label for="rss_maxline"><Translate key="MODULE_RSS_MAXLINE"/><input type="number" min="1" max="50" name="rss_maxline" prop:value={rssDataMax.get().maxline}  on:input:target=move |ev| {
 						rssDataMax.update(|inner|inner.maxline = ev.target().value().parse::<u8>().unwrap_or(10));
 						cacheMax.update(|cache| cache.update());
-					}/><br/>
-					<Translate key="module_rss_demo"/><br/>
+					}/></label><br/>
+					<Translate key="MODULE_RSS_DEMO"/><br/>
 					<table class="module_rss_table"><tr>
 						<td>{"0d"}</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse nulla nisi, faucibus ut eros non, porttitor posuere ante. Nunc faucibus sagittis sodales. Ut consectetur erat urna, id posuere nibh accumsan at. Praesent tincidunt eget lorem in elementum. Suspendisse varius neque sed magna efficitur, vitae varius arcu volutpat.</td>
 					</tr></table>
@@ -262,5 +262,9 @@ impl Backable for Rss
 			_update: ArcRwSignal::new(Cache::newFrom(from.timestamp)),
 			_sended: ArcRwSignal::new(Cache::newFrom(from.timestamp)),
 		})
+	}
+
+	fn size(&self) -> ModuleSizeContrainte {
+		ModuleSizeContrainte::default()
 	}
 }

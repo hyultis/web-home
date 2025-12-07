@@ -1,5 +1,4 @@
-use std::error::Error;
-use std::{fs};
+use std::{fs, io};
 use std::fs::File;
 use std::path::Path;
 use std::time::SystemTime;
@@ -13,7 +12,7 @@ pub struct ProxyCache
 
 impl ProxyCache
 {
-	pub fn get(cachetype: impl ToString) -> Result<Self, Box<dyn Error>>
+	pub fn get(cachetype: impl ToString) -> Result<Self, io::Error>
 	{
 		let cachetype = cachetype.to_string();
 

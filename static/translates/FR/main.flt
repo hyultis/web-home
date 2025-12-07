@@ -49,6 +49,12 @@ DISTANT_TIME_RESULT_DAY = j
 DISTANT_TIME_RESULT_MON = m
 DISTANT_TIME_RESULT_YEAR = a
 
+#module rss
+MODULE_RSS_TITLE = Titre:
+MODULE_RSS_LINK = Lien RSS:
+MODULE_RSS_MAXLINE = Nombre de lignes:
+MODULE_RSS_DEMO = Exemple:
+
 #module weather
 MODULE_WEATHER_SUN = Soleil
 MODULE_WEATHER_CLOUDY = Nuageux
@@ -59,3 +65,13 @@ MODULE_WEATHER_FOOG = Brouillard
 MODULE_WEATHER_LIGH_SNOW = Neige légère
 MODULE_WEATHER_SNOWY = Neige
 MODULE_WEATHER_STORM = Orages
+MODULE_WEATHER_POSITION = Position:
+MODULE_WEATHER_LOCATE = Localiser
+MODULE_WEATHER_MAXDAY = Jours max:
+
+#module mail
+MODULE_MAIL_HOST = Host/port:
+MODULE_MAIL_USERNAME = Login:
+MODULE_MAIL_PASSWORD = Password:
+MODULE_MAIL_GETBOXS = Obtenir les boites / vérification connection
+MODULE_MAIL_BOXS_LIST = Listes des boites (clic pour blacklisté)

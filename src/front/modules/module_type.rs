@@ -1,7 +1,7 @@
 use leptos::prelude::{AnyView, ArcRwSignal, RwSignal};
 use strum_macros::EnumDiscriminants;
 use crate::api::modules::components::ModuleContent;
-use crate::front::modules::components::{Backable, Cache, Cacheable};
+use crate::front::modules::components::{Backable, Cache, Cacheable, ModuleSizeContrainte};
 use crate::front::modules::{moduleContent};
 use crate::front::modules::todo::Todo;
 use strum_macros::EnumIter;
@@ -94,6 +94,10 @@ impl Backable for ModuleType {
 			},
 			&_ => panic!("ModuleType::newFromModuleContent : unknown module type {}", from.typeModule)
 		}
+	}
+
+	fn size(&self) -> ModuleSizeContrainte {
+		self.intoBackable().size()
 	}
 }
 

@@ -1,67 +1,35 @@
-use leptos::prelude::ServerFnError;
+use leptos::prelude::{FromServerFnError, ServerFnErrorErr};
 use leptos::server;
+use leptos::server_fn::codec::JsonEncoding;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize,Deserialize)]
-#[derive(PartialEq)]
+#[derive(Serialize,Deserialize,PartialEq,Debug,Clone)]
 pub enum proxys_return {
 	NOT_MODIFIED,
-	BLANKURL,
-	UPDATED(u64,String)
+	BLANK_URL,
+	SERVER_ERROR,
+}
+
+impl FromServerFnError for proxys_return {
+	type Encoder = JsonEncoding;
+
+	fn from_server_fn_error(value: ServerFnErrorErr) -> Self {
+		proxys_return::SERVER_ERROR
+	}
 }
 
 /// # API_proxys_wget
 ///
-/// Asynchronous server function responsible for fetching and caching content from a given URL.
+/// Asynchronous server function is responsible for fetching and caching content from a given URL.
 /// This function checks the cache for the URL's content and determines whether it needs to fetch
 /// new content or return a "not modified" response based on the `lastUpdate` timestamp provided.
 /// It makes use of an internal caching mechanism and fetches data via an HTTP client when required.
 ///
-/// ## Arguments
-///
-/// - `url` (`String`): The URL from which to fetch data.
-/// - `lastUpdate` (`Option<u64>`): The optional Unix timestamp representing the last known update
-///   of the content. If provided, it is used to determine whether cached content is still valid.
-///
-/// ## Returns
-///
-/// Returns a `Result`:
-/// - On success, returns a `proxys_return` variant:
-///   - `proxys_return::UPDATED(u64, String)`: Contains the updated UNIX timestamp and the fetched content.
-///   - `proxys_return::NOT_MODIFIED`: Indicates that the content has not been modified since the `lastUpdate`.
-/// - On failure, returns a `ServerFnError` indicating what caused the issue.
-///
-/// ## Flow
-/// 1. The function calculates a hashed version of the URL for identification in the cache.
-/// 2. Attempts to retrieve the last update timestamp of the URL's content from the cache.
-///    - If a valid timestamp exists and is within the allowed timeframe compared to `lastUpdate`,
-///      returns `proxys_return::NOT_MODIFIED`.
-/// 3. Fetches the URL content using an HTTP client if necessary:
-///    - If the server responds with HTTP status `304` (Not Modified), updates the cache timestamp,
-///      and attempts to serve cached content if available.
-///    - If the server responds with HTTP status `200` (OK), saves the new content in the cache,
-///      updates the cache timestamp, and serves the fetched content.
-///    - For all other response statuses, errors out.
-/// 4. Errors out with a `ServerFnError` on unexpected scenarios, including server errors.
-///
-/// ## Errors
-/// - Returns `ServerFnError` in the following cases:
-///   - Cache initialization failure.
-///   - Failed content fetch from the server.
-///   - Invalid or missing server response.
-///   - Encountering a server-side error.
-///
 /// ## Caching Behavior
 /// - Uses `ProxyCache` to manage cached content for the specific URL under the "wget" namespace.
 /// - The cache is checked and updated with the latest content timestamp or new content when applicable.
-///
-/// ## Notes
-/// - The cache expiry tolerance is defined as 5 minutes (60 * 5 seconds) since the last update.
-///
-/// ## Panics
-/// - Panics if the system's time moves backwards, as detected during duration calculations.
 #[server]
-pub async fn API_proxys_wget(url: String, lastUpdate: Option<u64>) -> Result<proxys_return, ServerFnError>
+pub async fn API_proxys_wget(url: String, lastUpdate: Option<u64>) -> Result<(u64,String), proxys_return>
 {
 	use reqwest::Client;
 	use crate::api::proxys::proxy_cache::ProxyCache;
@@ -70,17 +38,17 @@ pub async fn API_proxys_wget(url: String, lastUpdate: Option<u64>) -> Result<pro
 
 	if(url.is_empty())
 	{
-		return Ok(proxys_return::BLANKURL);
+		return Err(proxys_return::BLANK_URL);
 	}
 
 	let urlHash = hash(url.clone());
-	let cache = ProxyCache::get("wget").map_err(|err| ServerFnError::new(format!("{:?}",err)))?;
+	let cache = ProxyCache::get("wget")?;
 	if let Some(cacheTime) = cache.content_lastUpdate(&urlHash)
 	{
 		if let Some(clientTime) = lastUpdate
 		{
 			if clientTime <= cacheTime + 60 * 5 {
-				return Ok(proxys_return::NOT_MODIFIED);
+				return Err(proxys_return::NOT_MODIFIED);
 			}
 		}
 	}
@@ -96,31 +64,39 @@ pub async fn API_proxys_wget(url: String, lastUpdate: Option<u64>) -> Result<pro
 				if let Some(content) = cache.load(&urlHash)
 				{
 					let duration = SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("[API_proxys_wget] Time went backwards ?!");
-					return Ok(proxys_return::UPDATED(duration.as_secs(), content));
+					return Ok((duration.as_secs(), content));
 				}
 			}
-			return Ok(proxys_return::NOT_MODIFIED);
+			return Err(proxys_return::NOT_MODIFIED);
 		}
 		200 => {
 			if let Some(content) = response.content
 			{
 				cache.save(&urlHash, content.clone());
 				let duration = SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("[API_proxys_wget] Time went backwards ?!");
-				return Ok(proxys_return::UPDATED(duration.as_secs(), content));
+				return Ok((duration.as_secs(), content));
 			}
 		}
 		_ => {}
 	}
 
-	return Err(ServerFnError::new("SERVER_ERROR"));
+	return Err(proxys_return::SERVER_ERROR);
 }
 
 #[cfg(feature = "ssr")]
 mod inner
 {
+	use Htrace::HTrace;
 	use reqwest::header::{ETAG, IF_NONE_MATCH, IF_MODIFIED_SINCE, LAST_MODIFIED};
-	use reqwest::Client;
-	use leptos::prelude::ServerFnError;
+	use reqwest::{Client, Error};
+	use crate::api::proxys::wget::proxys_return;
+
+	impl From<std::io::Error> for proxys_return {
+		fn from(value: std::io::Error) -> Self {
+			HTrace!("[io::error] Error : {}",value.to_string());
+			proxys_return::SERVER_ERROR
+		}
+	}
 
 	pub struct CachedFetchResult {
 		pub status: u16,
@@ -133,7 +109,7 @@ mod inner
 		url: &str,
 		previous_etag: Option<&str>,
 		previous_last_modified: Option<&str>,
-	) -> Result<CachedFetchResult, ServerFnError> {
+	) -> Result<CachedFetchResult, Error> {
 		let client = Client::new();
 
 		let mut request = client.get(url);
@@ -180,5 +156,12 @@ mod inner
 			etag,
 			last_modified,
 		})
+	}
+
+	impl From<Error> for proxys_return {
+		fn from(value: Error) -> Self {
+			HTrace!("[reqwest] Error : {}",value.to_string());
+			return proxys_return::SERVER_ERROR;
+		}
 	}
 }

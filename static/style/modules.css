@@ -164,18 +164,53 @@
 	display: inline-flex;
 	flex-direction: row;
 	flex-wrap: nowrap;
-	justify-content: center;
-	align-items: flex-start;
-	align-content: center;
+	overflow-x: scroll;
+	height: 100%;
+	padding-bottom: 10px;
+}
+
+.modules input{
+	display: inline;
+	padding-top: 0px;
+	padding-bottom: 0px;
+	width: 45%;
 }
 
 .module_weather .day {
+	flex-shrink: 0;
 	text-align: center;
 	font-size: 0.8em;
 	line-height: 1.1em;
 	padding: 0.2em;
+	width: 90px;
+	background-color: var(--backgroundcolor);
+	border: 1px solid var(--maincolor);
+	border-radius: 0 0 8px 8px;
+	margin-right: 0.5em;
 }
 
 .module_weather .day img {
 	width: 4em;
+}
+
+.module_mail_config {
+	overflow-y: scroll;
+}
+
+.module_mail_config .boxmail {
+	display: inline-block;
+	background-color: var(--backgroundcolor);
+	padding: 0.5em;
+	margin: 0.2em;
+}
+
+.module_mail_config .boxmail:hover {
+	cursor: pointer;
+	background-color: var(--backgroundcolorlighter);
+	padding: 0.5em;
+}
+
+.module_mail_config .disabled, .module_mail_config .disabled:hover {
+	text-decoration: line-through;
+	background-color: var(--buttonbackgrounddanger);
 }

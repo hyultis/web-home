@@ -3,7 +3,7 @@ use std::sync::Arc;
 use leptoaster::{expect_toaster, ToastLevel};
 use leptos::prelude::{BindAttribute, GetUntracked, Write};
 use leptos::prelude::{use_context, ArcRwSignal, Callback, ClassAttribute, Effect, Get, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update};
-use crate::front::modules::components::{Backable, Cache, Cacheable};
+use crate::front::modules::components::{Backable, Cache, Cacheable, ModuleSizeContrainte};
 use leptos::prelude::{AnyView, CollectView, ElementChild, IntoAny, Read, RwSignal};
 use leptos::{view, IntoView};
 use leptos::ev::MouseEvent;
@@ -370,5 +370,9 @@ impl Backable for LinksHolder
 
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> {
 		Some(Self::new())
+	}
+
+	fn size(&self) -> ModuleSizeContrainte {
+		ModuleSizeContrainte::default()
 	}
 }

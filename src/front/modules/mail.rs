@@ -1,14 +1,16 @@
-use leptos::prelude::{CollectView, OnTargetAttribute, StyleAttribute};
+use leptos::prelude::{CollectView, OnTargetAttribute};
 use leptos::prelude::{ClassAttribute, ElementChild, GetUntracked, PropAttribute, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, Get, IntoAny, OnAttribute, RwSignal};
 use leptos::view;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen_futures::spawn_local;
 use crate::api::modules::components::ModuleContent;
-use crate::api::proxys::imap::{imap_connector, imap_connector_extra, API_proxys_imap_listbox};
+use crate::api::proxys::imap::{API_proxys_imap_getUnsee, API_proxys_imap_listbox};
+use crate::api::proxys::imap_components::{imap_connector, imap_connector_extra};
 use crate::front::modules::components::{Backable, Cache, Cacheable, ModuleSizeContrainte};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::translate::Translate;
+use crate::HWebTrace;
 
 #[derive(Serialize,Deserialize,Debug)]
 #[derive(Clone)]
@@ -157,37 +159,22 @@ impl Backable for Mail
 		let testFn = move |_| {
 			let refreshMail = refreshMail.clone();
 			spawn_local(async move {
-				API_proxys_imap_listbox(refreshMail.get_untracked().imap.clone()).await;
+				let _ = API_proxys_imap_getUnsee(refreshMail.get_untracked().imap.clone()).await;
 			});
 		};
 
+
 		view!{{
+			HWebTrace!("draw mail before {}",editMode.get());
 			if(editMode.get())
 			{
 				self.draw_config()
 			}
 			else
 			{
-				view!{<div class="module_mail">{" "
-					/*self.weatherContent.get().map(|haveContent| {
-						let units = haveContent.unit.clone();
-						haveContent.days.iter().map(|days| {
-							let date = UtcDateTime::from_unix_timestamp(days.timestampDay as i64).unwrap_or(UtcDateTime::now());
-							view!{
-								<div class="day">
-									{format!("{:0>2}",date.day())}/{format!("{:0>2}",date.month() as u8)}<br/>
-									<img src={format!("weather/{}.png",days.codeIntoImg())} alt={days.codeIntoImg()} /><br/>
-									<Translate key={days.codeIntoTranslate()}/><br/>
-									<span style={Self::celsiusToColor(days.temp_min)}>{days.temp_min}{units.clone().temp}</span>{" - "}<span style={Self::celsiusToColor(days.temp_max)}>{days.temp_max}{units.clone().temp}</span><br/>
-									<i class="iconoir-wind"/>{" "}{days.wind}{units.clone().wind}<br/>
-									<i class="iconoir-heavy-rain"/>{" "}{days.precipitation}{units.clone().precipitation}
-								</div>
-							}
-						}).collect_view()
-					})*/
-				
-				}
-				<button on:click={testFn}>MAIL</button>
+				HWebTrace!("draw mail");
+				view!{<div class="module_mail">
+					<button on:click={testFn}>MAIL</button>
 				</div>}.into_any()
 			}
 		}}.into_any()

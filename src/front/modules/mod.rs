@@ -135,11 +135,13 @@ impl ModuleHolder
 			}
 
 			if let Some(error) = Self::inner_retrieve(login.clone(), oneNewModuleName.clone(),&mut (), |_,moduleContent| {
+				HWebTrace!("module {} newFromModuleContent",oneNewModuleName);
 				let Some(moduleType) = ModuleType::newFromModuleContent(&moduleContent)
 				else
 				{
 					return;
 				};
+				HWebTrace!("module {} insert",oneNewModuleName);
 				self._blocks.insert(
 					oneNewModuleName,
 					ModulePositions::newFromModuleContent(moduleContent, moduleType),

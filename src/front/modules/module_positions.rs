@@ -127,8 +127,8 @@ impl<module: moduleContent> ModulePositions<module>
 		let cache = self._module.cache_getUpdate();
 		Effect::new(move |_| {
 			if !is_dragging.get() {return;}
-			let newPosX = position.get().x as i32;
-			let newPosY = position.get().y as i32;
+			let newPosX = position.get().x as i32 -8; // 8 is the half-width of the icon
+			let newPosY = position.get().y as i32 -8 -30; // -30 is the header bar height ... TODO : need to automatise that
 			cache.update(|data| data.update());
 			posMove.update(|size|{
 				size[0] = newPosX;
@@ -163,7 +163,7 @@ impl<module: moduleContent> ModulePositions<module>
 		let cache = self._module.cache_getUpdate();
 		Effect::new(move |_| {
 			if !is_dragging.get() {return;}
-			let mut newSizeX = position.get().x as i32 - posMove.clone().get()[0];
+			let mut newSizeX = position.get().x as i32 - posMove.clone().get()[0] + 8; // 8 is the half-width of the icon
 			if let Some(max) = size.x_max {
 				if(newSizeX > max as i32) {newSizeX = max as i32}
 			}
@@ -171,7 +171,7 @@ impl<module: moduleContent> ModulePositions<module>
 				if (newSizeX < min as i32) { newSizeX = min as i32 }
 			}
 
-			let mut newSizeY = position.get().y as i32 - posMove.clone().get()[1];
+			let mut newSizeY = position.get().y as i32 - posMove.clone().get()[1] + 8 - 30; // -30 is the header bar height ... TODO : need to automatise that
 			if let Some(max) = size.y_max {
 				if(newSizeY > max as i32) {newSizeY = max as i32}
 			}

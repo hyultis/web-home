@@ -43,6 +43,8 @@ Something I want to add in the future:
 - Password change (need client recrypt of all data)
 - Layout system
 - Design improvements
+- Background image
+- Theme Color configuration
 
 ## License
 

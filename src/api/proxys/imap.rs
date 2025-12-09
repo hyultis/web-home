@@ -1,78 +1,11 @@
 use leptos::server;
-use serde::{Deserialize, Serialize};
+use crate::api::proxys::imap_components::{imap_connector, ImapMail, BoxName};
 use crate::api::proxys::imap_error::ImapError;
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BoxName
-{
-	pub name: String,
-	pub attributes: Attributs,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct Attributs
-{
-	pub is_junk: bool,
-	pub is_trash: bool,
-	pub is_archive: bool,
-	pub is_sent: bool,
-	pub is_draft: bool,
-}
-
-impl Attributs
-{
-	#[cfg(feature = "ssr")]
-	pub fn add<'a>(&mut self, attribute: &'a imap_proto::NameAttribute<'a>)
-	{
-		match attribute {
-			imap_proto::NameAttribute::Archive => self.is_archive = true,
-			imap_proto::NameAttribute::Drafts => self.is_draft = true,
-			imap_proto::NameAttribute::Junk => self.is_junk = true,
-			imap_proto::NameAttribute::Sent => self.is_sent = true,
-			imap_proto::NameAttribute::Trash => self.is_trash = true,
-			_ => {}
-		}
-	}
-
-	pub fn is_uninteresting(&self) -> bool
-	{
-		self.is_junk || self.is_trash || self.is_sent || self.is_draft || self.is_archive
-	}
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct imap_connector
-{
-	pub host: String,
-	pub port: u16,
-	pub username: String,
-	pub password: String,
-	pub extra: Option<imap_connector_extra>,
-}
-
-impl Default for imap_connector
-{
-	fn default() -> Self {
-		Self {
-			host: "".to_string(),
-			port: 993,
-			username: "".to_string(),
-			password: "".to_string(),
-			extra: None,
-		}
-	}
-}
-
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
-pub struct imap_connector_extra
-{
-	pub boxBlackList: Vec<String>,
-}
 
 #[server]
 pub async fn API_proxys_imap_listbox(config: imap_connector) -> Result<Vec<BoxName>, ImapError>
 {
-	use inner::*;
+	use crate::api::proxys::imap_inner::*;
 
 
 	// the client we have here is unauthenticated.
@@ -84,68 +17,70 @@ pub async fn API_proxys_imap_listbox(config: imap_connector) -> Result<Vec<BoxNa
 }
 
 #[server]
-pub async fn API_proxys_imap_getUnsee(config: imap_connector) -> Result<(), ImapError>
+pub async fn API_proxys_imap_getUnsee(config: imap_connector) -> Result<Vec<ImapMail>, ImapError>
 {
 	use Htrace::HTrace;
-	use inner::*;
-	// the client we have here is unauthenticated.
-	// to do anything useful with the e-mails, we need to log in
+	use crate::api::proxys::imap_inner::*;
+	use mailparse::parse_mail;
+	use mailparse::MailHeaderMap;
+
 	let (mut imap_session,_) = connect_imap(config)?;
 	let results = listbox(&mut imap_session)?;
 
+	let mut listOfMail = vec![];
 	for boxName in results
 	{
-		let Ok(_) = imap_session.select(boxName.name) else {continue};
+		if(boxName.attributes.is_uninteresting()) {continue};
 
-	}
+		let Ok(mailbox) = imap_session.select(&boxName.name) else {continue};
+		HTrace!("on BOX : {}",boxName.name);
 
-	let results = imap_session.search("UNSEEN UNKEYWORD $Junk UNKEYWORD $Spam UNDELETED UNANSWERED UNDRAFT");
-	HTrace!("list of result : {}",results.unwrap_or_default().len());
-	let results = imap_session.search("UNSEEN");
-	HTrace!("list of result : {}",results.unwrap_or_default().len());
+		let Ok(results) = imap_session.uid_search("UNSEEN UNKEYWORD $Junk UNKEYWORD $Spam UNDELETED UNANSWERED UNDRAFT") else {continue};
+		HTrace!("number of result : {}",results.len());
 
-	return Ok(());
-}
-
-#[cfg(feature = "ssr")]
-mod inner {
-	use imap::{Connection, Session};
-	use imap::types::Mailbox;
-	pub use super::*;
-
-	pub fn connect_imap(config: imap_connector) -> Result<(Session<Connection>,Mailbox), ImapError>
-	{
-		let client = imap::ClientBuilder::new(config.host, config.port).connect()?; // /imap/ssl
-
-		let mut imap_session = client
-			.login(config.username, config.password)
-			.map_err(|e| e.0)?;
-
-		let mailbox = imap_session.select("INBOX")?;
-
-		return Ok((imap_session,mailbox));
-	}
-
-	pub fn listbox(imap_session: &mut Session<Connection>) -> Result<Vec<BoxName>, ImapError>
-	{
-
-		let mut returning = Vec::new();
-		let results = imap_session.list(None,Some("*"));
-		if let Ok(names) = results
+		for result in results.into_iter()
 		{
-			for result in names.iter()
-			{
-				let mut attributs = Attributs::default();
-				result.attributes().iter().for_each(|attribute| attributs.add(attribute));
+			//HTrace!("try to fetch : {}",result);
+			let Ok(message) = imap_session.uid_fetch(&result.to_string(), "(FLAGS INTERNALDATE BODY.PEEK[HEADER])") else {continue};
+			//HTrace!("number of submessage : {}",message.len());
 
-				let name = BoxName{
-					name: result.name().to_string(),
-					attributes: attributs,
-				};
-				returning.push(name);
+			let Some(message) = message.iter().next() else {continue};
+			let mut mailData = ImapMail{
+				uid: result,
+				subject: "<NO_TITLE>".to_string(),
+				..Default::default()
+			};
+			HTrace!("flags : {:?}",message.flags());
+			let Some(body) = message.header() else {continue};
+			let Ok(parsed) = parse_mail(body) else {continue};
+
+			if let Some(subject) = parsed.headers.get_first_value("Subject") {
+				mailData.subject = subject;
 			}
+
+			if let Some(from) = parsed.headers.get_first_value("From") {
+				mailData.from = from;
+			}
+
+			if let Some(to) = parsed.headers.get_first_value("To") {
+				mailData.to = to;
+			}
+
+			//HTrace!("body : {}",parsed.subparts.iter().next().unwrap().get_body().unwrap());
+
+			if let Some(date) = message.internal_date() {
+				mailData.date = date.timestamp();
+			}
+
+			listOfMail.push(mailData);
+
+			break;
 		}
 
-		return Ok(returning);
 	}
+
+	let _ = imap_session.logout();
+
+	return Ok(listOfMail);
 }
+

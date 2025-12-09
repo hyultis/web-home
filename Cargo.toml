@@ -46,6 +46,7 @@ reqwest = { version = "0.12.24", optional = true }
 simd-json = { version = "0.17.0"}
 imap = {  version = "3.0.0-alpha.15", optional = true }
 imap-proto = { version = "0.16.6", optional = true}
+mailparse = { version = "0.16.1", optional = true}
 
 [features]
 hydrate = [
@@ -69,6 +70,7 @@ ssr = [
     "dep:reqwest",
     "dep:imap",
     "dep:imap-proto",
+    "dep:mailparse",
 ]
 
 # Defines a size-optimized profile for the WASM bundle in release mode

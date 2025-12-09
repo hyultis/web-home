@@ -53,13 +53,8 @@ impl ModuleContent
 	#[cfg(feature = "ssr")]
 	pub fn update(&self, mut config: Hconfig::HConfig::HConfig) -> Result<(), ModuleErrors>
 	{
-		use Htrace::HTrace;
 		use std::collections::HashMap;
 		use Hconfig::tinyjson::JsonValue;
-
-		HTrace!("update module {}", self.name);
-		HTrace!("update module {}", self.timestamp);
-		HTrace!("update module {}", self.content);
 
 		let configPath = format!("modules/{}", self.name);
 

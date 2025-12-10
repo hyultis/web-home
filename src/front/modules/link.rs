@@ -208,7 +208,7 @@ impl LinksHolder
 				if(Url::parse(&url).is_err())
 				{
 					spawn_local(async move {
-						toastingErr(toaster.clone(), AllFrontUIEnum::INVALID_URL).await;
+						toastingErr(&toaster, AllFrontUIEnum::INVALID_URL).await;
 					});
 					return false;
 				}

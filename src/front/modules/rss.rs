@@ -1,15 +1,16 @@
-use leptos::prelude::{OnTargetAttribute, StyleAttribute};
-use leptos::prelude::{ClassAttribute, CollectView, ElementChild, PropAttribute};
+use leptos::prelude::{ClassAttribute, CollectView, ElementChild};
 use feed_rs::model::{Feed, Link, Text};
 use feed_rs::parser;
+use leptoaster::{expect_toaster, ToasterContext};
 use leptos::prelude::{AnyView, ArcRwSignal, Get, GetUntracked, IntoAny, RwSignal, Update};
 use leptos::view;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen_futures::{spawn_local};
 use crate::api::modules::components::ModuleContent;
 use crate::api::proxys::wget::{API_proxys_wget};
-use crate::front::modules::components::{distant_time, Backable, Cache, Cacheable, ModuleSizeContrainte, DISTANT_TIME_RESULT};
+use crate::front::modules::components::{distant_time_simpler, Backable, Cache, Cacheable, FieldHelper, ModuleSizeContrainte};
 use crate::front::modules::module_actions::ModuleActionFn;
+use crate::front::utils::toaster_helpers::toaster_api;
 use crate::front::utils::translate::Translate;
 
 #[derive(Serialize,Deserialize,Debug)]
@@ -62,18 +63,14 @@ impl Rss
 	}
 
 	// TODO : ajouter affichage d'erreur toaster
-	async fn sync(rssContent: ArcRwSignal<Option<(u64,Feed)>>, config: ArcRwSignal<RssConfig>)
+	async fn sync(toaster: &ToasterContext, rssContent: ArcRwSignal<Option<(u64,Feed)>>, config: ArcRwSignal<RssConfig>)
 	{
 
 		let url = config.get_untracked().link.clone();
 		// 1. fetch(...)
 		let Ok(window) = web_sys::window().ok_or("no window") else {return};
 		let oldTime = rssContent.get_untracked().map(|content| content.0);
-		let result = API_proxys_wget(url.to_string(),oldTime).await;
-		let Ok((time,text)) = result else {
-			let error = result.unwrap_err();
-			return
-		};
+		let Some((time,text)) = toaster_api(toaster,API_proxys_wget(url.to_string(),oldTime).await, None).await else {return};
 		let Ok(feed) = parser::parse(text.as_bytes()) else {return};
 
 		rssContent.update(|rssContent| {
@@ -81,12 +78,12 @@ impl Rss
 		})
 	}
 
-	fn refreshFn(&self)
+	fn refreshFn(&self,toaster: ToasterContext)
 	{
 		let config = self.config.clone();
 		let rssContent = self.rssContent.clone();
 		spawn_local( async move {
-			Self::sync(rssContent,config).await;
+			Self::sync(&toaster.clone(),rssContent,config).await;
 		});
 	}
 
@@ -152,30 +149,28 @@ impl Backable for Rss
 
 	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, currentName: String) -> AnyView
 	{
-		self.refreshFn();
+		let toaster = expect_toaster();
+		self.refreshFn(toaster.clone());
 
 		view! {{
 			if(editMode.get())
 			{
-				let rssDataTitle = self.config.clone();
-				let rssDataLink = self.config.clone();
-				let rssDataMax = self.config.clone();
-				let cacheTitle = self._update.clone();
-				let cacheLink = self._update.clone();
-				let cacheMax = self._update.clone();
+				let mut titleF = FieldHelper::new(&self.config,&self._update,"MODULE_RSS_TITLE",
+					|d| d.get().title,
+					|ev,inner| inner.title = ev.target().value());
+				titleF.setFullSize(true);
+				let mut linkF = FieldHelper::new(&self.config,&self._update,"MODULE_RSS_LINK",
+					|d| d.get().link,
+					|ev,inner| inner.link = ev.target().value());
+				linkF.setFullSize(true);
+				let maxLineF = FieldHelper::new(&self.config,&self._update,"MODULE_RSS_MAXLINE",
+					|d| d.get().maxline.to_string(),
+					|ev,inner| inner.maxline = ev.target().value().parse::<u8>().unwrap_or(10));
+				
 				view!{
-					<label for="rss_title"><Translate key="MODULE_RSS_TITLE"/><input type="text" style="display:block;width:100%" name="rss_title" prop:value={rssDataTitle.get().title} on:input:target=move |ev| {
-						rssDataTitle.update(|inner|inner.title = ev.target().value());
-						cacheTitle.update(|cache| cache.update());
-					} /></label>
-					<label for="rss_link"><Translate key="MODULE_RSS_LINK"/><input type="text" style="display:block;width:100%" name="rss_link" prop:value={rssDataLink.get().link}  on:input:target=move |ev| {
-						rssDataLink.update(|inner|inner.link = ev.target().value());
-						cacheLink.update(|cache| cache.update());
-					}/></label><br/>
-					<label for="rss_maxline"><Translate key="MODULE_RSS_MAXLINE"/><input type="number" min="1" max="50" name="rss_maxline" prop:value={rssDataMax.get().maxline}  on:input:target=move |ev| {
-						rssDataMax.update(|inner|inner.maxline = ev.target().value().parse::<u8>().unwrap_or(10));
-						cacheMax.update(|cache| cache.update());
-					}/></label><br/>
+					{titleF.draw()}
+					{linkF.draw()}
+					{maxLineF.draw()}
 					<Translate key="MODULE_RSS_DEMO"/><br/>
 					<table class="module_rss_table"><tr>
 						<td>{"0d"}</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse nulla nisi, faucibus ut eros non, porttitor posuere ante. Nunc faucibus sagittis sodales. Ut consectetur erat urna, id posuere nibh accumsan at. Praesent tincidunt eget lorem in elementum. Suspendisse varius neque sed magna efficitur, vitae varius arcu volutpat.</td>
@@ -199,10 +194,7 @@ impl Backable for Rss
 							.map(|(_,entry)|{
 								view!{
 									<tr>
-										<td>{match distant_time(entry.published.clone().unwrap().timestamp()){
-											DISTANT_TIME_RESULT::FUTUR(time,key) => {view!{{time}<Translate key={key}/>}}
-											DISTANT_TIME_RESULT::PAST(time,key) => {view!{{time}<Translate key={key}/>}}
-										}}</td>
+										<td>{distant_time_simpler(entry.published.clone().unwrap().timestamp())}</td>
 										<td><a href={entry.links.first().clone().unwrap().href.clone()} rel="noopener noreferrer nofollow" target="_blank">{entry.title.clone().unwrap().content}</a></td>
 									</tr>
 								}
@@ -224,7 +216,7 @@ impl Backable for Rss
 	}
 
 	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String) {
-		self.refreshFn();
+		self.refreshFn(expect_toaster());
 	}
 
 	fn export(&self) -> ModuleContent

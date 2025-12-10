@@ -1,4 +1,5 @@
 use std::time::Duration;
+use leptoaster::ToastLevel;
 
 pub mod translateBooks;
 pub mod Htrace;
@@ -16,3 +17,8 @@ pub const SESSION_SIGN_NBTRY: &str = "SESSION_SIGN_NBTRY";
 pub const SESSION_SIGN_NBTRY_LAST: &str = "SESSION_SIGN_NBTRY_LAST";
 pub const SESSION_SIGN_NBTRY_MAX: u8 = 1;
 pub const SESSION_SIGN_NBTRY_DELAY_RESET: Duration = Duration::from_secs(3600*24); // 1 day
+
+pub trait IsToastable: ToString {
+	// None if nothing is toasted, otherwise return the level of the toast
+	fn level(&self) -> Option<ToastLevel>;
+}

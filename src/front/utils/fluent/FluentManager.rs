@@ -88,9 +88,9 @@ impl FluentManager {
 	///
 	/// - `name`: A value that implements `Into<String>`. Represents the key or identifier for the
 	///   string to be translated.
-	pub fn getAsResource(name: impl Into<String>, params: Arc<HashMap<String,String>>) -> Resource<String>
+	pub fn getAsResource(name: impl Fn() -> String + Send + Sync + Clone + 'static, params: HashMap<String,String>) -> Resource<String>
 	{
-		let name = name.into();
+		let params = Arc::new(params);
 		return Resource::new(
 			move || {
 				let (userData, _) = UserData::cookie_signalGet();
@@ -105,14 +105,15 @@ impl FluentManager {
 				lang
 			},
 			move |lang| {
-				FluentManager::singleton().translate(lang, name.clone(), params.clone())
+				FluentManager::singleton().translate(lang, name.clone()(), params.clone())
 			}
 		);
 	}
 
 	pub fn getAsResourceParamsLess(name: impl Into<String>) -> Resource<String>
 	{
-		Self::getAsResource(name,Arc::new(HashMap::new()))
+		let name = name.into();
+		Self::getAsResource(move || name.clone(),HashMap::new())
 	}
 
 	//////// PRIVATE
@@ -126,7 +127,6 @@ impl FluentManager {
 	async fn addResource(&self, lang: &String, timestamp: u64)
 	{
 
-		println!("addResource seek book");
 		let (content,newtime) = match API_translate_getBook(lang.clone(), timestamp).await
 		{
 			Ok(data) => {

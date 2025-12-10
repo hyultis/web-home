@@ -6,7 +6,7 @@
 
 
 pub mod entry;
-mod front;
+pub mod front;
 mod api;
 pub mod global_security;
 

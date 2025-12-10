@@ -14,7 +14,6 @@ use crate::HWebTrace;
 #[island]
 pub fn Connection() -> impl IntoView {
 
-	let (userData, setUserData) = UserData::cookie_signalGet();
 	let login = signal("".to_string());
 	let pwd = signal("".to_string());
 

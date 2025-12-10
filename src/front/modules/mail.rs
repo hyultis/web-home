@@ -1,16 +1,18 @@
-use leptos::prelude::{CollectView, OnTargetAttribute};
-use leptos::prelude::{ClassAttribute, ElementChild, GetUntracked, PropAttribute, Update};
+use std::collections::HashMap;
+use leptoaster::expect_toaster;
+use leptos::prelude::{CollectView};
+use leptos::prelude::{ClassAttribute, ElementChild, GetUntracked, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, Get, IntoAny, OnAttribute, RwSignal};
 use leptos::view;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen_futures::spawn_local;
 use crate::api::modules::components::ModuleContent;
-use crate::api::proxys::imap::{API_proxys_imap_getUnsee, API_proxys_imap_listbox};
-use crate::api::proxys::imap_components::{imap_connector, imap_connector_extra};
-use crate::front::modules::components::{Backable, Cache, Cacheable, ModuleSizeContrainte};
+use crate::api::proxys::imap::{API_proxys_imap_getFullUnsee, API_proxys_imap_getUnseeSince, API_proxys_imap_listbox};
+use crate::api::proxys::imap_components::{imap_connector, imap_connector_extra, ImapMail};
+use crate::front::modules::components::{distant_time_simpler, Backable, Cache, Cacheable, FieldHelper, FieldHelperType, ModuleSizeContrainte};
 use crate::front::modules::module_actions::ModuleActionFn;
+use crate::front::utils::toaster_helpers::toaster_api;
 use crate::front::utils::translate::Translate;
-use crate::HWebTrace;
 
 #[derive(Serialize,Deserialize,Debug)]
 #[derive(Clone)]
@@ -32,7 +34,8 @@ impl Default for MailConfig
 struct MailsContent
 {
 	lastUpdate: u64,
-	mails: Vec<String>,
+	mails: HashMap<u64, ImapMail>,
+	mailsContent: HashMap<u64, String>,
 	boxs: Vec<String>,
 }
 
@@ -50,99 +53,93 @@ impl Mail
 {
 	pub fn draw_config(&self) -> AnyView
 	{
+		let toaster = expect_toaster();
 		let getBoxsMailConfig = self.config.clone();
 		let getBoxsMailContent = self.mailContent.clone();
 		let getBoxsFn = move |_| {
+			let toaster = toaster.clone();
 			let getBoxsMailConfig = getBoxsMailConfig.clone();
 			let getBoxsMailContent = getBoxsMailContent.clone();
 			spawn_local(async move {
-				match API_proxys_imap_listbox(getBoxsMailConfig.get_untracked().imap.clone()).await {
-					Ok(result) => {
-						getBoxsMailContent.update(|mailContent|{
-							mailContent.boxs = result.iter().map(|boxcontent| boxcontent.name.clone()).collect();
-						});
-					}
-					Err(_) => {}
-				};
+				if let Some(result) = toaster_api(&toaster,API_proxys_imap_listbox(getBoxsMailConfig.get_untracked().imap.clone()).await, None).await
+				{
+					getBoxsMailContent.update(|mailContent|{
+						mailContent.boxs = result.iter().map(|boxcontent| boxcontent.name.clone()).collect();
+					});
+				}
 			});
 		};
 
-		let configHost = self.config.clone();
-		let configPort = self.config.clone();
-		let configUsername = self.config.clone();
-		let configPassword = self.config.clone();
-		let cacheHost = self._update.clone();
-		let cachePort = self._update.clone();
-		let cacheUsername = self._update.clone();
-		let cachePassword = self._update.clone();
+
+		let hostF = FieldHelper::new(&self.config,&self._update,"MODULE_MAIL_HOST",
+		                                  |d| d.get().imap.host,
+		                                  |ev,inner| inner.imap.host = ev.target().value());
+		let mut portF = FieldHelper::new(&self.config,&self._update,"",
+		                              |d| d.get().imap.port.to_string(),
+		                              |ev,inner| inner.imap.port = ev.target().value().parse::<u16>().unwrap_or(993));
+		portF.setInputType(FieldHelperType::NUMBER(1,65535));
+		portF.setStyle("width:90px");
+		let usernameF = FieldHelper::new(&self.config,&self._update,"MODULE_MAIL_USERNAME",
+		                              |d| d.get().imap.username,
+		                              |ev,inner| inner.imap.username = ev.target().value());
+		let mut passwordF = FieldHelper::new(&self.config,&self._update,"MODULE_MAIL_PASSWORD",
+		                              |d| d.get().imap.password,
+		                              |ev,inner| inner.imap.password = ev.target().value());
+		passwordF.setInputType(FieldHelperType::PASSWORD);
 
 		view!{
-				<div class="module_mail_config">
-					<label for="mail_host"><Translate key="MODULE_MAIL_HOST"/></label><br/>
-					<input type="text" name="weather_latitude" prop:value={configHost.get().imap.host} on:input:target=move |ev| {
-						configHost.update(|inner|inner.imap.host = ev.target().value());
-						cacheHost.update(|cache| cache.update());
-					} />:
-					<input type="number" min="1" max="65535" prop:value={configPort.get().imap.port}  on:input:target=move |ev| {
-						configPort.update(|inner|inner.imap.port = ev.target().value().parse::<u16>().unwrap_or(993));
-						cachePort.update(|cache| cache.update());
-					}/><br/>
-					<label for="mail_username"><Translate key="MODULE_MAIL_USERNAME"/></label><input type="text" name="mail_username" prop:value={configUsername.get().imap.username}  on:input:target=move |ev| {
-						configUsername.update(|inner|inner.imap.username = ev.target().value());
-						cacheUsername.update(|cache| cache.update());
-					}/><br/>
-					<label for="mail_password"><Translate key="MODULE_MAIL_PASSWORD"/></label><input type="password" name="mail_password" prop:value={configPassword.get().imap.password}  on:input:target=move |ev| {
-						configPassword.update(|inner|inner.imap.password = ev.target().value());
-						cachePassword.update(|cache| cache.update());
-					}/><br/>
-					<button on:click={getBoxsFn}><Translate key="MODULE_MAIL_GETBOXS"/></button>
-					{
-						let boxConfig = self.config.clone();
-						let boxConfigCache = self._update.clone();
-						let switchBoxFn = move |boxName:String,isDisabled:bool| {
-							boxConfig.update(|mailContent|{
-								if(mailContent.imap.extra.is_none()) {mailContent.imap.extra = Some(imap_connector_extra::default())}
+			<div class="module_mail_config">
+				{hostF.draw()}:{portF.draw()}<br/>
+				{usernameF.draw()}<br/>
+				{passwordF.draw()}<br/>
+				<button on:click={getBoxsFn}><Translate key="MODULE_MAIL_GETBOXS"/></button>
+				{
+					let boxConfig = self.config.clone();
+					let boxConfigCache = self._update.clone();
+					let switchBoxFn = move |boxName:String,isDisabled:bool| {
+						boxConfig.update(|mailContent|{
+							if(mailContent.imap.extra.is_none()) {mailContent.imap.extra = Some(imap_connector_extra::default())}
 
-								if(isDisabled)
-								{
-									mailContent.imap.extra.as_mut().unwrap().boxBlackList.retain(|boxcontent| boxcontent != &boxName);
-								}
-								else
-								{
-									mailContent.imap.extra.as_mut().unwrap().boxBlackList.push(boxName.clone());
-								}
+							if(isDisabled)
+							{
+								mailContent.imap.extra.as_mut().unwrap().boxBlackList.retain(|boxcontent| boxcontent != &boxName);
+							}
+							else
+							{
+								mailContent.imap.extra.as_mut().unwrap().boxBlackList.push(boxName.clone());
+							}
 
-								boxConfigCache.update(|cache|{
-									cache.update();
-								});
+							boxConfigCache.update(|cache|{
+								cache.update();
 							});
-						};
+						});
+					};
 
-						let mailContent = self.mailContent.clone().get();
-						let configBoxContent = self.config.clone().get();
-						if(!mailContent.boxs.is_empty())
-						{
-							view!{
-								<hr/>
-								<Translate key="MODULE_MAIL_BOXS_LIST"/><br/>
-								{mailContent.boxs.iter().map(|boxcontent| {
-									let switchBoxFn = switchBoxFn.clone();
-									let mut isDisabled = false;
-									if let Some(s) = &configBoxContent.imap.extra
-									{
-										if(s.boxBlackList.contains(boxcontent)){
-											isDisabled = true;
-										}
+					let mailContent = self.mailContent.clone().get();
+					let configBoxContent = self.config.clone().get();
+					if(!mailContent.boxs.is_empty())
+					{
+						view!{
+							<hr/>
+							<Translate key="MODULE_MAIL_BOXS_LIST"/><br/>
+							{mailContent.boxs.iter().map(|boxcontent| {
+								let switchBoxFn = switchBoxFn.clone();
+								let mut isDisabled = false;
+								if let Some(s) = &configBoxContent.imap.extra
+								{
+									if(s.boxBlackList.contains(boxcontent)){
+										isDisabled = true;
 									}
-									let boxcontent = boxcontent.clone();
-									view!{<span class={if isDisabled {"disabled boxmail"} else {"boxmail"}} on:click={move |_|switchBoxFn(boxcontent.clone(),isDisabled)}>{boxcontent.clone()}</span>}
-								}).collect_view()}
-							}.into_any()
-						}
-						else {view!{}.into_any()}
+								}
+								let boxcontent = boxcontent.clone();
+								view!{<span class={if isDisabled {"disabled boxmail"} else {"boxmail"}} on:click={move |_|switchBoxFn(boxcontent.clone(),isDisabled)}>{boxcontent.clone()}</span>}
+							}).collect_view()}
+						}.into_any()
 					}
-				</div>
-				}.into_any()
+					else {view!{}.into_any()}
+				}
+			</div>
+			}.into_any()
 	}
 }
 
@@ -155,26 +152,63 @@ impl Backable for Mail
 
 	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, currentName: String) -> AnyView {
 
+		let toaster = expect_toaster();
 		let refreshMail = self.config.clone();
+		let refreshMailContent = self.mailContent.clone();
 		let testFn = move |_| {
 			let refreshMail = refreshMail.clone();
+			let refreshMailContent = refreshMailContent.clone();
 			spawn_local(async move {
-				let _ = API_proxys_imap_getUnsee(refreshMail.get_untracked().imap.clone()).await;
+				if let Ok(mail) = API_proxys_imap_getFullUnsee(refreshMail.get_untracked().imap.clone()).await
+				{
+					refreshMailContent.update(|mailcontent|{
+						for x in mail {
+							mailcontent.mails.insert(x.uid as u64, x);
+						}
+					});
+				}
+			});
+		};
+
+		let refreshMail = self.config.clone();
+		let testSinceFn = move |_| {
+			let refreshMail = refreshMail.clone();
+			spawn_local(async move {
+				let _ = API_proxys_imap_getUnseeSince(refreshMail.get_untracked().imap.clone(),1765303313).await;
 			});
 		};
 
 
 		view!{{
-			HWebTrace!("draw mail before {}",editMode.get());
 			if(editMode.get())
 			{
 				self.draw_config()
 			}
 			else
 			{
-				HWebTrace!("draw mail");
+				let config = self.config.clone();
+				let mailContent = self.mailContent.clone();
 				view!{<div class="module_mail">
 					<button on:click={testFn}>MAIL</button>
+					<button on:click={testSinceFn}>MAIL SINCE</button>
+					<div class="module_rss_upper">
+						<table class="module_rss_table">{
+							let mails = mailContent.get().mails.clone();
+							let mut mailsContent = mails.values().cloned().collect::<Vec<_>>();
+							mailsContent.sort_by(|a,b| a.date.cmp(&b.date).reverse());
+							mailsContent.iter().enumerate()
+								//.filter(|(num,_)| *num <= 10)
+								.map(|(_,mail)|{
+									view!{
+										<tr>
+											<td>{distant_time_simpler(mail.date)}</td>
+											<td>{mail.subject.clone()}</td>
+										</tr>
+									}
+								}).collect_view()
+							}
+						</table>
+					</div>
 				</div>}.into_any()
 			}
 		}}.into_any()

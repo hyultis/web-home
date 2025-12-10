@@ -58,6 +58,7 @@ pub fn Home() -> impl IntoView
 
 	let editModeAddModuleFn = editMode_AddBlock(moduleContent.clone(), dialog.clone());
 
+	let (userData, setUserData) = UserData::cookie_signalGet();
 	let toasterInnerDisconnect = toaster.clone();
 	let disconnectFn = move |_| {
 		let navigate = hooks::use_navigate();
@@ -69,15 +70,11 @@ pub fn Home() -> impl IntoView
 				let navigate = navigate.clone();
 				let toaster = toaster.clone();
 				spawn_local(async move {
-					let (userData, setUserData) = UserData::cookie_signalGet();
-					let mut userData = userData
-						.read()
-						.clone()
-						.unwrap_or(UserData::new(&"EN".to_string()));
+					let Some(mut userData) = userData.get() else {return};
 					userData.login_disconnect().await;
-					toastingSuccess(toaster, AllFrontLoginEnum::LOGIN_USER_DISCONNECTED).await;
+					toastingSuccess(&toaster, AllFrontLoginEnum::LOGIN_USER_DISCONNECTED).await;
 					HWebTrace!("user disconnected");
-					setUserData.set(Some(userData));
+					setUserData.set(None);
 					navigate("/", Default::default());
 				});
 				return true;
@@ -108,7 +105,7 @@ pub fn Home() -> impl IntoView
 			let error = (*holder).editMode_cancel(login, true).await;
 			if let Some(err) = error
 			{
-				toastingErr(toasterInnerInitialLoad, err.to_string()).await;
+				toastingErr(&toasterInnerInitialLoad, err.to_string()).await;
 			}
 		});
 	});
@@ -206,11 +203,11 @@ fn editMode_cancel(
 
 					if let Some(err) = error
 					{
-						toastingErr(toasterInnerValidate, err).await;
+						toastingErr(&toasterInnerValidate, err).await;
 					}
 					else
 					{
-						toastingSuccess(toasterInnerValidate, AllFrontUIEnum::VALID).await;
+						toastingSuccess(&toasterInnerValidate, AllFrontUIEnum::VALID).await;
 					}
 				});
 				return true;
@@ -263,11 +260,11 @@ fn editMode_validate(
 
 					if let Some(err) = error
 					{
-						toastingErr(toasterInnerValidate, err.to_string()).await;
+						toastingErr(&toasterInnerValidate, err.to_string()).await;
 					}
 					else
 					{
-						toastingSuccess(toasterInnerValidate, AllFrontUIEnum::UPDATE).await;
+						toastingSuccess(&toasterInnerValidate, AllFrontUIEnum::UPDATE).await;
 					}
 				});
 				return true;

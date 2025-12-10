@@ -12,10 +12,13 @@ use translateManager::TranslateManager;
 #[server]
 pub async fn API_translate_getBook(lang: String, oldtime: u64) -> Result<Option<(String,u64)>, ServerFnError>
 {
+	use Htrace::HTrace;
+	use Htrace::components::level::Level;
+
 	return TranslateManager::getBookContent(lang,oldtime)
 		.map(|content|content)
 		.map_err(|err| {
-			//Htrace!((Type::Error) "tranlation err: {}",err);
+			HTrace!((Level::ERROR) "translation err: {}",err);
 			ServerFnError::Response(err.to_string())
 		});
 }

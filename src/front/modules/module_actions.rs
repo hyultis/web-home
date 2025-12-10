@@ -53,11 +53,11 @@ impl ModuleActionFn
 
 				if let Some(err) = error
 				{
-					toastingErr(toasterInnerValidate, err).await;
+					toastingErr(&toasterInnerValidate, err).await;
 				}
 				else
 				{
-					toastingSuccess(toasterInnerValidate, AllFrontUIEnum::UPDATE).await;
+					toastingSuccess(&toasterInnerValidate, AllFrontUIEnum::UPDATE).await;
 				}
 			});
 		};
@@ -89,11 +89,11 @@ impl ModuleActionFn
 
 				if let Some(err) = error
 				{
-					toastingErr(toasterInnerValidate, err).await;
+					toastingErr(&toasterInnerValidate, err).await;
 				}
 				else
 				{
-					toastingSuccess(toasterInnerValidate, AllFrontUIEnum::UPDATE).await;
+					toastingSuccess(&toasterInnerValidate, AllFrontUIEnum::UPDATE).await;
 				}
 			});
 		};

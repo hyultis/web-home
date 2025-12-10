@@ -44,11 +44,11 @@ pub fn App() -> impl IntoView {
 
 	let dialog_manager = DialogManager::new();
 	provide_context(dialog_manager.clone());
+	let (userData, setUserData) = UserData::cookie_signalGet();
 
 	Effect::new(move |_| {
 		// set default userData
-		let (userData, setUserData) = UserData::cookie_signalGet();
-		if (userData.read().is_none())
+		if (userData.read_untracked().is_none())
 		{
 			let locales = use_locales();
 			setUserData.set(Some(UserData::new(locales.get().first().unwrap_or(&"EN".to_string()))));
@@ -57,8 +57,7 @@ pub fn App() -> impl IntoView {
 		// if user is connected, he directly go to is home page
 		let navigate = hooks::use_navigate();
 		spawn_local(async move {
-			let (userData, setUserData) = UserData::cookie_signalGet();
-			if let Some(dfd) = &*userData.read()
+			if let Some(dfd) = &*userData.read_untracked()
 			{
 				if(dfd.login_isConnected()) {
 					navigate("/home", Default::default());
@@ -66,19 +65,6 @@ pub fn App() -> impl IntoView {
 			}
 		});
 	});
-
-	// <nav class="mainmenu">
-	// 	<ul>
-	// 	<li></li>
-	// 	<li><span class="clickable"><A href="/"><Translate key="menu_home"/></A></span></li>
-	// 	<li><span class="unclickable"><TranslateCurrentLang/></span>
-	// 	<ul>
-	// 	<li on:click=move |_| userData.write().lang_set("EN")><span class="clickable"><Translate key="swap_to_EN"/></span></li>
-	// 	<li on:click=move |_| userData.write().lang_set("FR")><span class="clickable"><Translate key="swap_to_FR"/></span></li>
-	// 	</ul>
-	// 	</li>
-	// 	</ul>
-	// 	</nav>
 
 	view! {
 		// injects a stylesheet into the document <head>

@@ -76,6 +76,7 @@ pub struct ImapMail
 	pub uid: u32,
 	pub from: String,
 	pub to: String,
-	pub subject: String,
+	pub subject: Option<String>,
 	pub date: i64,
+	pub boxName: String,
 }

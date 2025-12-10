@@ -1,8 +1,14 @@
-use leptos::prelude::{AnyView, ArcRwSignal, RwSignal};
+use leptos::ev::Targeted;
+use leptos::prelude::OnTargetAttribute;
+use leptos::prelude::{ElementChild, Update};
+use leptos::prelude::{AnyView, ArcRwSignal, IntoAny, PropAttribute, RwSignal, StyleAttribute};
+use leptos::view;
 use time::UtcDateTime;
 use serde::{Deserialize, Serialize};
+use web_sys::{Event, HtmlInputElement};
 use crate::api::modules::components::ModuleContent;
 use crate::front::modules::module_actions::ModuleActionFn;
+use crate::front::utils::translate::Translate;
 
 #[derive(Clone, Debug, Serialize,Deserialize)]
 pub struct Cache
@@ -143,4 +149,131 @@ pub fn distant_time(timestamp: i64) -> DISTANT_TIME_RESULT
 		true => DISTANT_TIME_RESULT::PAST(distance as u64,format!("DISTANT_TIME_RESULT_{}",key)),
 		false => DISTANT_TIME_RESULT::FUTUR(distance as u64,format!("DISTANT_TIME_RESULT_{}",key)),
 	};
+}
+
+pub fn distant_time_simpler(timestamp: i64) -> AnyView
+{
+	match distant_time(timestamp){
+		DISTANT_TIME_RESULT::FUTUR(time,key) => {view!{{time}<Translate key={key}/>}}
+		DISTANT_TIME_RESULT::PAST(time,key) => {view!{{time}<Translate key={key}/>}}
+	}.into_any()
+}
+
+pub enum FieldHelperType
+{
+	TEXT,
+	PASSWORD,
+	NUMBER(i64,i64),
+}
+
+pub struct FieldHelper<A,B, T>
+where A: Fn(ArcRwSignal<T>) -> String + Clone + Send,
+      B: Fn(Targeted<Event,HtmlInputElement>,&mut T) + Clone,
+{
+	field: ArcRwSignal<T>,
+	update: ArcRwSignal<Cache>,
+	TranslateKey: String,
+	getField: A,
+	updateField: B,
+	style: String,
+	inputType: FieldHelperType
+}
+
+impl<A,B,T> FieldHelper<A,B,T>
+where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
+      B: Fn(Targeted<Event,HtmlInputElement>,&mut T) + Clone + 'static,
+      T: Send + Sync + 'static
+{
+	pub fn new(field: &ArcRwSignal<T>,update: &ArcRwSignal<Cache>,TranslateKey: impl ToString,getField: A,updateField: B) -> Self
+	{
+		Self {
+			field: field.clone(),
+			update: update.clone(),
+			TranslateKey: TranslateKey.to_string(),
+			getField,
+			updateField,
+			style: "".to_string(),
+			inputType: FieldHelperType::TEXT,
+		}
+	}
+
+	pub fn setInputType(&mut self,inputType: FieldHelperType)
+	{
+		self.inputType = inputType;
+	}
+
+	pub fn setFullSize(&mut self,isFullSize: bool)
+	{
+		self.style = "display:block;width:100%".to_string();
+	}
+	
+	pub fn setStyle(&mut self,style: impl ToString)
+	{
+		self.style = style.to_string();
+	}
+
+	pub fn draw(&self) -> AnyView
+	{
+		if(self.TranslateKey.is_empty())
+		{
+			return self.drawInput();
+		}
+
+		let TranslateKey = self.TranslateKey.clone();
+		view!{
+			<label for={TranslateKey.clone()}>
+				<Translate key={TranslateKey.clone()}/>
+				{self.drawInput()}
+			</label>
+		}.into_any()
+	}
+
+	pub fn drawInput(&self) -> AnyView
+	{
+		let data = self.field.clone();
+		let getField = self.getField.clone();
+		let getFn = move || getField(data.clone());
+
+		let data = self.field.clone();
+		let cache = self.update.clone();
+		let updateField = self.updateField.clone();
+		let updateFn = move |ev| {
+			data.update(|mut inner| updateField(ev, &mut inner));
+			cache.update(|cache| cache.update());
+		};
+
+		let TranslateKey = self.TranslateKey.clone();
+
+		let style = self.style.clone();
+
+		match self.inputType {
+			FieldHelperType::TEXT => {
+				view!{
+						<input type="text"
+							style={style}
+							name={TranslateKey.clone()}
+							prop:value={getFn}
+							on:input:target={updateFn} />
+				}.into_any()
+			}
+			FieldHelperType::PASSWORD => {
+				view!{
+						<input type="password"
+							style={style}
+							name={TranslateKey.clone()}
+							prop:value={getFn}
+							on:input:target={updateFn} />
+				}.into_any()
+			}
+			FieldHelperType::NUMBER(min, max) => {
+				view!{
+						<input type="number" min={min} max={max}
+							style={style}
+							name={TranslateKey.clone()}
+							prop:value={getFn}
+							on:input:target={updateFn} />
+				}.into_any()
+			}
+		}
+	}
 }

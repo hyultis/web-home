@@ -1,9 +1,12 @@
+use leptoaster::{ToastLevel};
 use leptos::prelude::{FromServerFnError, ServerFnErrorErr};
 use leptos::server;
 use leptos::server_fn::codec::JsonEncoding;
 use serde::{Deserialize, Serialize};
+use crate::api::IsToastable;
 
-#[derive(Serialize,Deserialize,PartialEq,Debug,Clone)]
+#[derive(Serialize,Deserialize,PartialEq,Debug,Clone,strum_macros::Display)]
+#[strum(prefix = "WGET_ERROR_")]
 pub enum proxys_return {
 	NOT_MODIFIED,
 	BLANK_URL,
@@ -15,6 +18,16 @@ impl FromServerFnError for proxys_return {
 
 	fn from_server_fn_error(value: ServerFnErrorErr) -> Self {
 		proxys_return::SERVER_ERROR
+	}
+}
+
+impl IsToastable for proxys_return {
+	fn level(&self) -> Option<ToastLevel> {
+		match self {
+			proxys_return::NOT_MODIFIED => None,
+			proxys_return::BLANK_URL => Some(ToastLevel::Info),
+			proxys_return::SERVER_ERROR => Some(ToastLevel::Error)
+		}
 	}
 }
 

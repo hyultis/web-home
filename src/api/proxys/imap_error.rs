@@ -1,13 +1,17 @@
 #[cfg(feature = "ssr")]
 use imap::Error;
+use leptoaster::ToastLevel;
 use leptos::prelude::{FromServerFnError, ServerFnErrorErr};
 use leptos::server_fn::codec::JsonEncoding;
 use serde::{Deserialize, Serialize};
+use crate::api::IsToastable;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize,strum_macros::Display)]
+#[strum(prefix = "IMAP_ERROR_")]
 pub enum ImapError {
 	IMAP_SERVER_CONNECTION,
 	IMAP_SERVER_CONNECTION_TLS,
+	INVALID_DATE,
 	SERVER_ERROR,
 }
 
@@ -16,6 +20,17 @@ impl FromServerFnError for ImapError {
 
 	fn from_server_fn_error(value: ServerFnErrorErr) -> Self {
 		ImapError::SERVER_ERROR
+	}
+}
+
+impl IsToastable for ImapError {
+	fn level(&self) -> Option<ToastLevel> {
+		match self {
+			ImapError::IMAP_SERVER_CONNECTION => Some(ToastLevel::Error),
+			ImapError::IMAP_SERVER_CONNECTION_TLS => Some(ToastLevel::Error),
+			ImapError::INVALID_DATE => Some(ToastLevel::Error),
+			ImapError::SERVER_ERROR => Some(ToastLevel::Error)
+		}
 	}
 }
 

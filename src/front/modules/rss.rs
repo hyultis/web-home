@@ -1,14 +1,13 @@
 use leptos::prelude::{ClassAttribute, CollectView, ElementChild};
 use feed_rs::model::{Feed, Link, Text};
 use feed_rs::parser;
-use leptoaster::{expect_toaster, ToasterContext};
+use leptoaster::{ToasterContext};
 use leptos::prelude::{AnyView, ArcRwSignal, Get, GetUntracked, IntoAny, RwSignal, Update};
 use leptos::view;
 use serde::{Deserialize, Serialize};
-use wasm_bindgen_futures::{spawn_local};
 use crate::api::modules::components::ModuleContent;
 use crate::api::proxys::wget::{API_proxys_wget};
-use crate::front::modules::components::{distant_time_simpler, Backable, Cache, Cacheable, FieldHelper, ModuleSizeContrainte};
+use crate::front::modules::components::{distant_time_simpler, Backable, BoxFuture, Cache, Cacheable, FieldHelper, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::toaster_helpers::toaster_api;
 use crate::front::utils::translate::Translate;
@@ -62,29 +61,17 @@ impl Rss
 		}
 	}
 
-	// TODO : ajouter affichage d'erreur toaster
-	async fn sync(toaster: &ToasterContext, rssContent: ArcRwSignal<Option<(u64,Feed)>>, config: ArcRwSignal<RssConfig>)
+	async fn sync(toaster: ToasterContext, rssContent: ArcRwSignal<Option<(u64,Feed)>>, config: ArcRwSignal<RssConfig>)
 	{
-
 		let url = config.get_untracked().link.clone();
-		// 1. fetch(...)
 		let Ok(window) = web_sys::window().ok_or("no window") else {return};
 		let oldTime = rssContent.get_untracked().map(|content| content.0);
-		let Some((time,text)) = toaster_api(toaster,API_proxys_wget(url.to_string(),oldTime).await, None).await else {return};
+		let Some((time,text)) = toaster_api(&toaster,API_proxys_wget(url.to_string(),oldTime).await, None).await else {return};
 		let Ok(feed) = parser::parse(text.as_bytes()) else {return};
 
 		rssContent.update(|rssContent| {
 			*rssContent = Some((time,feed));
 		})
-	}
-
-	fn refreshFn(&self,toaster: ToasterContext)
-	{
-		let config = self.config.clone();
-		let rssContent = self.rssContent.clone();
-		spawn_local( async move {
-			Self::sync(&toaster.clone(),rssContent,config).await;
-		});
 	}
 
 	fn utils_title(title: String, entryTitle: Option<Text>) -> String
@@ -149,9 +136,6 @@ impl Backable for Rss
 
 	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, currentName: String) -> AnyView
 	{
-		let toaster = expect_toaster();
-		self.refreshFn(toaster.clone());
-
 		view! {{
 			if(editMode.get())
 			{
@@ -211,12 +195,17 @@ impl Backable for Rss
 		}}.into_any()
 	}
 
-	fn refresh_time(&self) -> u64 {
-		return 1000*60*5;
+	fn refresh_time(&self) -> RefreshTime {
+		return RefreshTime::MINUTES(10);
 	}
 
-	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String) {
-		self.refreshFn(expect_toaster());
+	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String, toaster: ToasterContext) -> Option<BoxFuture> {
+		let config = self.config.clone();
+		let rssContent = self.rssContent.clone();
+		let tmp = Self::sync(toaster,rssContent,config);
+		return Some(Box::pin(async move {
+			tmp.await;
+		}));
 	}
 
 	fn export(&self) -> ModuleContent

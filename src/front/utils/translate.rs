@@ -7,7 +7,6 @@ use leptos::suspense::Transition;
 use leptos::prelude::ElementChild;
 use crate::front::utils::fluent::FluentManager::FluentManager;
 use crate::front::utils::users_data::UserData;
-use crate::HWebTrace;
 
 #[component]
 pub fn TranslateCurrentLang() -> impl IntoView {

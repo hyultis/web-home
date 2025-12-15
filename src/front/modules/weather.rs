@@ -1,4 +1,5 @@
 use js_sys::{Array, Intl, Object, Reflect};
+use leptoaster::ToasterContext;
 use leptos::prelude::{ClassAttribute, CollectView, Effect, ElementChild, Get, GetUntracked, OnAttribute, PropAttribute, StyleAttribute, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, IntoAny, RwSignal};
 use leptos::view;
@@ -6,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use simd_json::borrowed::Value;
 use simd_json::prelude::ValueAsScalar;
 use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen_futures::{spawn_local, JsFuture};
+use wasm_bindgen_futures::{JsFuture};
 use web_sys::{window, Position, PositionError, Response};
 use crate::api::modules::components::ModuleContent;
-use crate::front::modules::components::{Backable, Cache, Cacheable, ModuleSizeContrainte};
+use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::translate::Translate;
 use crate::HWebTrace;
@@ -94,21 +95,6 @@ impl Backable for Weather
 	}
 
 	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, currentName: String) -> AnyView {
-		let config = self.config.clone();
-		let refreshContent = self.weatherContent.clone();
-		Effect::new(move ||{
-			let config = config.clone();
-			let refreshContent = refreshContent.clone();
-			spawn_local(async move {
-				sync_weather_api(config,refreshContent).await;
-			});
-		});
-		/*let UseGeolocationReturn {
-			coords,
-			error,
-			..
-		} = use_geolocation();*/
-
 		view!{{
 			if(editMode.get())
 			{
@@ -189,16 +175,17 @@ impl Backable for Weather
 		}}.into_any()
 	}
 
-	fn refresh_time(&self) -> u64 {
-		1000*60*60
+	fn refresh_time(&self) -> RefreshTime {
+		RefreshTime::HOURS(1)
 	}
 
-	fn refresh(&self, moduleActions: ModuleActionFn, currentName: String) {
+	fn refresh(&self, moduleActions: ModuleActionFn, currentName: String, toaster: ToasterContext) -> Option<BoxFuture> {
 		let config = self.config.clone();
 		let refreshContent = self.weatherContent.clone();
-		spawn_local(async move {
+
+		return Some(Box::pin(async move {
 			sync_weather_api(config,refreshContent).await;
-		});
+		}));
 	}
 
 	fn export(&self) -> ModuleContent {
@@ -317,7 +304,7 @@ async fn sync_weather_api(config: ArcRwSignal<WeatherConfig>,weatherContent: Arc
 {
 	if let Some(lastContent) = (weatherContent.clone().get_untracked())
 	{
-		if(lastContent.lastUpdate.get()	- Cache::now() < 1000*60*5)
+		if(Cache::now() - lastContent.lastUpdate.get() < 30*1_000_000_000)
 		{
 			return;
 		}
@@ -339,7 +326,7 @@ async fn sync_weather_api(config: ArcRwSignal<WeatherConfig>,weatherContent: Arc
 		config.latitude, config.longitude, timezone, config.maxday
 	);
 
-	let text = if(true)
+	let text = if(false)
 	{
 		// debug
 		"{\"latitude\":42.98,\"longitude\":3.12,\"generationtime_ms\":0.26226043701171875,\"utc_offset_seconds\":3600,\"timezone\":\"Europe/Paris\",\"timezone_abbreviation\":\"GMT+1\",\"elevation\":81.0,\"daily_units\":{\"time\":\"unixtime\",\"temperature_2m_min\":\"°C\",\"temperature_2m_max\":\"°C\",\"precipitation_probability_max\":\"%\",\"wind_speed_10m_max\":\"m/s\",\"weather_code\":\"wmo code\"},\"daily\":{\"time\":[1764975600,1765062000,1765148400,1765234800,1765321200,1765407600,1765494000],\"temperature_2m_min\":[3.7,8.4,7.0,10.7,10.6,6.4,6.1],\"temperature_2m_max\":[11.4,17.4,16.5,14.3,14.4,17.3,12.3],\"precipitation_probability_max\":[38,5,0,58,51,14,42],\"wind_speed_10m_max\":[2.10,2.27,2.36,3.98,2.84,1.87,3.36],\"weather_code\":[80,45,45,80,80,45,3]}}".to_string()
@@ -353,9 +340,7 @@ async fn sync_weather_api(config: ArcRwSignal<WeatherConfig>,weatherContent: Arc
 		// On récupère le body en texte (JSON)
 		let Ok(text_promise) = resp.text().map_err(|_| "text() failed") else {return};
 		let Ok(text_js) = JsFuture::from(text_promise).await else {return};
-		let Ok(text) = text_js
-			.as_string()
-			.ok_or("response text is not a string") else {return};
+		let Some(text) = text_js.as_string() else {return};
 		text
 	};
 

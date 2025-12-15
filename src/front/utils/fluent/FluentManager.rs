@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock};
+use async_lock::{RwLock, RwLockWriteGuard};
 use fluent::bundle::FluentBundle;
 use fluent::{FluentArgs, FluentResource};
 use intl_memoizer::concurrent::IntlLangMemoizer;
@@ -12,7 +13,7 @@ use crate::HWebTrace;
 struct BookHolder
 {
 	content: FluentBundle<FluentResource, IntlLangMemoizer>,
-	timstamp: u64
+	timestamp: u64
 }
 
 pub struct FluentManager {
@@ -43,14 +44,17 @@ impl FluentManager {
 	{
 		let lang = lang.into();
 		let key = key.into();
-		if(!self._resources.read().unwrap().contains_key(&lang))
+		let mut lock = self._resources.write().await;
+		if(!lock.contains_key(&lang))
 		{
 			// TODO add a get into timestamp
-			self.addResource(&lang,0).await;
+			if let Some(apiResult) = Self::addResource(&lang,0).await
+			{
+				self.addLocalResource(&lang, &mut lock,apiResult);
+			}
 		}
-
-		let bindingMap = self._resources.read().unwrap();
-		let Some(bundle) = bindingMap.get(&lang) else {
+		let lock = RwLockWriteGuard::downgrade(lock);
+		let Some(bundle) = lock.get(&lang) else {
 			HWebTrace!("missing book {}",lang);
 			return key;
 		};
@@ -124,36 +128,38 @@ impl FluentManager {
 		}
 	}
 
-	async fn addResource(&self, lang: &String, timestamp: u64)
+	async fn addResource(lang: &String, timestamp: u64) -> Option<(String,u64)>
 	{
-
-		let (content,newtime) = match API_translate_getBook(lang.clone(), timestamp).await
+		log!("addResource {}",lang);
+		return match API_translate_getBook(lang.clone(), timestamp).await
 		{
 			Ok(data) => {
 				match data {
-					None => return,
-					Some(data) => data,
+					None => None,
+					Some(data) => Some(data),
 				}
 			}
 			Err(err) => {
 				log!("err when return API_translate_getBook {}",err);
-				return;
+				return None;
 			}
 		};
+	}
 
+	fn addLocalResource(&self, lang: impl AsRef<str> + ToString, lock: &mut RwLockWriteGuard<HashMap<String, BookHolder>>,(content,timestamp): (String,u64))
+	{
 		let Ok(flt_res) = FluentResource::try_new(content) else {
 			log!("Failed to parse an FTL string.");
 			return;
 		};
 
-		let mut bindingMap = self._resources.write().unwrap();
-		match bindingMap.get_mut(lang)
+		match lock.get_mut(lang.as_ref())
 		{
 			Some(bundle) => {
 				bundle.content.add_resource_overriding(flt_res);
 			},
 			None => {
-				let Ok(langid) = lang.parse() else {
+				let Ok(langid) = lang.to_string().parse() else {
 					log!("failed to parse lang ID");
 					return;
 				};
@@ -161,9 +167,9 @@ impl FluentManager {
 
 				bundle.add_resource_overriding(flt_res);
 
-				bindingMap.insert(lang.clone(), BookHolder {
+				lock.insert(lang.to_string(), BookHolder {
 					content: bundle,
-					timstamp: newtime,
+					timestamp,
 				});
 			}
 		}

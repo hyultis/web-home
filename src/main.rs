@@ -141,9 +141,13 @@ mod helper {
 		let method = request.method().to_string();
 		let uri = request.uri().to_string();
 
+
 		let response = next.run(request).await;
 
-		HTrace!("Request {} on {} : {}", method, uri, response.status());
+		if(!(uri.contains("API_translate_getBook") || uri.contains("API_Htrace_log")))
+		{
+			HTrace!("Request {} on {} : {}", method, uri, response.status());
+		}
 
 		response
 	}

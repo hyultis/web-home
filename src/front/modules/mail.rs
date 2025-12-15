@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use leptoaster::expect_toaster;
+use leptoaster::{expect_toaster, ToasterContext};
 use leptos::prelude::{CollectView};
 use leptos::prelude::{ClassAttribute, ElementChild, GetUntracked, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, Get, IntoAny, OnAttribute, RwSignal};
@@ -9,7 +9,7 @@ use wasm_bindgen_futures::spawn_local;
 use crate::api::modules::components::ModuleContent;
 use crate::api::proxys::imap::{API_proxys_imap_getFullUnsee, API_proxys_imap_getUnseeSince, API_proxys_imap_listbox};
 use crate::api::proxys::imap_components::{imap_connector, imap_connector_extra, ImapMail};
-use crate::front::modules::components::{distant_time_simpler, Backable, Cache, Cacheable, FieldHelper, FieldHelperType, ModuleSizeContrainte};
+use crate::front::modules::components::{distant_time_simpler, Backable, BoxFuture, Cache, Cacheable, FieldHelper, FieldHelperType, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::toaster_helpers::toaster_api;
 use crate::front::utils::translate::Translate;
@@ -214,12 +214,12 @@ impl Backable for Mail
 		}}.into_any()
 	}
 
-	fn refresh_time(&self) -> u64 {
-		1000*60*60
+	fn refresh_time(&self) -> RefreshTime {
+		RefreshTime::HOURS(1)
 	}
 
-	fn refresh(&self, moduleActions: ModuleActionFn, currentName: String) {
-
+	fn refresh(&self, moduleActions: ModuleActionFn, currentName: String, toaster: ToasterContext) -> Option<BoxFuture> {
+		None
 	}
 
 

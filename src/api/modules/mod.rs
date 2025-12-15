@@ -1,5 +1,6 @@
-use leptos::prelude::ServerFnError;
+use leptos::prelude::{FromServerFnError, ServerFnError, ServerFnErrorErr};
 use leptos::server;
+use leptos::server_fn::codec::JsonEncoding;
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::{ModuleContent};
 
@@ -63,4 +64,32 @@ pub async fn API_module_retrieveMissingModule(generatedId: String, #[server(defa
 	};
 
 	return Ok(missing_module);
+}
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum ModuleReturnRemove
+{
+	NOTFOUND,
+	SERVER_ERROR
+}
+
+impl FromServerFnError for ModuleReturnRemove {
+	type Encoder = JsonEncoding;
+
+	fn from_server_fn_error(value: ServerFnErrorErr) -> Self {
+		ModuleReturnRemove::SERVER_ERROR
+	}
+}
+
+#[server]
+pub async fn API_module_remove(generatedId: String, moduleName: String) -> Result<(), ModuleReturnRemove>
+{
+	use crate::api::login::user_back::UserBackHelper;
+	let config = UserBackHelper::getUserConfig(generatedId,false).map_err(|err| ModuleReturnRemove::SERVER_ERROR)?;
+
+	return match ModuleContent::remove(config, moduleName) {
+		true => Ok(()),
+		false => Err(ModuleReturnRemove::NOTFOUND)
+	};
 }

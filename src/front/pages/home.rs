@@ -33,6 +33,12 @@ pub fn Home() -> impl IntoView
 	let dialog = use_context::<DialogManager>().expect("DialogManager missing");
 	let toaster = expect_toaster();
 
+	let moduleActions = ModuleActionFn::new(moduleContent.clone(),toaster.clone());
+	let innerModuleActions = moduleActions.clone();
+	moduleContent.update(|modules|{
+		modules.moduleActions_set(innerModuleActions);
+	});
+
 	let editModeValidateFn = editMode_validate(
 		moduleContent.clone(),
 		editMode.clone(),
@@ -107,12 +113,16 @@ pub fn Home() -> impl IntoView
 			{
 				toastingErr(&toasterInnerInitialLoad, err.to_string()).await;
 			}
+
+			let keys: Vec<String> = holder.blocks_get().keys().cloned().collect();
+			for key in keys {
+				holder.module_refresh(key,toasterInnerInitialLoad.clone()).await;
+			}
 		});
 	});
 
 	let moduleContentInnerView = moduleContent.clone();
 	let moduleContentInnerModuleView = moduleContent.clone();
-	let moduleActions = ModuleActionFn::new(moduleContent.clone(),toaster.clone());
 	let moduleActionsInnerModuleView = moduleActions.clone();
 	view! {
 		<div class="home_body">

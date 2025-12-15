@@ -1,7 +1,7 @@
 [package]
 name = "web-home"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -24,7 +24,7 @@ Htrace = {  version = "2.0", optional = true }
 dashmap = {version = "6.1.0", features = ["rayon"]}
 serde = { version = "1.0", features = ["derive"] }
 http = "1"
-leptos-use = { version = "0.16.3", features = ["use_locales","use_cookie","storage","use_draggable","use_mouse_in_element","use_geolocation"] }
+leptos-use = { version = "0.16.3", features = ["use_locales","use_cookie","storage","use_draggable","use_mouse_in_element","use_interval_fn"] }
 fluent = { version = "0.17.0" }
 intl-memoizer = "0.5.2"
 anyhow = "1.0.95"
@@ -47,6 +47,7 @@ simd-json = { version = "0.17.0"}
 imap = {  version = "3.0.0-alpha.15", optional = true }
 imap-proto = { version = "0.16.6", optional = true}
 mailparse = { version = "0.16.1", optional = true}
+async-lock = "3.0.0"
 
 [features]
 hydrate = [

@@ -1,7 +1,8 @@
+use leptoaster::ToasterContext;
 use leptos::prelude::{AnyView, ArcRwSignal, RwSignal};
 use strum_macros::EnumDiscriminants;
 use crate::api::modules::components::ModuleContent;
-use crate::front::modules::components::{Backable, Cache, Cacheable, ModuleSizeContrainte};
+use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::{moduleContent};
 use crate::front::modules::todo::Todo;
 use strum_macros::EnumIter;
@@ -62,12 +63,12 @@ impl Backable for ModuleType {
 		return self.intoBackable().draw(editMode,moduleActions,currentName);
 	}
 
-	fn refresh_time(&self) -> u64 {
+	fn refresh_time(&self) -> RefreshTime {
 		return self.intoBackable().refresh_time();
 	}
 
-	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String) {
-		self.intoBackable().refresh(moduleActions,currentName);
+	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String, toaster: ToasterContext) -> Option<BoxFuture> {
+		return self.intoBackable().refresh(moduleActions,currentName,toaster);
 	}
 
 	fn export(&self) -> ModuleContent {

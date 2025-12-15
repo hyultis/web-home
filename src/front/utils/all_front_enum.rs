@@ -23,6 +23,7 @@ pub enum AllFrontUIEnum
 	INVALID_URL,
 	UPDATE,
 	REFRESH,
+	REMOVED,
 }
 
 #[derive(strum_macros::Display)]

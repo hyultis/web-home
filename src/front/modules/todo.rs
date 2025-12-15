@@ -1,3 +1,4 @@
+use leptoaster::ToasterContext;
 use leptos::prelude::{OnTargetAttribute, Set};
 use leptos::ev::MouseEvent;
 use leptos::prelude::{ElementChild, GetUntracked, OnAttribute, PropAttribute, Update};
@@ -5,7 +6,7 @@ use leptos::prelude::{AnyView, ArcRwSignal, ClassAttribute, Get, IntoAny, RwSign
 use leptos::view;
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::ModuleContent;
-use crate::front::modules::components::{Backable, Cache, Cacheable, ModuleSizeContrainte};
+use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleSizeContrainte, RefreshTime};
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::translate::Translate;
 use leptos::callback::Callable;
@@ -30,7 +31,7 @@ impl Todo
 		}
 	}
 
-	pub fn updateFn(&self,moduleActions: ModuleActionFn,currentName:String) -> impl Fn(MouseEvent) + Clone
+	pub fn updateFn(&self,moduleActions: ModuleActionFn,currentName:String) -> impl Fn(MouseEvent) + Clone + 'static
 	{
 		return move |_| {
 			moduleActions.clone().updateFn.run((currentName.clone()));
@@ -64,6 +65,7 @@ impl Backable for Todo
 
 		let updateFn = self.updateFn(moduleActions,currentName);
 		let content = self.content.clone();
+		let contentd = self.content.clone();
 		let contentWrite = self.content.clone();
 		let contentCache = self._update.clone();
 
@@ -76,18 +78,19 @@ impl Backable for Todo
 						cache.update();
 					});
 					contentWrite.set(ev.target().value())
-				}>{content.get()}</textarea><br/>
+				}>{contentd.get()}</textarea><br/>
 			<button class="validate" on:click=updateFn><Translate key={AllFrontUIEnum::UPDATE.to_string()}/></button>
 			</>
 		}.into_any()
 	}
 
-	fn refresh_time(&self) -> u64 {
-		0
+	fn refresh_time(&self) -> RefreshTime {
+		RefreshTime::NONE
 	}
 
-	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String) {
+	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String, toaster: ToasterContext) -> Option<BoxFuture> {
 		moduleActions.clone().updateFn.run((currentName.clone()));
+		None
 	}
 
 	fn export(&self) -> ModuleContent

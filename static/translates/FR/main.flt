@@ -40,6 +40,7 @@ FRONTUI_MUST_NOT_EMPTY = { $input } ne doit pas être vide
 FRONTUI_INVALID_URL = format d'url invalide
 FRONTUI_UPDATE = Sauvegarder
 FRONTUI_REFRESH = Recharger
+FRONTUI_REMOVED = Supprimer
 
 #time
 DISTANT_TIME_RESULT_SEC = s

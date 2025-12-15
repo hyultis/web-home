@@ -1,5 +1,5 @@
 use leptos::html::I;
-use leptos::prelude::{ArcRwSignal, Effect, ElementChild, Get, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update};
+use leptos::prelude::{ArcRwSignal, Callable, Effect, ElementChild, Get, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update};
 use leptos::prelude::{AnyView, ClassAttribute, IntoAny, RwSignal};
 use leptos::{view};
 use leptos_use::core::Position;
@@ -68,8 +68,10 @@ impl<module: moduleContent> ModulePositions<module>
 
 	pub fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn,currentName:String) -> AnyView
 	{
+		let innerModuleActions = moduleActions.clone();
+		let innerCurrentName = currentName.clone();
 		let view = move |module: &module,editMode| {
-			return module.draw(editMode,moduleActions.clone(),currentName.clone());
+			return module.draw(editMode,innerModuleActions.clone(),innerCurrentName.clone());
 		};
 
 		let pos = self._pos.clone();
@@ -78,8 +80,10 @@ impl<module: moduleContent> ModulePositions<module>
 		let elMove = self.moveFn();
 		let elResize = self.resizeFn();
 
-		let removeFn = move |ev| {
-
+		let innerModuleActions = moduleActions.clone();
+		let innerCurrentName = currentName.clone();
+		let removeFn = move |_| {
+			innerModuleActions.clone().removeFn.run(innerCurrentName.clone());
 		};
 
 		view! {

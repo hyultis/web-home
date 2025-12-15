@@ -60,7 +60,7 @@ impl ModuleContent
 
 		let mut moduleRoot = config.value_get_mut(&configPath);
 		let mut lasttimestamp = 0;
-		if let Some(JsonValue::Object(ref mut content)) = moduleRoot.as_mut()
+		if let Some(JsonValue::Object(content)) = moduleRoot.as_mut()
 		{
 			if let Some(JsonValue::Number(timestampSaved) ) = content.get("timestamp"){
 				lasttimestamp = *timestampSaved as i64;
@@ -120,6 +120,18 @@ impl ModuleContent
 		}
 
 		return Ok(());
+	}
+
+	#[cfg(feature = "ssr")]
+	pub fn remove(mut config: Hconfig::HConfig::HConfig, name: String) -> bool
+	{
+		use Hconfig::tinyjson::JsonValue;
+		let Some(JsonValue::Object(_)) = config.value_get(&format!("modules/{}", name)) else {return false};
+
+		if config.value_remove(&format!("modules/{}", name)) {
+			return config.file_save().is_ok();
+		}
+		return false;
 	}
 
 	#[cfg(feature = "ssr")]

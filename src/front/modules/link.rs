@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use leptoaster::{expect_toaster, ToastLevel};
+use leptoaster::{expect_toaster, ToastLevel, ToasterContext};
 use leptos::prelude::{BindAttribute, GetUntracked, Write};
 use leptos::prelude::{use_context, ArcRwSignal, Callback, ClassAttribute, Effect, Get, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update};
-use crate::front::modules::components::{Backable, Cache, Cacheable, ModuleSizeContrainte};
+use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleSizeContrainte, RefreshTime};
 use leptos::prelude::{AnyView, CollectView, ElementChild, IntoAny, Read, RwSignal};
 use leptos::{view, IntoView};
 use leptos::ev::MouseEvent;
@@ -141,7 +141,7 @@ impl LinksHolder
 		};
 	}
 
-	fn addLinkPopupFn(&self) -> impl Fn(MouseEvent)
+	fn addLinkPopupFn(&self) -> impl Fn(MouseEvent) + Clone + 'static
 	{
 		let dialog = use_context::<DialogManager>().expect("DialogManager missing");
 		let content = self.content.clone();
@@ -335,12 +335,12 @@ impl Backable for LinksHolder
 		}.into_any()
 	}
 
-	fn refresh_time(&self) -> u64 {
-		0
+	fn refresh_time(&self) -> RefreshTime {
+		RefreshTime::NONE
 	}
 
-	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String) {
-
+	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String, toaster: ToasterContext) -> Option<BoxFuture> {
+		return None
 	}
 
 	fn export(&self) -> ModuleContent

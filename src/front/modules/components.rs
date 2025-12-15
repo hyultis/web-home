@@ -1,5 +1,8 @@
+use std::pin::Pin;
+use std::sync::Arc;
+use leptoaster::ToasterContext;
 use leptos::ev::Targeted;
-use leptos::prelude::OnTargetAttribute;
+use leptos::prelude::{OnTargetAttribute};
 use leptos::prelude::{ElementChild, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, IntoAny, PropAttribute, RwSignal, StyleAttribute};
 use leptos::view;
@@ -75,14 +78,17 @@ pub trait Cacheable
 	fn cache_getSended(&self) -> ArcRwSignal<Cache>;
 }
 
+
+pub type BoxFuture = Pin<Box<dyn Future<Output = ()> + 'static>>;
+
 /// struct that can be sent to / retrieved from backend
 pub trait Backable
 {
 	fn typeModule(&self) -> String;
 	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn,currentName: String) -> AnyView;
 
-	fn refresh_time(&self) -> u64;
-	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String);
+	fn refresh_time(&self) -> RefreshTime;
+	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String, toaster: ToasterContext) -> Option<BoxFuture>;
 
 	fn export(&self) -> ModuleContent;
 	fn import(&mut self, import: ModuleContent);
@@ -206,7 +212,7 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
 	{
 		self.style = "display:block;width:100%".to_string();
 	}
-	
+
 	pub fn setStyle(&mut self,style: impl ToString)
 	{
 		self.style = style.to_string();
@@ -276,4 +282,19 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
 			}
 		}
 	}
+}
+
+pub enum RefreshTime
+{
+	NONE,
+	MINUTES(u8),
+	HOURS(u8),
+}
+
+#[derive(Clone)]
+pub struct PausableStocker
+{
+	pub interval: RwSignal<u64>,
+	pub pause: Arc<dyn Fn() + Send + Sync>,
+	pub resume: Arc<dyn Fn() + Send + Sync>,
 }

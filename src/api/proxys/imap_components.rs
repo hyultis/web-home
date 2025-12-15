@@ -77,6 +77,46 @@ pub struct ImapMail
 	pub from: String,
 	pub to: String,
 	pub subject: Option<String>,
+	pub content: Option<String>,
+	pub files: Option<Vec<String>>,
 	pub date: i64,
 	pub boxName: String,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct MailParts {
+	pub text: Option<String>,
+	pub html: Option<String>,
+	pub attachments: Vec<Attachment>,
+	pub inline: Vec<Attachment>,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct Attachment {
+	pub filename: Option<String>,
+	pub content_type: String,
+	pub content_id: Option<String>,
+	pub data: Vec<u8>,
+}
+
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct ImapMailIdentifier
+{
+	pub uid: u32,
+	pub boxName: String,
+}
+
+impl From<ImapMail> for ImapMailIdentifier
+{
+	fn from(value: ImapMail) -> Self {
+		ImapMailIdentifier { uid: value.uid, boxName: value.boxName }
+	}
+}
+
+impl From<&ImapMail> for ImapMailIdentifier
+{
+	fn from(value: &ImapMail) -> Self {
+		ImapMailIdentifier { uid: value.uid, boxName: value.boxName.clone() }
+	}
 }

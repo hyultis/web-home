@@ -1,18 +1,21 @@
 use std::collections::HashMap;
 use leptoaster::{expect_toaster, ToasterContext};
-use leptos::prelude::{CollectView};
+use leptos::callback::Callback;
+use leptos::prelude::{use_context, CollectView, StyleAttribute};
 use leptos::prelude::{ClassAttribute, ElementChild, GetUntracked, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, Get, IntoAny, OnAttribute, RwSignal};
 use leptos::view;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen_futures::spawn_local;
 use crate::api::modules::components::ModuleContent;
-use crate::api::proxys::imap::{API_proxys_imap_getFullUnsee, API_proxys_imap_getUnseeSince, API_proxys_imap_listbox};
-use crate::api::proxys::imap_components::{imap_connector, imap_connector_extra, ImapMail};
+use crate::api::proxys::imap::{API_proxys_imap_getFullUnsee, API_proxys_imap_getMailContent, API_proxys_imap_getUnseeSince, API_proxys_imap_listbox};
+use crate::api::proxys::imap_components::{imap_connector, imap_connector_extra, ImapMail, ImapMailIdentifier};
 use crate::front::modules::components::{distant_time_simpler, Backable, BoxFuture, Cache, Cacheable, FieldHelper, FieldHelperType, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::module_actions::ModuleActionFn;
+use crate::front::utils::dialog::DialogManager;
 use crate::front::utils::toaster_helpers::toaster_api;
 use crate::front::utils::translate::Translate;
+use crate::HWebTrace;
 
 #[derive(Serialize,Deserialize,Debug)]
 #[derive(Clone)]
@@ -141,6 +144,33 @@ impl Mail
 			</div>
 			}.into_any()
 	}
+
+	pub fn mail_view_content(imapConnector: imap_connector, toaster: ToasterContext, dialog: DialogManager, mailId: ImapMail)
+	{
+		spawn_local(async move {
+			let Some(mailContent) = toaster_api(&toaster,API_proxys_imap_getMailContent(imapConnector, mailId.clone().into()).await, None).await else {return};
+
+			HWebTrace!("mail content : {:?}",mailContent.content);
+
+			dialog.openLarger(mailId.subject.clone().map(|subject|format!("€{}",subject)).unwrap_or("MODULE_MAIL_NO_SUBJECT".to_string()), move || {
+				let mailId = mailId.clone();
+				let mailContent = mailContent.clone();
+
+				view!{
+				<div class="module_mail_content_parent">
+					<h2>{mailId.from}</h2>
+					<h2>{mailId.to}</h2>
+					<div style="flex-grow: 1; border: none; margin: 0; padding: 0;">
+				        <iframe srcdoc={mailContent.content.unwrap_or_default()} sandbox style="width:100%; height:100%; background:white; border: none; margin: 0; padding: 0;"></iframe>
+					</div>
+				</div>
+			}.into_any()
+			}, Some(Callback::new(move |_| {
+				return true;
+			})), Some(Callback::new(move |_| {})));
+		});
+
+	}
 }
 
 
@@ -152,6 +182,8 @@ impl Backable for Mail
 
 	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, currentName: String) -> AnyView {
 
+
+		let dialog = use_context::<DialogManager>().expect("DialogManager missing");
 		let toaster = expect_toaster();
 		let refreshMail = self.config.clone();
 		let refreshMailContent = self.mailContent.clone();
@@ -168,6 +200,16 @@ impl Backable for Mail
 					});
 				}
 			});
+		};
+
+
+		let imapConnector = self.config.get_untracked().imap.clone();
+		let viewContentFn = move |id:ImapMail| {
+			Self::mail_view_content(imapConnector, toaster, dialog, id);
+		};
+
+		let imapConnector = self.config.get_untracked().imap.clone();
+		let markViewFn = move |id:ImapMail| {
 		};
 
 		let refreshMail = self.config.clone();
@@ -199,10 +241,16 @@ impl Backable for Mail
 							mailsContent.iter().enumerate()
 								//.filter(|(num,_)| *num <= 10)
 								.map(|(_,mail)|{
+									let id = mail.uid;
+									let mailId = mail.clone();
+									let mailIdMark = mail.clone();
+									let viewContentFn = viewContentFn.clone();
+									let markViewFn = markViewFn.clone();
 									view!{
 										<tr>
 											<td>{distant_time_simpler(mail.date)}</td>
-											<td>{mail.subject.clone()}</td>
+											<td on:click={move |_| viewContentFn.clone()(mailId.clone())}>{mail.subject.clone()}</td>
+											<td><i class="iconoir-mail-open" on:click={move |_| markViewFn.clone()(mailIdMark.clone())}></i></td>
 										</tr>
 									}
 								}).collect_view()

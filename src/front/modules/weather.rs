@@ -1,6 +1,6 @@
 use js_sys::{Array, Intl, Object, Reflect};
 use leptoaster::ToasterContext;
-use leptos::prelude::{ClassAttribute, CollectView, Effect, ElementChild, Get, GetUntracked, OnAttribute, PropAttribute, StyleAttribute, Update};
+use leptos::prelude::{ClassAttribute, CollectView, ElementChild, Get, GetUntracked, OnAttribute, PropAttribute, StyleAttribute, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, IntoAny, RwSignal};
 use leptos::view;
 use serde::{Deserialize, Serialize};
@@ -267,14 +267,18 @@ impl WeatherApiResultOneDay
 	{
 		match self.code {
 			0 => {"sun"},
-			1 => {"cloudy"},
-			2 | 3 => {"cloud"},
-			51 | 80 | 61 => {"cloudy_rain"},
-			53 | 55 | 81 | 63 | 82 | 65 => {"rainy"},
-			85 | 71 | 77 => {"ligh_snow"},
-			73 | 86 | 75 => {"snowy"},
-			45 | 48 => {"foog"},
-			95 | 96 | 99 => {"storm"},
+			1 | 2 | 3 => {"cloudy"},
+			45 | 48 => {"fog"},
+			51 | 53 | 55 => {"cloudy_rain"},
+			56 | 57 => {"light_snow"},
+			61 | 63 | 65 => {"cloudy_rain"},
+			66 | 67 => {"light_snow"},
+			71 | 73 | 75 => {"snow"},
+			77 => {"snow_grain"},
+			80 | 81 | 82 => {"rain"},
+			85 | 86 => {"snow"},
+			95 => {"storm"},
+			96 | 99 => {"heavystorm"},
 			_ => {"sun"}
 		}
 	}
@@ -322,14 +326,14 @@ async fn sync_weather_api(config: ArcRwSignal<WeatherConfig>,weatherContent: Arc
 
 	let config = config.get_untracked();
 	let url = format!(
-		"https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=temperature_2m_min,temperature_2m_max,precipitation_probability_max,wind_speed_10m_max,weather_code{}&forecast_days={}&wind_speed_unit=ms&format=json&timeformat=unixtime",
+		"https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=apparent_temperature_min,apparent_temperature_max,precipitation_probability_max,wind_speed_10m_max,weather_code{}&forecast_days={}&wind_speed_unit=ms&format=json&timeformat=unixtime",
 		config.latitude, config.longitude, timezone, config.maxday
 	);
 
 	let text = if(false)
 	{
 		// debug
-		"{\"latitude\":42.98,\"longitude\":3.12,\"generationtime_ms\":0.26226043701171875,\"utc_offset_seconds\":3600,\"timezone\":\"Europe/Paris\",\"timezone_abbreviation\":\"GMT+1\",\"elevation\":81.0,\"daily_units\":{\"time\":\"unixtime\",\"temperature_2m_min\":\"°C\",\"temperature_2m_max\":\"°C\",\"precipitation_probability_max\":\"%\",\"wind_speed_10m_max\":\"m/s\",\"weather_code\":\"wmo code\"},\"daily\":{\"time\":[1764975600,1765062000,1765148400,1765234800,1765321200,1765407600,1765494000],\"temperature_2m_min\":[3.7,8.4,7.0,10.7,10.6,6.4,6.1],\"temperature_2m_max\":[11.4,17.4,16.5,14.3,14.4,17.3,12.3],\"precipitation_probability_max\":[38,5,0,58,51,14,42],\"wind_speed_10m_max\":[2.10,2.27,2.36,3.98,2.84,1.87,3.36],\"weather_code\":[80,45,45,80,80,45,3]}}".to_string()
+		"{\"latitude\":42.98,\"longitude\":3.12,\"generationtime_ms\":0.26226043701171875,\"utc_offset_seconds\":3600,\"timezone\":\"Europe/Paris\",\"timezone_abbreviation\":\"GMT+1\",\"elevation\":81.0,\"daily_units\":{\"time\":\"unixtime\",\"apparent_temperature_min\":\"°C\",\"apparent_temperature_max\":\"°C\",\"precipitation_probability_max\":\"%\",\"wind_speed_10m_max\":\"m/s\",\"weather_code\":\"wmo code\"},\"daily\":{\"time\":[1764975600,1765062000,1765148400,1765234800,1765321200,1765407600,1765494000],\"apparent_temperature_min\":[3.7,8.4,7.0,10.7,10.6,6.4,6.1],\"apparent_temperature_max\":[11.4,17.4,16.5,14.3,14.4,17.3,12.3],\"precipitation_probability_max\":[38,5,0,58,51,14,42],\"wind_speed_10m_max\":[2.10,2.27,2.36,3.98,2.84,1.87,3.36],\"weather_code\":[80,45,45,80,80,45,3]}}".to_string()
 	}
 	else
 	{
@@ -383,8 +387,8 @@ async fn sync_weather_api(config: ArcRwSignal<WeatherConfig>,weatherContent: Arc
 fn json_read_daily(result: &mut WeatherApiResult, json: &Value)
 {
 	let mut times = vec![];
-	let mut temperature_2m_min = vec![];
-	let mut temperature_2m_max = vec![];
+	let mut apparent_temperature_min = vec![];
+	let mut apparent_temperature_max = vec![];
 	let mut precipitation_probability_max = vec![];
 	let mut wind_speed_10m_max = vec![];
 	let mut code = vec![];
@@ -399,16 +403,16 @@ fn json_read_daily(result: &mut WeatherApiResult, json: &Value)
 						.collect::<Vec<u64>>();
 				}
 			}
-			"temperature_2m_min" => {
+			"apparent_temperature_min" => {
 				if let Value::Array(value) = value {
-					temperature_2m_min = value.iter()
+					apparent_temperature_min = value.iter()
 						.map(|v| v.as_f64().unwrap_or(0.0))
 						.collect::<Vec<f64>>();
 				}
 			}
-			"temperature_2m_max" => {
+			"apparent_temperature_max" => {
 				if let Value::Array(value) = value {
-					temperature_2m_max = value.iter()
+					apparent_temperature_max = value.iter()
 						.map(|v| v.as_f64().unwrap_or(0.0))
 						.collect::<Vec<f64>>();
 				}
@@ -441,8 +445,8 @@ fn json_read_daily(result: &mut WeatherApiResult, json: &Value)
 	result.days = times.iter().enumerate().map(|(i,time)|{
 		return WeatherApiResultOneDay{
 			timestampDay: *time,
-			temp_min: temperature_2m_min[i],
-			temp_max: temperature_2m_max[i],
+			temp_min: apparent_temperature_min[i],
+			temp_max: apparent_temperature_max[i],
 			precipitation: precipitation_probability_max[i],
 			wind: wind_speed_10m_max[i],
 			code: code[i],
@@ -454,15 +458,15 @@ fn json_read_daily_units(result: &mut WeatherApiResult, json: &Value)
 {
 	/*
 		"time":"unixtime",
-		"temperature_2m_min":"°C",
-		"temperature_2m_max":"°C",
+		"apparent_temperature_min":"°C",
+		"apparent_temperature_max":"°C",
 		"precipitation_probability_max":"%",
 		"wind_speed_10m_max":"m/s"
 	 */
 	let Value::Object(obj) = json else {return};
 	for (key, value) in obj.iter() {
 		match key.as_ref() {
-			"temperature_2m_min" => {
+			"apparent_temperature_min" => {
 				if let Value::String(value) = value {
 					result.unit.temp = value.to_string();
 				}

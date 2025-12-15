@@ -23,6 +23,13 @@
 .dialog-backdrop.closing {
 	animation: close var(--animationduration) normal linear;
 }
+.dialog-backdrop.larger .dialog-window {
+	width: 100%;
+	height: 95%;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
 
 .dialog-window h2 {
 	font-size: 1.2em;

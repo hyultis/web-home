@@ -56,10 +56,19 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 					<div class={move || {
 							let mut closing = "";
 							if data.is_closing {closing = " closing";}
-							format!("dialog-backdrop{}",closing)
+							let mut larger = "";
+							if data.is_larger {larger = " larger";}
+							format!("dialog-backdrop{}{}",closing,larger)
 						}} on:click=closeFn.clone()>
 						<div class="dialog-window" on:click=|e| e.stop_propagation()>
-							<h2><Translate key={data.title}/></h2>
+							<h2>{
+								if(data.title.starts_with("€")) {
+									view!({data.title.chars().next().map(|c| &data.title[c.len_utf8()..]).unwrap_or("MODULE_MAIL_NO_SUBJECT")}).into_any()
+								}
+								else {
+									view!(<Translate key={data.title}/>).into_any()
+								}
+					}</h2>
 							<p>{
 								let tmp = data.body.clone();
 								tmp()
@@ -84,6 +93,7 @@ pub struct DialogData
 	pub on_validate: Option<Callback<(),bool>>,
 	pub on_close: Option<Callback<()>>,
 	pub is_closing: bool,
+	pub is_larger: bool,
 }
 
 #[derive(Clone)]
@@ -101,7 +111,8 @@ impl DialogManager
 		}
 	}
 
-	/// Ouvre une popup sans body
+	/// Ouvre un popup sans body
+	/// note pour le titre, s'il commence avec "€", il ne sera pas traduit
 	pub fn openSimple(
 		&self,
 		title: impl ToString,
@@ -115,10 +126,12 @@ impl DialogManager
 			on_validate,
 			on_close,
 			is_closing: false,
+			is_larger: false,
 		}));
 	}
 
-	/// Ouvre une popup avec le contenu fourni
+	/// Ouvre un popup avec le contenu fourni
+	/// note pour le titre, s'il commence avec "€", il ne sera pas traduit
 	pub fn open(
 		&self,
 		title: impl ToString,
@@ -133,6 +146,27 @@ impl DialogManager
 			on_validate,
 			on_close,
 			is_closing: false,
+			is_larger: false,
+		}));
+	}
+
+	/// Ouvre une grosse popup avec le contenu fourni
+	/// note pour le titre, s'il commence avec "€", il ne sera pas traduit
+	pub fn openLarger(
+		&self,
+		title: impl ToString,
+		body: impl Fn() -> AnyView + Send + Sync + 'static,
+		on_validate: Option<Callback<(),bool>>,
+		on_close: Option<Callback<()>>,
+	)
+	{
+		self.dialog.set(Some(DialogData {
+			title: title.to_string(),
+			body: Arc::new(body),
+			on_validate,
+			on_close,
+			is_closing: false,
+			is_larger: true,
 		}));
 	}
 

@@ -11,6 +11,7 @@ use crate::api::IsToastable;
 pub enum ImapError {
 	IMAP_SERVER_CONNECTION,
 	IMAP_SERVER_CONNECTION_TLS,
+	MAIL_NOT_FOUND,
 	INVALID_DATE,
 	SERVER_ERROR,
 }
@@ -29,7 +30,8 @@ impl IsToastable for ImapError {
 			ImapError::IMAP_SERVER_CONNECTION => Some(ToastLevel::Error),
 			ImapError::IMAP_SERVER_CONNECTION_TLS => Some(ToastLevel::Error),
 			ImapError::INVALID_DATE => Some(ToastLevel::Error),
-			ImapError::SERVER_ERROR => Some(ToastLevel::Error)
+			ImapError::SERVER_ERROR => Some(ToastLevel::Error),
+			ImapError::MAIL_NOT_FOUND => Some(ToastLevel::Error),
 		}
 	}
 }

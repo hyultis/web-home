@@ -124,6 +124,10 @@
 	overflow: hidden;
 }
 
+.module_rss_table td:nth-child(3) {
+	width: 1.5em;
+}
+
 .module_rss_table tr:nth-child(even) {
 	background-color: var(--backgroundcolorlighter);
 }
@@ -213,4 +217,13 @@
 .module_mail_config .disabled, .module_mail_config .disabled:hover {
 	text-decoration: line-through;
 	background-color: var(--buttonbackgrounddanger);
+}
+
+.module_mail_content_parent {
+	display: flex;
+	width: 100%;
+	height: 100%;
+	flex-direction: column;
+	background-color: blue;
+	overflow: hidden;
 }

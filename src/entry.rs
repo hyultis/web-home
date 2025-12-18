@@ -46,7 +46,13 @@ pub fn App() -> impl IntoView {
 	provide_context(dialog_manager.clone());
 	let (userData, setUserData) = UserData::cookie_signalGet();
 
-	Effect::new(move |_| {
+	let is_initialized = RwSignal::new(false);
+	Effect::new(move || {
+		if(is_initialized.get_untracked()) {
+			return;
+		}
+		is_initialized.set(true);
+
 		// set default userData
 		if (userData.read_untracked().is_none())
 		{

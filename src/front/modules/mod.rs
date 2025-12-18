@@ -1,11 +1,14 @@
 use crate::api::modules::components::ModuleContent;
-use crate::api::modules::{API_module_remove, API_module_retrieve, API_module_retrieveMissingModule, API_module_update, ModuleReturnRetrieve, ModuleReturnUpdate};
+use crate::api::modules::{
+	API_module_remove, API_module_retrieve, API_module_retrieveMissingModule, API_module_update,
+	ModuleReturnRetrieve, ModuleReturnUpdate,
+};
 use crate::front::modules::components::{Backable, Cacheable, PausableStocker, RefreshTime};
 use crate::front::modules::link::LinksHolder;
 use crate::front::utils::all_front_enum::AllFrontErrorEnum;
 use crate::front::utils::users_data::UserData;
-use crate::HWebTrace;
 use leptoaster::ToasterContext;
+use leptos::logging::log;
 use leptos::prelude::{Callable, Read, RwSignal, Update};
 use leptos_use::use_interval_fn;
 use module_positions::ModulePositions;
@@ -15,13 +18,13 @@ use std::sync::Arc;
 
 pub mod components;
 pub mod link;
+mod mail;
+pub mod module_actions;
 pub mod module_positions;
 pub(crate) mod module_type;
 pub mod rss;
 pub mod todo;
-pub mod module_actions;
 pub mod weather;
-mod mail;
 
 pub trait moduleContent: Backable + Cacheable {}
 
@@ -64,7 +67,7 @@ impl ModuleHolder
 		if (self._links.cache_mustUpdate())
 		{
 			let module = self._links.export();
-			if let Some(error) = Self::inner_update(login.clone(),module).await
+			if let Some(error) = Self::inner_update(login.clone(), module).await
 			{
 				return Some(error);
 			}
@@ -76,8 +79,7 @@ impl ModuleHolder
 			{
 				let mut module = oneModule.export();
 				module.name = key.clone();
-				HWebTrace!("editMode_validate on module : {:?}", key);
-				if let Some(error) = Self::inner_update(login.clone(),module).await
+				if let Some(error) = Self::inner_update(login.clone(), module).await
 				{
 					return Some(error);
 				}
@@ -97,9 +99,15 @@ impl ModuleHolder
 		{
 			let moduleName = self._links.typeModule();
 
-			if let Some(error) =  Self::inner_retrieve(login.clone(), moduleName.clone(),&mut self._links, |module, moduleContent| {
-				module.import(moduleContent);
-			}).await
+			if let Some(error) = Self::inner_retrieve(
+				login.clone(),
+				moduleName.clone(),
+				&mut self._links,
+				|module, moduleContent| {
+					module.import(moduleContent);
+				},
+			)
+			.await
 			{
 				return Some(error);
 			}
@@ -110,14 +118,23 @@ impl ModuleHolder
 			if (forceUpdate || oneModule.inner().cache_mustUpdate())
 			{
 				let moduleName = format!("{}_{}", key, oneModule.inner().typeModule());
-				if let Some(error) =  Self::inner_retrieve(login.clone(), moduleName.clone(),oneModule, |module, moduleContent| {
-					module.import(moduleContent);
-				}).await
+				if let Some(error) = Self::inner_retrieve(
+					login.clone(),
+					moduleName.clone(),
+					oneModule,
+					|module, moduleContent| {
+						module.import(moduleContent);
+					},
+				)
+				.await
 				{
 					return Some(error);
 				}
 
-				Self::add_cron(oneModule, moduleName, &mut self._crons, self._moduleActions.clone().unwrap());
+				if let Some(actions) = &self._moduleActions
+				{
+					Self::add_cron(oneModule, moduleName, &mut self._crons, actions.clone());
+				}
 			}
 		}
 
@@ -145,32 +162,45 @@ impl ModuleHolder
 				}
 			}
 
-			if let Some(error) = Self::inner_retrieve(login.clone(), oneNewModuleName.clone(),self, |this,moduleContent| {
-				HWebTrace!("module {} newFromModuleContent",oneNewModuleName);
-				let Some(moduleType) = ModuleType::newFromModuleContent(&moduleContent)
-				else
-				{
-					return;
-				};
-				HWebTrace!("module {} insert",oneNewModuleName);
-				let mut oneModule = ModulePositions::newFromModuleContent(moduleContent, moduleType);
-				Self::add_cron(&mut oneModule, oneNewModuleName.clone(), &mut this._crons, this._moduleActions.clone().unwrap());
-				this._blocks.insert(
-					oneNewModuleName,
-					oneModule,
-				);
-			}).await
+			if let Some(error) = Self::inner_retrieve(
+				login.clone(),
+				oneNewModuleName.clone(),
+				self,
+				|this, moduleContent| {
+					let Some(moduleType) = ModuleType::newFromModuleContent(&moduleContent)
+					else
+					{
+						return;
+					};
+					let mut oneModule =
+						ModulePositions::newFromModuleContent(moduleContent, moduleType);
+
+					if let Some(actions) = &this._moduleActions
+					{
+						Self::add_cron(
+							&mut oneModule,
+							oneNewModuleName.clone(),
+							&mut this._crons,
+							actions.clone(),
+						);
+						this._blocks.insert(oneNewModuleName, oneModule);
+					}
+				},
+			)
+			.await
 			{
 				return Some(error);
 			}
 		}
-		HWebTrace!("_blockNb : {:?}", self._blockNb);
 
 		return None;
 	}
 
-	pub async fn module_retrieve(&mut self, login: String, name: String)
-	                           -> Option<AllFrontErrorEnum>
+	pub async fn module_retrieve(
+		&mut self,
+		login: String,
+		name: String,
+	) -> Option<AllFrontErrorEnum>
 	{
 		let Some(oneModule) = self._blocks.get_mut(&name)
 		else
@@ -183,21 +213,30 @@ impl ModuleHolder
 			return None;
 		}
 
-		let returning = Self::inner_retrieve(login.clone(), name.clone(),oneModule, |module, moduleContent| {
-			module.import(moduleContent);
-		}).await;
+		let returning = Self::inner_retrieve(
+			login.clone(),
+			name.clone(),
+			oneModule,
+			|module, moduleContent| {
+				module.import(moduleContent);
+			},
+		)
+		.await;
 
-		HWebTrace!("module returning {}",returning.is_none());
 		if returning.is_none()
+			&& let Some(actions) = &self._moduleActions
 		{
-			Self::add_cron(oneModule, name.clone(), &mut self._crons, self._moduleActions.clone().unwrap());
+			Self::add_cron(oneModule, name.clone(), &mut self._crons, actions.clone());
 		}
 
 		return returning;
 	}
 
-	pub async fn module_remove(&mut self, login: String, moduleName: String)
-	                             -> Option<AllFrontErrorEnum>
+	pub async fn module_remove(
+		&mut self,
+		login: String,
+		moduleName: String,
+	) -> Option<AllFrontErrorEnum>
 	{
 		let Some(oneModule) = self._blocks.get_mut(&moduleName)
 		else
@@ -207,7 +246,9 @@ impl ModuleHolder
 
 		if let Err(err) = API_module_remove(login.clone(), moduleName.clone()).await
 		{
-			return Some(AllFrontErrorEnum::SERVER_ERROR("Impossible to remove module".to_string()));
+			return Some(AllFrontErrorEnum::SERVER_ERROR(
+				"Impossible to remove module".to_string(),
+			));
 		}
 
 		if let Some(oneModule) = self._crons.get_mut(&moduleName)
@@ -218,77 +259,97 @@ impl ModuleHolder
 		return None;
 	}
 
-	pub async fn module_refresh(&mut self, moduleName: String, toaster: ToasterContext)
+	pub async fn module_refresh(&self, moduleName: String, toaster: ToasterContext)
 	{
-		let Some(oneModule) = self._blocks.get_mut(&moduleName)
+		let Some(oneModule) = self._blocks.get(&moduleName)
 		else
 		{
 			return;
 		};
 
-		HWebTrace!("module_refresh {}",moduleName);
-		let tmp = oneModule.inner().refresh(self._moduleActions.clone().unwrap(),moduleName.clone(), toaster);
-		HWebTrace!("module_refresh tmp {}",tmp.is_some());
-		if let Some(refreshFutur) = tmp
+		if let Some(actions) = &self._moduleActions
 		{
-			HWebTrace!("module_refresh await {}",moduleName);
-			refreshFutur.await;
-			HWebTrace!("module_refresh awaited {}",moduleName);
+			let tmp = oneModule
+				.inner()
+				.refresh(actions.clone(), moduleName.clone(), toaster);
+			if let Some(refreshFutur) = tmp
+			{
+				refreshFutur.await;
+			}
 		}
 	}
 
-	fn add_cron(module: &mut ModulePositions<ModuleType>, moduleName: String, crons: &mut HashMap<String, PausableStocker>, moduleActions: module_actions::ModuleActionFn)
+	fn add_cron(
+		module: &mut ModulePositions<ModuleType>,
+		moduleName: String,
+		crons: &mut HashMap<String, PausableStocker>,
+		moduleActions: module_actions::ModuleActionFn,
+	)
 	{
-			let refreshTime = match module.inner().refresh_time()
-			{
-				RefreshTime::NONE => None,
-				RefreshTime::MINUTES(i) => Some(i as u64),
-				RefreshTime::HOURS(h) => Some(h as u64 * 60),
-			};
+		let refreshTime = match module.inner().refresh_time()
+		{
+			RefreshTime::NONE => None,
+			RefreshTime::MINUTES(i) => Some(i as u64),
+			RefreshTime::HOURS(h) => Some(h as u64 * 60),
+		};
 
-			if let Some(timeMinute) = refreshTime
-			{
-				let timeMillisecond = timeMinute * 60 * 1000;
+		if let Some(timeMinute) = refreshTime
+		{
+			let timeMillisecond = timeMinute * 60 * 1000;
 
-				if let Some(cronModule) = crons.get_mut(&moduleName)
-				{
-					cronModule.interval.update(|oldInterval|*oldInterval = timeMillisecond);
-					(cronModule.resume)();
-				}
-				else
-				{
-					let intervalS = RwSignal::new(timeMillisecond);
-					let moduleNameInner = moduleName.clone();
-					let moduleActionsInner = moduleActions.clone();
-					let pausable = use_interval_fn(
-						move || {
-							HWebTrace!("cron module {} refresh to {}",moduleNameInner,timeMillisecond);
-							moduleActionsInner.refreshFn.run(moduleNameInner.clone());
-						},
-						intervalS.clone(),
-					);
-					let pause = pausable.pause;
-					let resume = pausable.resume;
-					crons.insert(moduleName.clone(),PausableStocker{
+			if let Some(cronModule) = crons.get_mut(&moduleName)
+			{
+				cronModule
+					.interval
+					.update(|oldInterval| *oldInterval = timeMillisecond);
+				(cronModule.resume)();
+			}
+			else
+			{
+				let intervalS = RwSignal::new(timeMillisecond);
+				let moduleNameInner = moduleName.clone();
+				let moduleActionsInner = moduleActions.clone();
+				let pausable = use_interval_fn(
+					move || {
+						log!(
+							"cron module {} refresh to {}",
+							moduleNameInner,
+							timeMillisecond
+						);
+						moduleActionsInner.refreshFn.run(moduleNameInner.clone());
+					},
+					intervalS.clone(),
+				);
+				let pause = pausable.pause;
+				let resume = pausable.resume;
+				crons.insert(
+					moduleName.clone(),
+					PausableStocker {
 						interval: intervalS,
 						pause: Arc::new(move || pause()),
 						resume: Arc::new(move || resume()),
-					});
-				}
+					},
+				);
 			}
+		}
 	}
 
-	async fn inner_retrieve<T>(login: String, moduleName: String, sendInner: &mut T, module: impl FnOnce(&mut T,ModuleContent)) -> Option<AllFrontErrorEnum>
+	async fn inner_retrieve<T>(
+		login: String,
+		moduleName: String,
+		sendInner: &mut T,
+		module: impl FnOnce(&mut T, ModuleContent),
+	) -> Option<AllFrontErrorEnum>
 	{
 		match API_module_retrieve(login.clone(), moduleName).await
 		{
 			Ok(ModuleReturnRetrieve::EMPTY) => return Some(AllFrontErrorEnum::MODULE_NOTEXIST),
 			Ok(ModuleReturnRetrieve::UPDATED(mut moduleContent)) =>
-				{
-					Self::import_decrypt_content(&mut moduleContent);
-					module(sendInner,moduleContent);
-				}
-			Err(err) => return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)))
+			{
+				Self::import_decrypt_content(&mut moduleContent);
+				module(sendInner, moduleContent);
+			}
+			Err(err) => return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err))),
 		}
 
 		return None;
@@ -298,7 +359,7 @@ impl ModuleHolder
 	/// It will encrypt the content of the module before sending it to the server.
 	/// It will return an error if the module is outdated or if the server returns an error.
 	pub async fn module_update(&mut self, login: String, name: String)
-		-> Option<AllFrontErrorEnum>
+	-> Option<AllFrontErrorEnum>
 	{
 		let Some(oneModule) = self._blocks.get(&name)
 		else
@@ -314,7 +375,7 @@ impl ModuleHolder
 		let mut module = oneModule.export();
 		module.name = name.clone();
 
-		return Self::inner_update(login,module).await;
+		return Self::inner_update(login, module).await;
 	}
 
 	async fn inner_update(login: String, mut module: ModuleContent) -> Option<AllFrontErrorEnum>
@@ -324,15 +385,15 @@ impl ModuleHolder
 		{
 			// TODO : when the module is outdated, we should update instead of returning an error
 			Ok(ModuleReturnUpdate::OUTDATED) =>
-				{
-					return Some(AllFrontErrorEnum::MODULE_OUTDATED);
-				}
+			{
+				return Some(AllFrontErrorEnum::MODULE_OUTDATED);
+			}
 			Err(err) =>
-				{
-					return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
-				}
+			{
+				return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+			}
 			_ =>
-				{}
+			{}
 		}
 
 		return None;
@@ -365,8 +426,16 @@ impl ModuleHolder
 	fn import_decrypt_content(moduleContent: &mut ModuleContent) -> bool
 	{
 		let (userData, _) = UserData::cookie_signalGet();
-		let Some(userData) = &*userData.read() else {return false};
-		let Some(result) = userData.decrypt_with_password(&moduleContent.content) else {return false};
+		let Some(userData) = &*userData.read()
+		else
+		{
+			return false;
+		};
+		let Some(result) = userData.decrypt_with_password(&moduleContent.content)
+		else
+		{
+			return false;
+		};
 		moduleContent.content = result;
 		return true;
 	}
@@ -376,8 +445,16 @@ impl ModuleHolder
 	fn import_crypt_content(moduleContent: &mut ModuleContent) -> bool
 	{
 		let (userData, _) = UserData::cookie_signalGet();
-		let Some(userData) = &*userData.read() else {return false};
-		let Some(result) = userData.crypt_with_password(&moduleContent.content) else {return false};
+		let Some(userData) = &*userData.read()
+		else
+		{
+			return false;
+		};
+		let Some(result) = userData.crypt_with_password(&moduleContent.content)
+		else
+		{
+			return false;
+		};
 		moduleContent.content = serde_json::to_string(&result).unwrap_or_default();
 		return true;
 	}

@@ -121,7 +121,7 @@ impl UserData {
 	}
 
 	fn derive_key_from_password(password: &str, salt: &[u8]) -> [u8; 32] {
-		let hash = argon2::hash_raw(password.as_bytes(), salt, &Config::default()).unwrap();
+		let hash = argon2::hash_raw(password.as_bytes(), salt, &Config::default()).unwrap_or_default();
 
 		let mut key = [0u8; 32];
 		key.copy_from_slice(&hash[..32]);
@@ -135,13 +135,12 @@ impl UserData {
 
 		// dérive la clé AES-256
 		let key_bytes = Self::derive_key_from_password(&password, &salt);
-		let key = Key::<Aes256Gcm>::try_from(key_bytes).unwrap();
+		let Ok(key) = Key::<Aes256Gcm>::try_from(key_bytes);
 		let cipher = Aes256Gcm::new(&key);
 		let Ok(nonce) = Aes256Gcm::generate_nonce() else {return None};
 
 		// chiffrement
-		let ciphertext = cipher.encrypt(&nonce, plaintext.as_bytes())
-			.expect("encryption failed");
+		let Ok(ciphertext) = cipher.encrypt(&nonce, plaintext.as_bytes()) else {return None};
 
 		Some(UserDataCypher {
 			salt: Base64::encode_string(&salt),
@@ -165,9 +164,9 @@ impl UserData {
 		let Ok(ciphertext) = Base64::decode_vec(ciphertext_b64) else {return None};
 
 		let key_bytes = Self::derive_key_from_password(password, &salt);
-		let key = Key::<Aes256Gcm>::try_from(key_bytes).unwrap();
+		let key = Key::<Aes256Gcm>::try_from(key_bytes).unwrap_or_default();
 		let cipher = Aes256Gcm::new(&key);
-		let nonce = Nonce::try_from(nonce_bytes.as_slice()).unwrap();
+		let nonce = Nonce::try_from(nonce_bytes.as_slice()).unwrap_or_default();
 
 		let Ok(plaintext_bytes) = cipher.decrypt(&nonce, ciphertext.as_ref()) else {return None};
 		return match String::from_utf8(plaintext_bytes) {

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use crate::api::modules::components::ModuleContent;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
-use crate::front::utils::dialog::DialogManager;
+use crate::front::utils::dialog::{DialogData, DialogManager};
 use crate::front::utils::toaster_helpers::{toastingErr, toastingParams};
 use crate::HWebTrace;
 use std::ops::DerefMut;
@@ -64,7 +64,9 @@ impl LinksHolder
 	                      draggedOriginPosition: RwSignal<Option<usize>>,
 	                      draggedTargetPosition: RwSignal<Option<usize>>,
 	                      somethingIsDragging: RwSignal<bool>,
-	                      content: ArcRwSignal<Vec<Link>>, cache: ArcRwSignal<Cache>) -> impl IntoView
+	                      content: ArcRwSignal<Vec<Link>>,
+	                      cache: ArcRwSignal<Cache>,
+	                      dialogManager: DialogManager) -> impl IntoView
 	{
 		// drop zone
 		let target = NodeRef::<Div>::new();
@@ -98,7 +100,7 @@ impl LinksHolder
 			..
 		} = use_draggable_with_options(el,config);
 
-		let fnRemove = Self::removeLinkPopupFn(content,cache,pos);
+		let fnRemove = Self::removeLinkPopupFn(dialogManager, content,cache,pos);
 
 
 		return view! {
@@ -120,30 +122,32 @@ impl LinksHolder
 		};
 	}
 
-	fn removeLinkPopupFn(content: ArcRwSignal<Vec<Link>>, cache: ArcRwSignal<Cache>, pos: usize) -> impl Fn(MouseEvent)
+	fn removeLinkPopupFn(dialogManager: DialogManager, content: ArcRwSignal<Vec<Link>>, cache: ArcRwSignal<Cache>, pos: usize) -> impl Fn(MouseEvent)
 	{
-		let dialog = use_context::<DialogManager>().expect("DialogManager missing");
 		let content = content.clone();
 		let cache = cache.clone();
 
 		return move |_| {
 			let content = content.clone();
 			let cache = cache.clone();
-			dialog.openSimple("Supprimer un lien ?", Some(Callback::new(move |_| {
-				content.update(|links|{
-					links.remove(pos);
-				});
-				cache.update(|cache|{
-					cache.update();
-				});
-				return true;
-			})), None);
+
+			let dialogContent = DialogData::new()
+				.setTitle("MODULE_RSS_DEL")
+				.setOnValidate(Callback::new(move |_| {
+					content.update(|links|{
+						links.remove(pos);
+					});
+					cache.update(|cache|{
+						cache.update();
+					});
+					return true;
+				}));
+			dialogManager.open(dialogContent);
 		};
 	}
 
-	fn addLinkPopupFn(&self) -> impl Fn(MouseEvent) + Clone + 'static
+	fn addLinkPopupFn(&self,dialogManager: DialogManager) -> impl Fn(MouseEvent) + Clone + 'static
 	{
-		let dialog = use_context::<DialogManager>().expect("DialogManager missing");
 		let content = self.content.clone();
 		let cache = self._update.clone();
 		let toaster = expect_toaster();
@@ -157,19 +161,22 @@ impl LinksHolder
 			let content = content.clone();
 			let cache = cache.clone();
 			let toaster = toaster.clone();
-			dialog.open("Ajouter un lien", move || {
 
-				let innerLabel = RwSignal::new("".to_string());
-				let innerUrl = RwSignal::new("".to_string());
+			let dialogContent = DialogData::new()
+				.setTitle("MODULE_RSS_ADD")
+				.setBody(move || {
 
-				let labelEffect = labelDialog.clone();
-				let urlEffect = urlDialog.clone();
-				Effect::new(move |_| {
-					labelEffect.clone().update(|e| *e = innerLabel.get());
-					urlEffect.clone().update(|e| *e = innerUrl.get());
-				});
+					let innerLabel = RwSignal::new("".to_string());
+					let innerUrl = RwSignal::new("".to_string());
 
-				view!{
+					let labelEffect = labelDialog.clone();
+					let urlEffect = urlDialog.clone();
+					Effect::new(move |_| {
+						labelEffect.clone().update(|e| *e = innerLabel.get());
+						urlEffect.clone().update(|e| *e = innerUrl.get());
+					});
+
+					view!{
 				<div>
 					<label>
 						<span>Label</span>
@@ -181,58 +188,61 @@ impl LinksHolder
 					</label>
 				</div>
 			}.into_any()
-			}, Some(Callback::new(move |_| {
-				let label = label.clone().get();
-				let url = url.clone().get();
-				let toaster = toaster.clone();
+				})
+				.setOnValidate(Callback::new(move |_| {
+					let label = label.clone().get();
+					let url = url.clone().get();
+					let toaster = toaster.clone();
 
-				if(url.is_empty()) {
-					let mut params= HashMap::new();
-					params.insert("input".to_string(), "url".to_string());
+					if(url.is_empty()) {
+						let mut params= HashMap::new();
+						params.insert("input".to_string(), "url".to_string());
 
-					spawn_local(async move {
-						toastingParams(toaster.clone(), AllFrontUIEnum::MUST_NOT_EMPTY, ToastLevel::Error, Arc::new(params)).await;
+						spawn_local(async move {
+							toastingParams(toaster.clone(), AllFrontUIEnum::MUST_NOT_EMPTY, ToastLevel::Error, Arc::new(params)).await;
+						});
+						return false;
+					};
+					if(label.is_empty()) {
+						let mut params= HashMap::new();
+						params.insert("input".to_string(), "label".to_string());
+
+						spawn_local(async move {
+							toastingParams(toaster.clone(), AllFrontUIEnum::MUST_NOT_EMPTY, ToastLevel::Error, Arc::new(params)).await;
+						});
+						return false;
+					};
+
+					if(Url::parse(&url).is_err())
+					{
+						spawn_local(async move {
+							toastingErr(&toaster, AllFrontUIEnum::INVALID_URL).await;
+						});
+						return false;
+					}
+
+
+					let Some(mut guard) = content.try_write()
+					else
+					{
+						return false;
+					};
+					let links: &mut Vec<Link> = guard.deref_mut();
+
+					// remove if already exists
+					if let Some(pos) = links.iter().enumerate().filter(|(_,link)|link.label==label).map(|(pos,link)|pos).next()
+					{
+						links.remove(pos);
+					}
+
+					links.push(Link::new(label,url));
+					cache.update(|cache|{
+						cache.update();
 					});
-					return false;
-				};
-				if(label.is_empty()) {
-					let mut params= HashMap::new();
-					params.insert("input".to_string(), "label".to_string());
+					return true;
+				}));
 
-					spawn_local(async move {
-						toastingParams(toaster.clone(), AllFrontUIEnum::MUST_NOT_EMPTY, ToastLevel::Error, Arc::new(params)).await;
-					});
-					return false;
-				};
-
-				if(Url::parse(&url).is_err())
-				{
-					spawn_local(async move {
-						toastingErr(&toaster, AllFrontUIEnum::INVALID_URL).await;
-					});
-					return false;
-				}
-
-
-				let Some(mut guard) = content.try_write()
-				else
-				{
-					return false;
-				};
-				let links: &mut Vec<Link> = guard.deref_mut();
-
-				// remove if already exists
-				if let Some(pos) = links.iter().enumerate().filter(|(_,link)|link.label==label).map(|(pos,link)|pos).next()
-				{
-					links.remove(pos);
-				}
-
-				links.push(Link::new(label,url));
-				cache.update(|cache|{
-					cache.update();
-				});
-				return true;
-			})), None);
+			dialogManager.open(dialogContent);
 		};
 	}
 }
@@ -262,7 +272,11 @@ impl Backable for LinksHolder
 
 	fn draw(&self, editMode: RwSignal<bool>,_: ModuleActionFn,_:String) -> AnyView
 	{
-		let addLinkFn = self.addLinkPopupFn();
+		let Some(dialogManager) = use_context::<DialogManager>() else {
+			HWebTrace!("cannot get dialogManager in link");
+			return view!{}.into_any();
+		};
+		let addLinkFn = self.addLinkPopupFn(dialogManager.clone());
 
 		let draggedOriginPosition: RwSignal<Option<usize>> = RwSignal::new(None);
 		let draggedTargetPosition: RwSignal<Option<usize>> = RwSignal::new(None);
@@ -309,7 +323,6 @@ impl Backable for LinksHolder
 				cache.update();
 			});
 
-			HWebTrace!("need to move origin {} to target {}", Origin, newTarget);
 		});
 		/*
 			<span>{match &*draggedPosition.read(){
@@ -324,7 +337,7 @@ impl Backable for LinksHolder
 				.enumerate()
 				.map(|(key,link)|
 					if editMode.get()
-						{return Self::draw_editable_link(&link,key,draggedOriginPosition,draggedTargetPosition,somethingIsDragging, self.content.clone(), self._update.clone()).into_any();}
+						{return Self::draw_editable_link(&link,key,draggedOriginPosition,draggedTargetPosition,somethingIsDragging, self.content.clone(), self._update.clone(),dialogManager.clone()).into_any();}
 					else
 						{return Self::draw_link(&link).into_any();}
 				)

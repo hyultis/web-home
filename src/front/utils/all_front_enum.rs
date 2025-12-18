@@ -24,6 +24,10 @@ pub enum AllFrontUIEnum
 	UPDATE,
 	REFRESH,
 	REMOVED,
+	NOTITLE,
+	HOME_CHANGE_OK,
+	HOME_CHANGE_CANCEL,
+	HOME_CHANGE_NEW
 }
 
 #[derive(strum_macros::Display)]

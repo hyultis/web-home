@@ -1,24 +1,25 @@
 use std::collections::HashSet;
-use crate::api::proxys::imap_components::{imap_connector, Attachment, Attributs, BoxName, ImapMail};
+use crate::api::proxys::imap_components::{imap_connector, Attachment, Attributs, BoxName, ImapMail, ImapMailContentType};
 use crate::api::proxys::imap_error::ImapError;
 use imap::types::{Fetches, Mailbox, Uid};
 use imap::{Connection, Session};
-use mailparse::{parse_mail, DispositionType, MailHeaderMap};
+use mailparse::{parse_mail, DispositionType, MailHeaderMap, ParsedMail};
 
-pub fn connect_imap(config: imap_connector) -> Result<(Session<Connection>, Mailbox), ImapError>
+pub fn connect_imap(config: &imap_connector) -> Result<(Session<Connection>, Mailbox, bool), ImapError>
 {
-	let client = imap::ClientBuilder::new(config.host, config.port).connect()?; // /imap/ssl
+	let isGmail = config.isGmail();
+	let client = imap::ClientBuilder::new(config.host.clone(), config.port).connect()?; // /imap/ssl
 
 	let mut imap_session = client
-		.login(config.username, config.password)
+		.login(config.username.clone(), config.password.clone())
 		.map_err(|e| e.0)?;
 
 	let mailbox = imap_session.select("INBOX")?;
 
-	return Ok((imap_session, mailbox));
+	return Ok((imap_session, mailbox, isGmail));
 }
 
-pub fn listbox(imap_session: &mut Session<Connection>) -> Result<Vec<BoxName>, ImapError>
+pub fn listbox(imap_session: &mut Session<Connection>, isGmail: bool) -> Result<Vec<BoxName>, ImapError>
 {
 	let mut returning = Vec::new();
 	let results = imap_session.list(None, Some("*"));
@@ -26,6 +27,9 @@ pub fn listbox(imap_session: &mut Session<Connection>) -> Result<Vec<BoxName>, I
 	{
 		for result in names.iter()
 		{
+			// special gmail case
+			if(isGmail && result.name().to_string()=="INBOX") {continue};
+
 			let mut attributs = Attributs::default();
 			result
 				.attributes()
@@ -70,8 +74,8 @@ pub fn extract_ImapMail_from_fetch(imap_session: &mut Session<Connection>, uid: 
 		..Default::default()
 	};
 
-	for message in message.iter() {
-		println!("message ok");
+	for message in message.iter()
+	{
 		if let Some(header) = message.header() && let Ok(parsed) = parse_mail(header)
 		{
 			if let Some(subject) = parsed.headers.get_first_value("Subject") {
@@ -90,55 +94,11 @@ pub fn extract_ImapMail_from_fetch(imap_session: &mut Session<Connection>, uid: 
 		//println!("mail parse content : {}", String::from_utf8(message.body().unwrap_or("qdqsdqd".as_bytes()).to_vec()).unwrap_or_default());
 		if let Some(body) = message.body() && !body.is_empty() && let Ok(parsed) = parse_mail(body)
 		{
+			body_content_extract(&mut mailData,&parsed);
 			for part in &parsed.subparts {
-				println!("--- part {} ----",part.ctype.mimetype);
-				match part.ctype.mimetype.as_str() {
-					"text/plain" => {
-						if let Ok(text) = part.get_body() {
-							if mailData.content.is_none() {
-								mailData.content = Some(text);
-							}
-						}
-					}
-					"text/html" => {
-						if let Ok(text) = part.get_body() {
-							mailData.content = Some(text);
-						}
-					}
-					"multipart/alternative" => {
-						println!("alternative {}",part.ctype.mimetype);
-					}
-					_ => {
-						let cd = part.get_content_disposition();
-
-						let is_attachment = cd.disposition == DispositionType::Attachment;
-						let is_inline = cd.disposition == DispositionType::Inline;
-
-						if is_attachment || is_inline {
-							if let Ok(data) = part.get_body_raw() {
-								let attachment = Attachment {
-									filename: cd.params.iter().filter_map(|((key,value))| {
-										if(key=="filename") {return Some(value.clone());}
-										return None;
-									}).next(),
-									content_type: part.ctype.mimetype.clone(),
-									content_id: part.headers.get_first_value("Content-ID"),
-									data,
-								};
-
-								/*if is_inline {
-									out.inline.push(attachment);
-								} else {
-									out.attachments.push(attachment);
-								}*/
-							}
-						}
-					}
-				}
+				body_content_extract(&mut mailData, part);
 			}
 		}
-
-		//HTrace!("body : {}",parsed.subparts.iter().next().unwrap().get_body().unwrap());
 
 		if let Some(date) = message.internal_date() {
 			mailData.date = date.timestamp();
@@ -148,52 +108,71 @@ pub fn extract_ImapMail_from_fetch(imap_session: &mut Session<Connection>, uid: 
 	return Some(mailData);
 }
 
-/*fn extract_parts(mail: &ParsedMail, out: &mut MailParts) {
-	for part in &parsed.subparts {
-		println!("--- part {} ----",part.ctype.mimetype);
-		match part.ctype.mimetype.as_str() {
-			"text/plain" => {
-				if let Ok(text) = part.get_body() {
-					if mailData.content.is_none() {
-						mailData.content = Some(text);
-					}
+
+pub fn body_content_extract(mailData: &mut ImapMail,body: &ParsedMail)
+{
+	//println!("--- part {} ----",body.ctype.mimetype);
+	match body.ctype.mimetype.as_str() {
+		"text/plain" => {
+			if let Ok(text) = body.get_body() {
+				if mailData.content.is_none() {
+					mailData.content = ImapMailContentType::Text(text);
 				}
 			}
-			"text/html" => {
-				if let Ok(text) = part.get_body() {
-					mailData.content = Some(text);
+		}
+		"text/html" => {
+			if let Ok(text) = body.get_body() {
+				if mailData.content.is_not_html() {
+					mailData.content = ImapMailContentType::Html(text);
 				}
 			}
-			"multipart/alternative" => {
-
+		}
+		"multipart/alternative" | "multipart/mixed" | "multipart/related" => {
+			//println!("alternative {}",body.ctype.mimetype);
+			for subpart in body.subparts.iter() {
+				body_content_extract(mailData,subpart);
 			}
-			_ => {
-				let cd = mail.get_content_disposition();
+		}
+		_ => {
+			let cd = body.get_content_disposition();
 
-				let is_attachment =
-					cd.as_ref().map(|d| d.disposition == "attachment").unwrap_or(false);
+			let is_attachment = cd.disposition == DispositionType::Attachment;
+			let is_inline = cd.disposition == DispositionType::Inline;
 
-				let is_inline =
-					cd.as_ref().map(|d| d.disposition == "inline").unwrap_or(false);
+			if is_attachment || is_inline {
+				if let Ok(data) = body.get_body_raw() {
+					let attachment = Attachment {
+						filename: cd.params.iter().filter_map(|((key,value))| {
+							if(key=="filename") {return Some(value.clone());}
+							return None;
+						}).next(),
+						content_type: body.ctype.mimetype.clone(),
+						content_id: body.headers.get_first_value("Content-ID").map(|s| s.trim().trim_start_matches('<').trim_end_matches('>').to_string()),
+						data,
+					};
 
-				if is_attachment || is_inline {
-					if let Ok(data) = mail.get_body_raw() {
-						let attachment = Attachment {
-							filename: cd.and_then(|d| d.params.get("filename").cloned()),
-							content_type: mail.ctype.mimetype.clone(),
-							content_id: mail.headers.get_first_value("Content-ID"),
-							data,
-						};
-
-						if is_inline {
-							out.inline.push(attachment);
-						} else {
-							out.attachments.push(attachment);
+					if is_inline {
+						if let Some(content_id) = attachment.content_id.clone() {
+							if mailData.parts.iter().filter(|att| att.content_id.is_some() && att.content_id.as_ref().unwrap()==&content_id).next().is_none() {
+								mailData.parts.push(attachment);
+							}
+						}
+						else {
+							mailData.parts.push(attachment);
+						}
+					} else {
+						if let Some(filename) = attachment.filename.clone() {
+							if mailData.attachement.iter().filter(|att| att.filename.is_some() && att.filename.as_ref().unwrap()==&filename).next().is_none() {
+								mailData.attachement.push(attachment);
+							}
+						}
+						else {
+							mailData.attachement.push(attachment);
 						}
 					}
 				}
 			}
 		}
 	}
+	//println!("--- end part {} ----",body.ctype.mimetype);
 }
-*/

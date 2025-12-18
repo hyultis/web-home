@@ -1,10 +1,10 @@
-use std::sync::OnceLock;
-use dashmap::DashMap;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use crate::api::translateBooks::translateBook::TranslateBook;
 
 pub struct TranslateManager
 {
-	_datas: DashMap<String, TranslateBook>
+	_datas: Arc<Mutex<HashMap<String, TranslateBook>>>
 }
 
 static SINGLETON: OnceLock<TranslateManager> = OnceLock::new();
@@ -14,27 +14,28 @@ impl TranslateManager
 	pub fn singleton() -> &'static Self
 	{
 		SINGLETON.get_or_init(||Self {
-			_datas: DashMap::new()
+			_datas: Default::default()
 		})
 	}
 
 	pub fn getBookContent(lang: String,timestamp: u64) -> anyhow::Result<Option<(String,u64)>>
 	{
 		let lang = Self::filterLang(lang);
-		if let Some(book) = Self::singleton()._datas.get(&lang)
+		let mut binding = Self::singleton()._datas.lock().unwrap();
+		if let Some(book) = binding.get(&lang)
 		{
 			if(book.getTime() > timestamp)
 			{
-				return Ok(Some(book.value().get()));
+				return Ok(Some(book.get()));
 			}
 			return Ok(None);
 		}
 
 
-		// if book not existing
+		// if a book not existing
 		let book = TranslateBook::load(&lang)?;
-		Self::singleton()._datas.insert(lang.clone(),book);
-		return Ok(Some(Self::singleton()._datas.get(&lang).unwrap().get()));
+		binding.insert(lang.clone(),book);
+		return Ok(Some(binding.get(&lang).unwrap().get()));
 	}
 
 	///// PRIVATE

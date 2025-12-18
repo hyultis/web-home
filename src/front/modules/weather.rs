@@ -1,6 +1,6 @@
 use js_sys::{Array, Intl, Object, Reflect};
 use leptoaster::ToasterContext;
-use leptos::prelude::{ClassAttribute, CollectView, ElementChild, Get, GetUntracked, OnAttribute, PropAttribute, StyleAttribute, Update};
+use leptos::prelude::{ClassAttribute, CollectView, ElementChild, Get, GetUntracked, OnAttribute, StyleAttribute, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, IntoAny, RwSignal};
 use leptos::view;
 use serde::{Deserialize, Serialize};
@@ -10,13 +10,13 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{JsFuture};
 use web_sys::{window, Position, PositionError, Response};
 use crate::api::modules::components::ModuleContent;
-use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleSizeContrainte, RefreshTime};
+use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, FieldHelper, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::translate::Translate;
 use crate::HWebTrace;
-use leptos::prelude::OnTargetAttribute;
 use time::UtcDateTime;
 use wasm_bindgen::prelude::Closure;
+use crate::front::utils::draw_title_if_present;
 
 #[derive(Serialize,Deserialize,Debug)]
 #[derive(Clone)]
@@ -25,6 +25,8 @@ struct WeatherConfig
 	pub latitude: f64,
 	pub longitude: f64,
 	pub maxday: u8,
+	#[serde(default)]
+	pub title: String,
 }
 impl Default for WeatherConfig
 {
@@ -34,6 +36,7 @@ impl Default for WeatherConfig
 			latitude: 0.0,
 			longitude: 0.0,
 			maxday: 3,
+			title: "".to_string(),
 		}
 	}
 }
@@ -126,34 +129,35 @@ impl Backable for Weather
 				    on_error.forget();
 				};
 
-				let configLatitude = self.config.clone();
-				let configLongitude = self.config.clone();
-				let configMaxDay = self.config.clone();
-				let cacheTitle = self._update.clone();
-				let cacheLink = self._update.clone();
-				let cacheMax = self._update.clone();
+				let mut titleF = FieldHelper::new(&self.config,&self._update,"MODULE_TITLE_CONF",
+		                                  |d| d.get().title,
+		                                  |ev,inner| inner.title = ev.target().value());
+				titleF.setFullSize(true);
+				let latitudeF = FieldHelper::new(&self.config,&self._update,"MODULE_WEATHER_POSITION",
+		                                  |d| d.get().latitude.to_string(),
+		                                  |ev,inner| inner.latitude = ev.target().value().parse::<f64>().unwrap_or(0.0));
+				let longitudeF = FieldHelper::new(&self.config,&self._update,"",
+		                                  |d| d.get().longitude.to_string(),
+		                                  |ev,inner| inner.longitude = ev.target().value().parse::<f64>().unwrap_or(0.0));
+				let maxdayF = FieldHelper::new(&self.config,&self._update,"MODULE_WEATHER_MAXDAY",
+		                                  |d| d.get().maxday.to_string(),
+		                                  |ev,inner| inner.maxday = ev.target().value().parse::<u8>().unwrap_or(0));
 				view!{
 				<div class="module_weather_config">
-					<label for="weather_latitude"><Translate key="MODULE_WEATHER_POSITION"/></label><br/>
-					<input type="text" name="weather_latitude" prop:value={configLatitude.get().latitude} on:input:target=move |ev| {
-						configLatitude.update(|inner|inner.latitude = ev.target().value().parse::<f64>().unwrap_or(0.0));
-						cacheTitle.update(|cache| cache.update());
-					} />/
-					<input type="text" prop:value={configLongitude.get().longitude}  on:input:target=move |ev| {
-						configLongitude.update(|inner|inner.longitude = ev.target().value().parse::<f64>().unwrap_or(0.0));
-						cacheLink.update(|cache| cache.update());
-					}/><br/>
+					{titleF.draw()}<br/>
+					{latitudeF.draw()}/
+					{longitudeF.draw()}<br/>
 					<button on:click={locateFn}><Translate key="MODULE_WEATHER_LOCATE"/></button><br/>
-					<label for="weather_maxday"><Translate key="MODULE_WEATHER_MAXDAY"/></label><input type="number" min="1" max="7" name="weather_maxday" prop:value={configMaxDay.get().maxday}  on:input:target=move |ev| {
-						configMaxDay.update(|inner|inner.maxday = ev.target().value().parse::<u8>().unwrap_or(3));
-						cacheMax.update(|cache| cache.update());
-					}/>
+					{maxdayF.draw()}
 				</div>
 				}.into_any()
 			}
 			else
 			{
-				view!{<div class="module_weather">{
+				let config = self.config.clone();
+				view!{
+					{draw_title_if_present(config.get().title.clone())}
+					<div class="module_weather">{
 					self.weatherContent.get().map(|haveContent| {
 						let units = haveContent.unit.clone();
 						haveContent.days.iter().map(|days| {
@@ -225,10 +229,13 @@ impl Backable for Weather
 	}
 
 	fn size(&self) -> ModuleSizeContrainte {
+		let mut minsize = 175;
+		if(!self.config.get_untracked().title.is_empty()) {minsize = 210};
+
 		ModuleSizeContrainte{
 			x_min: Some(150),
 			x_max: None,
-			y_min: Some(175),
+			y_min: Some(minsize),
 			y_max: None,
 		}
 	}
@@ -375,6 +382,7 @@ async fn sync_weather_api(config: ArcRwSignal<WeatherConfig>,weatherContent: Arc
 		}
 		Err(e) => {
 			HWebTrace!("error : {:?}", e);
+			// TODO
 		}
 		_ => {}
 	}

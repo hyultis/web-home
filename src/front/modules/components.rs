@@ -143,7 +143,7 @@ pub fn distant_time(timestamp: i64) -> DISTANT_TIME_RESULT
 
 	let ifpast = distance<0;
 	let mut distance = distance.abs();
-	let mut key = ORDERED_TIME.get(0).unwrap().1.to_string();
+	let mut key = ORDERED_TIME.get(0).unwrap_or(&(0,"YEAR")).1.to_string();
 
 	for (max,I18lKey) in ORDERED_TIME {
 		key = I18lKey.to_string();

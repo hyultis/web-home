@@ -61,10 +61,8 @@ pub fn TranslateFn(
 	view! {
 		<Transition fallback=move || view! { <span>{format!("{}_fallback",altkey.clone()())}</span> }.into_any()>
 			{move || translate.get().map(|translated|{
-					if(translated.contains(splitted))
+					if let Some((prefix,suffix)) = translated.split_once(splitted)
 					{
-						let splitVar = translated.split_once(splitted);
-						let (prefix,suffix) = splitVar.unwrap();
 						let prefix = prefix.to_string();
 						let suffix = suffix.to_string();
 						if let Some(children) = &children

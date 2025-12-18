@@ -1,3 +1,6 @@
+use base64ct::{Base64, Encoding};
+use leptos::logging::log;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -48,6 +51,20 @@ pub struct imap_connector
 	pub extra: Option<imap_connector_extra>,
 }
 
+impl imap_connector
+{
+	pub fn isGmail(&self) -> bool
+	{
+		self.host.contains("gmail.com")
+	}
+
+	pub fn isBoxBlacklisted(&self, boxName: impl ToString) -> bool
+	{
+		let Some(extra) = &self.extra else {return true;};
+		return extra.boxBlackList.contains(&boxName.to_string());
+	}
+}
+
 impl Default for imap_connector
 {
 	fn default() -> Self {
@@ -77,18 +94,13 @@ pub struct ImapMail
 	pub from: String,
 	pub to: String,
 	pub subject: Option<String>,
-	pub content: Option<String>,
+	pub content: ImapMailContentType,
 	pub files: Option<Vec<String>>,
 	pub date: i64,
 	pub boxName: String,
-}
-
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
-pub struct MailParts {
-	pub text: Option<String>,
-	pub html: Option<String>,
-	pub attachments: Vec<Attachment>,
-	pub inline: Vec<Attachment>,
+	pub parts: Vec<Attachment>,
+	pub attachement: Vec<Attachment>,
+	pub confirmVue: bool
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
@@ -105,6 +117,69 @@ pub struct ImapMailIdentifier
 {
 	pub uid: u32,
 	pub boxName: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum ImapMailContentType
+{
+	None,
+	Text(String),
+	Html(String),
+}
+
+impl Default for ImapMailContentType
+{
+	fn default() -> Self {
+		Self::None
+	}
+}
+
+impl ImapMailContentType
+{
+	pub fn is_none(&self) -> bool {
+		matches!(self, Self::None)
+	}
+
+	pub fn is_not_html(&self) -> bool {
+		!matches!(self, Self::Html(_))
+	}
+
+	/// do not panic, just return an empty string in case of None
+	/// in case of Text, convert return line into <br/>
+	pub fn unwrap_or_default(&self, parts: &Vec<Attachment>) -> String {
+		match self {
+			Self::Text(text) => text.clone().replace("\n", "<br/>"),
+			Self::Html(html) => {
+				let re = Regex::new(r#"(?i)src\s*=\s*("cid:[^"]+"|'cid:[^']+')"#).unwrap();
+
+				re.replace_all(html, |caps: &regex::Captures| {
+					let full = caps.get(1).unwrap().as_str(); // ex: "cid:image@id"
+					let quote = &full[0..1];                  // " ou '
+					let cid = &full[5..full.len() - 1];       // enlève "cid: et la quote finale
+					log!("cid: {} quote: {}", cid, quote);
+
+					let filter = |part: &&Attachment| {
+						log!("filter: {:?} == {}", part.content_id,cid);
+						if let Some(partcid) = &part.content_id {
+							return partcid == &cid.to_string();
+						}
+						return false;
+					};
+
+					if let Some((mime, bytes)) = parts.iter().filter(filter).next().map(|part| (part.content_type.clone(), part.data.clone())) {
+						log!("cid found");
+						let b64 = Base64::encode_string(bytes.as_slice());
+						format!(r#"src={quote}data:{mime};base64,{b64}{quote}"#)
+					} else {
+						// on laisse tel quel (comme ton return $match[0])
+						caps.get(0).unwrap().as_str().to_string()
+					}
+				})
+					.into_owned()
+			},
+			_ => "".to_string(),
+		}
+	}
 }
 
 impl From<ImapMail> for ImapMailIdentifier

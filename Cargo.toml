@@ -21,7 +21,6 @@ tower-sessions = { git = "https://github.com/maxcountryman/tower-sessions"} # ve
 wasm-bindgen = "=0.2.104"
 Hconfig = {  version = "2.0", optional = true }
 Htrace = {  version = "2.0", optional = true }
-dashmap = {version = "6.1.0", features = ["rayon"]}
 serde = { version = "1.0", features = ["derive"] }
 http = "1"
 leptos-use = { version = "0.16.3", features = ["use_locales","use_cookie","storage","use_draggable","use_mouse_in_element","use_interval_fn"] }
@@ -39,7 +38,7 @@ strum = "0.27.2"
 url = "2.5.7"
 strum_macros = "0.27"
 feed-rs = "2.3.1"
-web-sys = "0.3.81"
+web-sys = { version = "0.3.81", features = ["BlobPropertyBag"] }
 wasm-bindgen-futures = "0.4.54"
 js-sys = "0.3.81"
 reqwest = { version = "0.12.24", optional = true }
@@ -48,6 +47,8 @@ imap = {  version = "3.0.0-alpha.15", optional = true }
 imap-proto = { version = "0.16.6", optional = true}
 mailparse = { version = "0.16.1", optional = true}
 async-lock = "3.0.0"
+gloo-timers = "0.3.0"
+regex = "1.12.2"
 
 [features]
 hydrate = [
@@ -75,6 +76,10 @@ ssr = [
 ]
 
 # Defines a size-optimized profile for the WASM bundle in release mode
+[profile.wasm-debug]
+inherits = "dev"
+panic = "unwind"
+
 [profile.wasm-release]
 inherits = "release"
 opt-level = 'z'

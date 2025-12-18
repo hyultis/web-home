@@ -42,7 +42,7 @@ impl ModuleActionFn
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
 			spawn_local(async move {
-				let Some(mut guard) = moduleContentInnerValidate.try_write()
+				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked()
 				else
 				{
 					return;
@@ -78,7 +78,7 @@ impl ModuleActionFn
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
 			spawn_local(async move {
-				let Some(mut guard) = moduleContentInnerValidate.try_write()
+				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked()
 				else
 				{
 					return;
@@ -114,7 +114,7 @@ impl ModuleActionFn
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
 			spawn_local(async move {
-				let Some(mut guard) = moduleContentInnerValidate.try_write()
+				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked()
 				else
 				{
 					return;
@@ -149,7 +149,7 @@ impl ModuleActionFn
 			let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 			let toaster = toaster.clone();
 			spawn_local(async move {
-				let mut guard = moduleContentInnerValidate.write();
+				let mut guard = moduleContentInnerValidate.write_untracked();
 				let modules: &mut ModuleHolder = guard.deref_mut();
 				(*modules).module_refresh(moduleName, toaster).await;
 			});

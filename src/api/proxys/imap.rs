@@ -7,8 +7,8 @@ pub async fn API_proxys_imap_listbox(config: imap_connector) -> Result<Vec<BoxNa
 {
 	use crate::api::proxys::imap_inner::*;
 
-	let (mut imap_session,_) = connect_imap(config)?;
-	let results = listbox(&mut imap_session)?;
+	let (mut imap_session,_,isGmail) = connect_imap(&config)?;
+	let results = listbox(&mut imap_session,isGmail)?;
 
 	return Ok(results);
 }
@@ -19,8 +19,8 @@ pub async fn API_proxys_imap_getFullUnsee(config: imap_connector) -> Result<Vec<
 {
 	use crate::api::proxys::imap_inner::*;
 
-	let (mut imap_session,_) = connect_imap(config)?;
-	let results = listbox(&mut imap_session)?;
+	let (mut imap_session,_,isGmail) = connect_imap(&config)?;
+	let results = listbox(&mut imap_session,isGmail)?;
 
 	let mut listOfMail = vec![];
 	for boxName in results
@@ -45,13 +45,14 @@ pub async fn API_proxys_imap_getUnseeSince(config: imap_connector, date:u64) -> 
 	use crate::api::proxys::imap_inner::*;
 	use time::format_description;
 
-	let (mut imap_session,_) = connect_imap(config)?;
-	let results = listbox(&mut imap_session)?;
+	let (mut imap_session,_,isGmail) = connect_imap(&config)?;
+	let results = listbox(&mut imap_session,isGmail)?;
 
 	let mut listOfMail = vec![];
 	for boxName in results
 	{
 		if(boxName.attributes.is_uninteresting()) {continue};
+		if(config.isBoxBlacklisted(&boxName.name)) {continue};
 
 		let Ok(mailbox) = imap_session.select(&boxName.name) else {continue};
 
@@ -74,10 +75,22 @@ pub async fn API_proxys_imap_getMailContent(config: imap_connector, mail: ImapMa
 {
 	use crate::api::proxys::imap_inner::*;
 
-	let (mut imap_session,_) = connect_imap(config)?;
+	let (mut imap_session,_,_) = connect_imap(&config)?;
 	imap_session.select(&mail.boxName)?;
 	let Ok(results) = imap_session.uid_fetch(&mail.uid.to_string(), "(FLAGS INTERNALDATE BODY.PEEK[])") else {return Err(ImapError::MAIL_NOT_FOUND)};
 	let Some(mail) = extract_ImapMail_from_fetch(&mut imap_session,mail.uid,results,&mail.boxName).into_iter().next() else {return Err(ImapError::MAIL_NOT_FOUND)};
 
 	return Ok(mail);
+}
+
+#[server]
+pub async fn API_proxys_imap_setMailSee(config: imap_connector, mail: ImapMailIdentifier) -> Result<(), ImapError>
+{
+	use crate::api::proxys::imap_inner::*;
+
+	let (mut imap_session,_,_) = connect_imap(&config)?;
+	imap_session.select(&mail.boxName)?;
+	imap_session.uid_store(&mail.uid.to_string(),"+FLAGS (\\Seen)")?;
+
+	return Ok(());
 }

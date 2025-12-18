@@ -41,6 +41,10 @@ FRONTUI_INVALID_URL = format d'url invalide
 FRONTUI_UPDATE = Sauvegarder
 FRONTUI_REFRESH = Recharger
 FRONTUI_REMOVED = Supprimer
+FRONTUI_NOTITLE = Sans titre
+FRONTUI_HOME_CHANGE_OK = Enregistrer les changements ?
+FRONTUI_HOME_CHANGE_CANCEL = Annuler les changements ?
+FRONTUI_HOME_CHANGE_NEW = Type du nouveau module ?
 
 #time
 DISTANT_TIME_RESULT_SEC = s
@@ -50,8 +54,14 @@ DISTANT_TIME_RESULT_DAY = j
 DISTANT_TIME_RESULT_MON = m
 DISTANT_TIME_RESULT_YEAR = a
 
+#modules
+MODULE_TITLE_CONF = Titre:
+
+#module link
+MODULE_RSS_DEL = Supprimer un lien ?
+MODULE_RSS_ADD = Ajouter un lien
+
 #module rss
-MODULE_RSS_TITLE = Titre:
 MODULE_RSS_LINK = Lien RSS:
 MODULE_RSS_MAXLINE = Nombre de lignes:
 MODULE_RSS_DEMO = Exemple:
@@ -82,3 +92,10 @@ MODULE_MAIL_GETBOXS = Obtenir les boites / vérification connection
 MODULE_MAIL_BOXS_LIST = Listes des boites (clic pour blacklisté)
 MODULE_MAIL_NO_MAIL = Aucun nouveau mail
 MODULE_MAIL_NO_SUBJECT = <sans titre>
+MODULE_MAIL_FROM = Emetteur:
+MODULE_MAIL_TO = Destinataire:
+MODULE_MAIL_DATE = Date:
+MODULE_MAIL_ATTACHEMENT = Pieces jointes:
+MODULE_MAIL_BLOBCREATORERROR = Impossible de crée le téléchargement pour ce fichier
+MODULE_MAIL_SYNCERROR = Synchronisation mail impossible
+MODULE_MAIL_MAILCONTENTSEEN = Marquer comme lu

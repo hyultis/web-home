@@ -1,4 +1,3 @@
-use crate::HWebTrace;
 use leptos::prelude::{ElementChild, IntoAny};
 use leptos::prelude::OnAttribute;
 use leptos::prelude::{AnyView, ClassAttribute, Signal, Update};
@@ -69,13 +68,25 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 									view!(<Translate key={data.title}/>).into_any()
 								}
 					}</h2>
-							<p>{
+							<p class="dialog-content">{
 								let tmp = data.body.clone();
 								tmp()
 							}</p>
 							<div class="dialog-buttons">
-								<button class="validate" on:click=validateFn.clone()><Translate key={AllFrontUIEnum::VALID.to_string()}/></button>
-								<button class="close" on:click=closeFn.clone()><Translate key={AllFrontUIEnum::CLOSE.to_string()}/></button>
+								{
+									if let Some(button) = data.button_validate_title.clone()
+									{
+										view!{<button class="validate" on:click=validateFn.clone()><Translate key={button}/></button>}.into_any()
+									}
+									else {view!{}.into_any()}
+								}
+								{
+									if let Some(button) = data.button_close_title.clone()
+									{
+										view!{<button class="close" on:click=closeFn.clone()><Translate key={button}/></button>}.into_any()
+									}
+									else {view!{}.into_any()}
+								}
 							</div>
 						</div>
 					</div>
@@ -88,12 +99,78 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 #[derive(Clone)]
 pub struct DialogData
 {
-	pub title: String,
-	pub body: Arc<dyn Fn() -> AnyView + Send + Sync + 'static>,
-	pub on_validate: Option<Callback<(),bool>>,
-	pub on_close: Option<Callback<()>>,
-	pub is_closing: bool,
-	pub is_larger: bool,
+	title: String,
+	body: Arc<dyn Fn() -> AnyView + Send + Sync + 'static>,
+	on_validate: Option<Callback<(),bool>>,
+	on_close: Option<Callback<()>>,
+	is_closing: bool,
+	is_larger: bool,
+	button_validate_title: Option<String>,
+	button_close_title: Option<String>,
+}
+
+impl DialogData
+{
+	pub fn new() -> Self
+	{
+		Self {
+			title: AllFrontUIEnum::NOTITLE.to_string(),
+			body: Arc::new(move || view!{}.into_any()),
+			on_validate: None,
+			on_close: None,
+			is_closing: false,
+			is_larger: false,
+			button_validate_title: Some(AllFrontUIEnum::VALID.to_string()),
+			button_close_title: Some(AllFrontUIEnum::CLOSE.to_string()),
+		}
+	}
+
+	/// note: si le titre commence avec "€", il ne sera pas traduit
+	pub fn setTitle(mut self, title: impl ToString) -> Self
+	{
+		self.title = title.to_string();
+		self
+	}
+
+	pub fn setBody(mut self, body: impl Fn() -> AnyView + Send + Sync + 'static) -> Self
+	{
+		self.body = Arc::new(body);
+		self
+	}
+
+	/// Defines an action for the valid button before the popup is closed. If the callback returns false, the popup is not closed.
+	pub fn setOnValidate(mut self, on_validate: Callback<(),bool>) -> Self
+	{
+		self.on_validate = Some(on_validate);
+		self
+	}
+
+	/// Defines an action for the close button before the popup is closed.
+	pub fn setOnClose(mut self, on_close: Callback<()>) -> Self
+	{
+		self.on_close = Some(on_close);
+		self
+	}
+
+	/// "Large" tells the popup to use the maximum available screen size instead of the content’s minimum size.
+	pub fn setIsLarger(mut self, is_larger: bool) -> Self
+	{
+		self.is_larger = is_larger;
+		self
+	}
+
+	/// Change the label of the valid button (or hide it if `NONE`).
+	pub fn setButtonValidateTitle(mut self, button_validate_title: Option<impl ToString>) -> Self
+	{
+		self.button_validate_title = button_validate_title.map(|s| s.to_string());
+		self
+	}
+
+	/// Change the label of the close button (or hide it if `NONE`).
+	pub fn setButtonCloseTitle(mut self, button_close_title: Option<impl ToString>)
+	{
+		self.button_close_title = button_close_title.map(|s| s.to_string());
+	}
 }
 
 #[derive(Clone)]
@@ -113,61 +190,12 @@ impl DialogManager
 
 	/// Ouvre un popup sans body
 	/// note pour le titre, s'il commence avec "€", il ne sera pas traduit
-	pub fn openSimple(
-		&self,
-		title: impl ToString,
-		on_validate: Option<Callback<(),bool>>,
-		on_close: Option<Callback<()>>,
-	)
-	{
-		self.dialog.set(Some(DialogData {
-			title: title.to_string(),
-			body: Arc::new(move || view!{}.into_any()),
-			on_validate,
-			on_close,
-			is_closing: false,
-			is_larger: false,
-		}));
-	}
-
-	/// Ouvre un popup avec le contenu fourni
-	/// note pour le titre, s'il commence avec "€", il ne sera pas traduit
 	pub fn open(
 		&self,
-		title: impl ToString,
-		body: impl Fn() -> AnyView + Send + Sync + 'static,
-		on_validate: Option<Callback<(),bool>>,
-		on_close: Option<Callback<()>>,
+		dialog: DialogData
 	)
 	{
-		self.dialog.set(Some(DialogData {
-			title: title.to_string(),
-			body: Arc::new(body),
-			on_validate,
-			on_close,
-			is_closing: false,
-			is_larger: false,
-		}));
-	}
-
-	/// Ouvre une grosse popup avec le contenu fourni
-	/// note pour le titre, s'il commence avec "€", il ne sera pas traduit
-	pub fn openLarger(
-		&self,
-		title: impl ToString,
-		body: impl Fn() -> AnyView + Send + Sync + 'static,
-		on_validate: Option<Callback<(),bool>>,
-		on_close: Option<Callback<()>>,
-	)
-	{
-		self.dialog.set(Some(DialogData {
-			title: title.to_string(),
-			body: Arc::new(body),
-			on_validate,
-			on_close,
-			is_closing: false,
-			is_larger: true,
-		}));
+		self.dialog.set(Some(dialog));
 	}
 
 	/// Ferme la popup courante
@@ -194,7 +222,6 @@ impl DialogManager
 				isValidated = cb.run(());
 			}
 		}
-		HWebTrace!("isValidated {}",isValidated);
 		if(isValidated)
 		{
 			self.innerAnimateClose(start);

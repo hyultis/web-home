@@ -130,7 +130,6 @@ impl FluentManager {
 
 	async fn addResource(lang: &String, timestamp: u64) -> Option<(String,u64)>
 	{
-		log!("addResource {}",lang);
 		return match API_translate_getBook(lang.clone(), timestamp).await
 		{
 			Ok(data) => {

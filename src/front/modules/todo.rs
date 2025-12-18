@@ -89,8 +89,9 @@ impl Backable for Todo
 	}
 
 	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String, toaster: ToasterContext) -> Option<BoxFuture> {
-		moduleActions.clone().updateFn.run((currentName.clone()));
-		None
+		return Some(Box::pin(async move {
+			moduleActions.clone().updateFn.run((currentName.clone()));
+		}));
 	}
 
 	fn export(&self) -> ModuleContent

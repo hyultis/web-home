@@ -64,9 +64,8 @@ impl Rss
 	async fn sync(toaster: ToasterContext, rssContent: ArcRwSignal<Option<(u64,Feed)>>, config: ArcRwSignal<RssConfig>)
 	{
 		let url = config.get_untracked().link.clone();
-		let Ok(window) = web_sys::window().ok_or("no window") else {return};
 		let oldTime = rssContent.get_untracked().map(|content| content.0);
-		let Some((time,text)) = toaster_api(&toaster,API_proxys_wget(url.to_string(),oldTime).await, None).await else {return};
+		let Some((time,text)) = toaster_api(&toaster,API_proxys_wget(url.to_string(),oldTime).await, None).await else {return}; // TODO: return must throw error toaster
 		let Ok(feed) = parser::parse(text.as_bytes()) else {return};
 
 		rssContent.update(|rssContent| {
@@ -139,7 +138,7 @@ impl Backable for Rss
 		view! {{
 			if(editMode.get())
 			{
-				let mut titleF = FieldHelper::new(&self.config,&self._update,"MODULE_RSS_TITLE",
+				let mut titleF = FieldHelper::new(&self.config,&self._update,"MODULE_TITLE_CONF",
 					|d| d.get().title,
 					|ev,inner| inner.title = ev.target().value());
 				titleF.setFullSize(true);
@@ -176,12 +175,16 @@ impl Backable for Rss
 							rssContent.entries.iter().enumerate()
 							.filter(|(num,_)| *num <= config.get().maxline as usize)
 							.map(|(_,entry)|{
-								view!{
-									<tr>
-										<td>{distant_time_simpler(entry.published.clone().unwrap().timestamp())}</td>
-										<td><a href={entry.links.first().clone().unwrap().href.clone()} rel="noopener noreferrer nofollow" target="_blank">{entry.title.clone().unwrap().content}</a></td>
-									</tr>
+								if let Some(link) = &entry.links.first() && let Some(title) = &entry.title
+								{
+									view!{
+										<tr>
+											<td>{distant_time_simpler(entry.published.clone().unwrap_or_default().timestamp())}</td>
+											<td><a href={link.href.clone()} rel="noopener noreferrer nofollow" target="_blank">{title.content.clone()}</a></td>
+										</tr>
+									}.into_any()
 								}
+								else {view!{}.into_any()}
 							}).collect_view()
 						}
 						</table>

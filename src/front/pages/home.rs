@@ -1,9 +1,9 @@
-use leptos::prelude::OnTargetAttribute;
+use leptos::prelude::{GetUntracked, OnTargetAttribute, ReadUntracked};
 use leptos::prelude::{CollectView, Get, PropAttribute};
 use crate::front::modules::components::Backable;
 use crate::front::modules::ModuleHolder;
 use crate::front::utils::all_front_enum::{AllFrontLoginEnum, AllFrontUIEnum};
-use crate::front::utils::dialog::DialogManager;
+use crate::front::utils::dialog::{DialogData, DialogManager};
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
 use crate::front::utils::users_data::UserData;
 use crate::{HWebTrace};
@@ -30,7 +30,10 @@ pub fn Home() -> impl IntoView
 {
 	let editMode = RwSignal::new(false);
 	let moduleContent = ArcRwSignal::new(ModuleHolder::new());
-	let dialog = use_context::<DialogManager>().expect("DialogManager missing");
+	let Some(dialogManager) = use_context::<DialogManager>() else {
+		HWebTrace!("cannot get dialogManager in home");
+		panic!("cannot get dialogManager in home");
+	};
 	let toaster = expect_toaster();
 
 	let moduleActions = ModuleActionFn::new(moduleContent.clone(),toaster.clone());
@@ -43,14 +46,14 @@ pub fn Home() -> impl IntoView
 		moduleContent.clone(),
 		editMode.clone(),
 		toaster.clone(),
-		dialog.clone(),
+		dialogManager.clone(),
 	);
 
 	let editModeCancelFn = editMode_cancel(
 		moduleContent.clone(),
 		editMode.clone(),
 		toaster.clone(),
-		dialog.clone(),
+		dialogManager.clone(),
 	);
 
 	let editModeActivateFn = move |_| {
@@ -62,7 +65,7 @@ pub fn Home() -> impl IntoView
 	let forceResyncFn = move |_| {
 	};
 
-	let editModeAddModuleFn = editMode_AddBlock(moduleContent.clone(), dialog.clone());
+	let editModeAddModuleFn = editMode_AddBlock(moduleContent.clone(), dialogManager.clone());
 
 	let (userData, setUserData) = UserData::cookie_signalGet();
 	let toasterInnerDisconnect = toaster.clone();
@@ -70,9 +73,9 @@ pub fn Home() -> impl IntoView
 		let navigate = hooks::use_navigate();
 		let toaster = toasterInnerDisconnect.clone();
 
-		dialog.openSimple(
-			AllFrontLoginEnum::LOGIN_USER_WANT_DISCONNECTED,
-			Some(Callback::new(move |_| {
+		let dialogContent = DialogData::new()
+			.setTitle(AllFrontLoginEnum::LOGIN_USER_WANT_DISCONNECTED)
+			.setOnValidate(Callback::new(move |_| {
 				let navigate = navigate.clone();
 				let toaster = toaster.clone();
 				spawn_local(async move {
@@ -84,39 +87,52 @@ pub fn Home() -> impl IntoView
 					navigate("/", Default::default());
 				});
 				return true;
-			})),
-			None,
-		);
+			}));
+
+		dialogManager.open(dialogContent);
 	};
 
 	let moduleContentInnerInitialLoad = moduleContent.clone();
 	let toasterInnerInitialLoad = toaster.clone();
+	let is_initialized = RwSignal::new(false);
 	Effect::new(move || {
+		if(is_initialized.get_untracked()) {
+			return;
+		}
+		is_initialized.set(true);
+
 		let moduleContentInnerInitialLoad = moduleContentInnerInitialLoad.clone();
 		let toasterInnerInitialLoad = toasterInnerInitialLoad.clone();
 
 		spawn_local(async move {
-			let Some(mut guard) = moduleContentInnerInitialLoad.try_write()
-			else
+			let mut haveBeenCorrectlyInit = false;
+			if let Some(mut guard) = moduleContentInnerInitialLoad.try_write()
 			{
-				return;
-			};
-			let holder: &mut ModuleHolder = guard.deref_mut();
+				let holder: &mut ModuleHolder = guard.deref_mut();
 
-			let Some((login, lang)) = UserData::loginLang_get_from_cookie()
-			else
-			{
-				return;
-			};
-			let error = (*holder).editMode_cancel(login, true).await;
-			if let Some(err) = error
-			{
-				toastingErr(&toasterInnerInitialLoad, err.to_string()).await;
+				let Some((login, _)) = UserData::loginLang_get_from_cookie()
+				else
+				{
+					return;
+				};
+				let error = (*holder).editMode_cancel(login, true).await;
+				if let Some(err) = error
+				{
+					toastingErr(&toasterInnerInitialLoad, err.to_string()).await;
+				}
+				else
+				{
+					haveBeenCorrectlyInit = true;
+				}
 			}
 
-			let keys: Vec<String> = holder.blocks_get().keys().cloned().collect();
-			for key in keys {
-				holder.module_refresh(key,toasterInnerInitialLoad.clone()).await;
+			if(haveBeenCorrectlyInit)
+			{
+				let holder = moduleContentInnerInitialLoad.read_untracked();
+				let keys: Vec<String> = holder.blocks_get().keys().cloned().collect();
+				for key in keys {
+					holder.module_refresh(key, toasterInnerInitialLoad.clone()).await;
+				}
 			}
 		});
 	});
@@ -174,7 +190,7 @@ fn editMode_cancel(
 	moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 	editModeInnerValidate: RwSignal<bool>,
 	toasterInnerValidate: ToasterContext,
-	dialog: DialogManager,
+	dialogManager: DialogManager,
 ) -> impl Fn(MouseEvent) + Clone
 {
 	return move |_| {
@@ -182,15 +198,9 @@ fn editMode_cancel(
 		let editModeInnerValidate = editModeInnerValidate.clone();
 		let toasterInnerValidate = toasterInnerValidate.clone();
 
-		dialog.open(
-			"Annuler les changements ?",
-			move || {
-				view! {
-					<span/>
-				}
-				.into_any()
-			},
-			Some(Callback::new(move |_| {
+		let dialogContent = DialogData::new()
+			.setTitle(AllFrontUIEnum::HOME_CHANGE_CANCEL)
+			.setOnValidate(Callback::new(move |_| {
 				let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 				let editModeInnerValidate = editModeInnerValidate.clone();
 				let toasterInnerValidate = toasterInnerValidate.clone();
@@ -221,9 +231,9 @@ fn editMode_cancel(
 					}
 				});
 				return true;
-			})),
-			None,
-		);
+			}));
+
+		dialogManager.open(dialogContent);
 	};
 }
 
@@ -231,7 +241,7 @@ fn editMode_validate(
 	moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 	editModeInnerValidate: RwSignal<bool>,
 	toasterInnerValidate: ToasterContext,
-	dialog: DialogManager,
+	dialogManager: DialogManager,
 ) -> impl Fn(MouseEvent) + Clone
 {
 	return move |_| {
@@ -239,15 +249,9 @@ fn editMode_validate(
 		let editModeInnerValidate = editModeInnerValidate.clone();
 		let toasterInnerValidate = toasterInnerValidate.clone();
 
-		dialog.open(
-			"Enregistrer les changements ?",
-			move || {
-				view! {
-					<span/>
-				}
-				.into_any()
-			},
-			Some(Callback::new(move |_| {
+		let dialogContent = DialogData::new()
+			.setTitle(AllFrontUIEnum::HOME_CHANGE_OK)
+			.setOnValidate(Callback::new(move |_| {
 				let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 				let editModeInnerValidate = editModeInnerValidate.clone();
 				let toasterInnerValidate = toasterInnerValidate.clone();
@@ -278,23 +282,23 @@ fn editMode_validate(
 					}
 				});
 				return true;
-			})),
-			None,
-		);
+			}));
+
+		dialogManager.open(dialogContent);
 	};
 }
 
 fn editMode_AddBlock(moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
-                     dialog: DialogManager) -> impl Fn(MouseEvent) + Clone
+                     dialogManager: DialogManager) -> impl Fn(MouseEvent) + Clone
 {
 	return move |_| {
 		let selectedType = ArcRwSignal::new("".to_string());
 
 		let selectedTypeInnerView = selectedType.clone();
 		let moduleContentInnerValidate = moduleContentInnerValidate.clone();
-		dialog.open(
-			"Type du nouveau bloc ?",
-			move || {
+		let dialogContent = DialogData::new()
+			.setTitle(AllFrontUIEnum::HOME_CHANGE_NEW)
+			.setBody(move || {
 				let innerSelectedType = RwSignal::new("".to_string());
 
 				let selectedTypeEffect = selectedTypeInnerView.clone();
@@ -307,7 +311,7 @@ fn editMode_AddBlock(moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 						<label>
 							<span>Type</span>
 							<select on:change:target=move |ev| {
-							      innerSelectedType.set(ev.target().value().parse().unwrap());
+							      innerSelectedType.set(ev.target().value().parse().unwrap_or_default());
 							    }
 							    prop:value=move || innerSelectedType.get().to_string()>
 								{move ||{
@@ -319,8 +323,8 @@ fn editMode_AddBlock(moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 						</label>
 					</div>
 				}.into_any()
-			},
-			Some(Callback::new(move |_| {
+			})
+			.setOnValidate(Callback::new(move |_| {
 				let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 				let selectedType = selectedType.clone().get();
 
@@ -331,8 +335,8 @@ fn editMode_AddBlock(moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 				});
 
 				return true;
-			})),
-			None,
-		);
+			}));
+
+		dialogManager.open(dialogContent);
 	}
 }

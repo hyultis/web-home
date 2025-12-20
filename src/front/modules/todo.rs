@@ -1,16 +1,16 @@
 use leptoaster::ToasterContext;
 use leptos::prelude::{OnTargetAttribute, Set};
 use leptos::ev::MouseEvent;
-use leptos::prelude::{ElementChild, GetUntracked, OnAttribute, PropAttribute, Update};
+use leptos::prelude::{ElementChild, GetUntracked, PropAttribute, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, ClassAttribute, Get, IntoAny, RwSignal};
 use leptos::view;
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::ModuleContent;
 use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleSizeContrainte, RefreshTime};
-use crate::front::utils::all_front_enum::AllFrontUIEnum;
-use crate::front::utils::translate::Translate;
 use leptos::callback::Callable;
 use crate::front::modules::module_actions::ModuleActionFn;
+
+static MAX_LENGTH: usize = 100000;
 
 #[derive(Serialize,Deserialize,Default,Debug)]
 pub struct Todo
@@ -69,18 +69,19 @@ impl Backable for Todo
 		let contentWrite = self.content.clone();
 		let contentCache = self._update.clone();
 
+		// <button class="validate" on:click=updateFn><Translate key={AllFrontUIEnum::UPDATE.to_string()}/></button>
 		view!{
-			<>
 			<textarea class="module_todo"
                 prop:value=move || content.get()
 				on:input:target=move |ev| {
 					contentCache.update(|cache|{
 						cache.update();
 					});
-					contentWrite.set(ev.target().value())
-				}>{contentd.get()}</textarea><br/>
-			<button class="validate" on:click=updateFn><Translate key={AllFrontUIEnum::UPDATE.to_string()}/></button>
-			</>
+					let mut newContent: String = ev.target().value();
+					newContent.truncate(MAX_LENGTH);
+					contentWrite.set(newContent);
+				}>{contentd.get()}</textarea>
+			<span class="module_todo_counter">{contentd.get().len()}/{MAX_LENGTH}c</span>
 		}.into_any()
 	}
 

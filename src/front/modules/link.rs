@@ -370,9 +370,11 @@ impl Backable for LinksHolder
 
 	fn import(&mut self, import: ModuleContent)
 	{
-		let Ok(content) = serde_json::from_str(&import.content) else {return};
+		let Ok(importedContent) = serde_json::from_str(&import.content) else {return};
 
-		self.content = content;
+		self.content.update(|content|{
+			*content = importedContent;
+		});
 		self._update.update(|cache|{
 			cache.update_from(import.timestamp);
 		});

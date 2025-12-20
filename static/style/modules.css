@@ -96,6 +96,20 @@
 	padding: 0.3em;
 }
 
+.module_todo_counter{
+	display: block;
+	font-family: monospace;
+	font-size: 0.9em;
+	color: var(--maincolor);
+	text-align: right;
+	position: absolute;
+	bottom: 0.5em;
+	right: 0.5em;
+	padding: 0 .5em;
+	background: #000000B0;
+	border-radius: 0.3em;
+}
+
 .module_rss_upper {
 	width: 100%;
 	overflow-y: scroll;

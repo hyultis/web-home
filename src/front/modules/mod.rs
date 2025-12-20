@@ -15,7 +15,6 @@ use module_positions::ModulePositions;
 use module_type::ModuleType;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::HWebTrace;
 
 pub mod components;
 pub mod link;
@@ -277,21 +276,17 @@ impl ModuleHolder
 
 		if(oneModule.inner().cache_mustUpdate())
 		{
-			HWebTrace!("module_getOrUpdate update to server for {}",name);
-			HWebTrace!("module_getOrUpdate update timestamp {}",oneModule.inner().cache_getUpdate().get_untracked().get());
 			let mut exportedModule = oneModule.export();
 			exportedModule.name = name.clone();
 			return Self::inner_update(login, exportedModule).await;
 		}
 
-		HWebTrace!("module_getOrUpdate retrieve from server for {}",name);
 		return Self::inner_retrieve(
 			login.clone(),
 			name.clone(),
 			oneModule,
 			|module, moduleContent| {
 
-				HWebTrace!("module_getOrUpdate timestamp {}>{}",moduleContent.timestamp,module.inner().cache_getUpdate().get_untracked().get());
 				if(moduleContent.timestamp>module.inner().cache_getUpdate().get_untracked().get()) {
 					module.import(moduleContent);
 				}

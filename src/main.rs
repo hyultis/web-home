@@ -112,9 +112,8 @@ async fn main() {
 	    .layer(session_layer)
         .with_state(leptos_options);
 
-    // run our app with hyper
-    // `axum::Server` is a re-export of `hyper::Server`
-    HTrace!((Level::DEBUG) "listening on http://{}", &addr);
+    // to run our app
+    HTrace!((Level::DEBUG) "listening on http(s)://{}", &addr);
 	let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 	axum::serve(listener, app.into_make_service()).await.unwrap();
 }

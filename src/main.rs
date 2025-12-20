@@ -4,11 +4,14 @@
 #![allow(unused_variables)]
 #![allow(non_camel_case_types)]
 
+use std::sync::atomic::AtomicBool;
 use axum::middleware;
 use Hconfig::IO::json::WrapperJson;
 use Htrace::HTraceError;
 use time::Duration;
 use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
+use web_home::entry::AppProps;
+use crate::api::IS_PROD;
 use crate::api::proxys::proxy_cache::CACHE_DIR;
 use crate::global_security::generate_salt;
 
@@ -80,6 +83,7 @@ async fn main() {
 	{
 		global_context.level_setMin(Some(Level::NOTICE));
 	}
+	let _ = IS_PROD.set(AtomicBool::new(conf.leptos_options.env==Env::PROD));
 	HTracer::globalContext_set(global_context);
 	HTrace!((Level::DEBUG) "leptos option env : {:?}",conf.leptos_options.env);
 
@@ -93,8 +97,12 @@ async fn main() {
 		.with_secure(true)
 		.with_expiry(Expiry::OnInactivity(Duration::days(1)));
 
+	let leptos_options_inner_app = leptos_options.clone();
     let app = Router::new()
-        .leptos_routes(&leptos_options, generate_route_list(App), {
+        .leptos_routes(&leptos_options, generate_route_list(move || {
+	        let leptos_options = leptos_options_inner_app.clone();
+	        App(AppProps { isProd: leptos_options.env == Env::PROD })
+        }), {
             let leptos_options = leptos_options.clone();
             move || shell(leptos_options.clone())
         })

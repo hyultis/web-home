@@ -13,7 +13,7 @@ pub struct ModuleActionFn
 {
 	/// (moduleName/key, login)
 	pub updateFn: Callback<(String),()>,
-	pub reloadFn: Callback<(String),()>,
+	pub getOrUpdateFn: Callback<(String),()>,
 	pub removeFn: Callback<(String),()>,
 	pub refreshFn: Callback<(String),()>
 }
@@ -25,7 +25,7 @@ impl ModuleActionFn
 	{
 		Self {
 			updateFn: Callback::new(Self::module_update(moduleContentInnerValidate.clone(), toasterInnerValidate.clone())),
-			reloadFn: Callback::new(Self::module_reload(moduleContentInnerValidate.clone(), toasterInnerValidate.clone())),
+			getOrUpdateFn: Callback::new(Self::module_getOrUpdate(moduleContentInnerValidate.clone(), toasterInnerValidate.clone())),
 			removeFn: Callback::new(Self::module_remove(moduleContentInnerValidate.clone(), toasterInnerValidate.clone())),
 			refreshFn: Callback::new(Self::module_refresh(moduleContentInnerValidate.clone(), toasterInnerValidate.clone())),
 		}
@@ -42,11 +42,7 @@ impl ModuleActionFn
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
 			spawn_local(async move {
-				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked()
-				else
-				{
-					return;
-				};
+				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked() else {return};
 				let Some((login, _)) = UserData::loginLang_get_from_cookie()
 				else
 				{
@@ -67,7 +63,7 @@ impl ModuleActionFn
 		};
 	}
 
-	fn module_reload(
+	fn module_getOrUpdate(
 		moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 		toasterInnerValidate: ToasterContext,
 		//dialog: DialogManager
@@ -78,26 +74,18 @@ impl ModuleActionFn
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
 			spawn_local(async move {
-				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked()
-				else
-				{
-					return;
-				};
+				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked() else {return};
 				let Some((login, _)) = UserData::loginLang_get_from_cookie()
 				else
 				{
 					return;
 				};
 				let modules: &mut ModuleHolder = guard.deref_mut();
-				let error = (*modules).module_update(login, moduleName).await;
+				let error = (*modules).module_getOrUpdate(login, moduleName).await;
 
 				if let Some(err) = error
 				{
 					toastingErr(&toasterInnerValidate, err).await;
-				}
-				else
-				{
-					toastingSuccess(&toasterInnerValidate, AllFrontUIEnum::UPDATE).await;
 				}
 			});
 		};
@@ -114,11 +102,7 @@ impl ModuleActionFn
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
 			spawn_local(async move {
-				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked()
-				else
-				{
-					return;
-				};
+				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked() else {return};
 				let Some((login, _)) = UserData::loginLang_get_from_cookie()
 				else
 				{
@@ -149,7 +133,7 @@ impl ModuleActionFn
 			let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 			let toaster = toaster.clone();
 			spawn_local(async move {
-				let mut guard = moduleContentInnerValidate.write_untracked();
+				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked() else {return};
 				let modules: &mut ModuleHolder = guard.deref_mut();
 				(*modules).module_refresh(moduleName, toaster).await;
 			});

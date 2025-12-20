@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use leptos::{component, view, IntoView};
 use leptos::children::ChildrenFn;
 use leptos::html::InnerHtmlAttribute;
-use leptos::prelude::{Get, IntoAny, Read};
+use leptos::prelude::{Get, IntoAny};
 use leptos::suspense::Transition;
 use leptos::prelude::ElementChild;
 use crate::front::utils::fluent::FluentManager::FluentManager;
@@ -13,11 +13,7 @@ pub fn TranslateCurrentLang() -> impl IntoView {
 	let (userData, _) = UserData::cookie_signalGet();
 
 	view! { <TranslateFn key=move || {
-		let mut lang = "EN".to_string();
-		if let Some(userDataContent) = &*userData.read()
-		{
-			lang = userDataContent.lang_get().clone();
-		}
+		let lang =  userData.get().map(|userDataContent| userDataContent.lang_get()).unwrap_or("EN".to_string());
 		return format!("swap_to_{}",lang);
 	}/> }.into_any()
 }

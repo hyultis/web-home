@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicBool;
 use leptoaster::{provide_toaster, Toaster};
 use leptos::view;
 use leptos::IntoView;
@@ -7,6 +8,7 @@ use leptos_router::components::{Route, Router, Routes, A};
 use leptos_router::{hooks, path};
 use leptos_use::use_locales;
 use leptos::__reexports::wasm_bindgen_futures::spawn_local;
+use crate::api::IS_PROD;
 use crate::front::pages::home::Home;
 use crate::front::pages::connection::Connection;
 use crate::front::pages::inscription::Inscription;
@@ -15,6 +17,8 @@ use crate::front::utils::translate::Translate;
 use crate::front::utils::users_data::UserData;
 pub fn shell(options: LeptosOptions) -> impl IntoView {
 	//	<meta http-equiv="Content-Security-Policy" modules="default-src https: * 'unsafe-inline' 'unsafe-eval' 'strict-dynamic' 'wasm-unsafe-eval'; script-src-elem *"/>
+
+	let isProd = options.env==Env::PROD;
 	view! {
 		<!DOCTYPE html>
 		<html lang="en">
@@ -30,21 +34,21 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 				<MetaTags/>
 			</head>
 			<body>
-				<App/>
+				<App isProd={isProd}/>
 			</body>
 		</html>
 	}
 }
 
 #[island]
-pub fn App() -> impl IntoView {
+pub fn App(isProd: bool) -> impl IntoView {
 	// Provides context that manages stylesheets, titles, meta tags, etc.
 	provide_meta_context();
 	provide_toaster();
 
 	let dialog_manager = DialogManager::new();
 	provide_context(dialog_manager.clone());
-	let (userData, setUserData) = UserData::cookie_signalGet();
+	let (userDataSignal, setUserData) = UserData::cookie_signalGet();
 
 	let is_initialized = RwSignal::new(false);
 	Effect::new(move || {
@@ -52,9 +56,10 @@ pub fn App() -> impl IntoView {
 			return;
 		}
 		is_initialized.set(true);
+		let _ = IS_PROD.set(AtomicBool::new(isProd));
 
 		// set default userData
-		if (userData.read_untracked().is_none())
+		if (userDataSignal.read_untracked().is_none())
 		{
 			let locales = use_locales();
 			setUserData.set(Some(UserData::new(locales.get().first().unwrap_or(&"EN".to_string()))));
@@ -63,9 +68,9 @@ pub fn App() -> impl IntoView {
 		// if user is connected, he directly go to is home page
 		let navigate = hooks::use_navigate();
 		spawn_local(async move {
-			if let Some(dfd) = &*userData.read_untracked()
+			if let Some(userData) = &*userDataSignal.read_untracked()
 			{
-				if(dfd.login_isConnected()) {
+				if(userData.login_isConnected()) {
 					navigate("/home", Default::default());
 				}
 			}

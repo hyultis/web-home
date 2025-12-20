@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicBool;
+use std::sync::OnceLock;
 use std::time::Duration;
 use leptoaster::ToastLevel;
 
@@ -6,7 +8,6 @@ pub mod Htrace;
 pub mod login;
 pub mod modules;
 pub mod proxys;
-//pub mod ApiError;
 
 // LOGIN and SIGNUP const
 pub const SESSION_LOGIN_NBTRY: &str = "SESSION_LOGIN_NBTRY";
@@ -22,3 +23,5 @@ pub trait IsToastable: ToString {
 	// None if nothing is toasted, otherwise return the level of the toast
 	fn level(&self) -> Option<ToastLevel>;
 }
+
+pub static IS_PROD: OnceLock<AtomicBool> = OnceLock::new();

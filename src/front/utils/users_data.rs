@@ -2,7 +2,7 @@ use aes_gcm::{AeadCore, Aes256Gcm, Key, KeyInit, Nonce};
 use aes_gcm::aead::Aead;
 use argon2::Config;
 use leptos::prelude::codee::string::JsonSerdeCodec;
-use leptos::prelude::{Read, Signal, WriteSignal};
+use leptos::prelude::{GetUntracked, Signal, WriteSignal};
 use leptos_use::{use_cookie_with_options, SameSite, UseCookieOptions};
 use serde::{Deserialize, Serialize};
 use crate::api::login::{API_user_login, API_user_salt, API_user_sign};
@@ -195,7 +195,7 @@ impl UserData {
 	pub fn lang_get_from_cookie() -> Option<String>
 	{
 		let (userData, setUserData) = UserData::cookie_signalGet();
-		let Some(userData) = userData.read().clone() else {return None};
+		let Some(userData) = userData.get_untracked() else {return None};
 		let Some(login) = userData.login_get() else {return None};
 
 		return Some(login);
@@ -204,14 +204,14 @@ impl UserData {
 	pub fn login_get_from_cookie() -> Option<String>
 	{
 		let (userData, setUserData) = UserData::cookie_signalGet();
-		let Some(userData) = userData.read().clone() else {return None};
+		let Some(userData) = userData.get_untracked() else {return None};
 		return Some(userData.lang_get());
 	}
 
 	pub fn loginLang_get_from_cookie() -> Option<(String,String)>
 	{
 		let (userData, setUserData) = UserData::cookie_signalGet();
-		let Some(userData) = userData.read().clone() else {return None};
+		let Some(userData) = userData.get_untracked() else {return None};
 		let Some(login) = userData.login_get() else {return None};
 
 		return Some((login,userData.lang_get()));

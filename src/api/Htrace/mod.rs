@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 #[server]
 pub async fn API_Htrace_log( content: String, htype: Type, file: String, line: u32) -> Result<(), ServerFnError>
 {
+	let isProd = crate::api::IS_PROD.get().map(|ab| ab.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(true);
+	if(isProd) {
+		return Err(ServerFnError::ServerError("Disabled".to_string()));
+	}
 	HTracer::trace(&content, htype.to_Htype(), file.as_str(), line, vec![]);
 	return Ok(());
 }

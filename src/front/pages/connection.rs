@@ -1,5 +1,5 @@
 use leptoaster::{expect_toaster, ToastBuilder, ToastLevel};
-use leptos::prelude::{BindAttribute, ClassAttribute, IntoAny, Read, Set, Transition};
+use leptos::prelude::{BindAttribute, ClassAttribute, GetUntracked, IntoAny, Set, Transition};
 use leptos::prelude::{signal, ElementChild, Get};
 use leptos::prelude::{OnAttribute, RenderHtml};
 use leptos::{island, view, IntoView};
@@ -25,7 +25,7 @@ pub fn Connection() -> impl IntoView {
 
 		spawn_local(async move {
 			let (userData, setUserData) = UserData::cookie_signalGet();
-			let mut userData = userData.read().clone().unwrap_or(UserData::new(&"EN".to_string()));
+			let mut userData = userData.get_untracked().unwrap_or(UserData::new(&"EN".to_string()));
 			if let Some(reason) = userData.login_set(login, pwd).await
 			{
 				HWebTrace!("user NOT logged because {:?}",&reason);

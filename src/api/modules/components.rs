@@ -55,6 +55,7 @@ impl ModuleContent
 	{
 		use std::collections::HashMap;
 		use Hconfig::tinyjson::JsonValue;
+		use Htrace::HTrace;
 
 		let configPath = format!("modules/{}", self.name);
 
@@ -74,7 +75,8 @@ impl ModuleContent
 		}
 
 		let mut content = HashMap::new();
-		content.insert("timestamp".to_string(), JsonValue::Number(self.timestamp as f64));
+		HTrace!("self.timestamp update for {} : {}",self.name,self.timestamp);
+		content.insert("timestamp".to_string(), JsonValue::String(self.timestamp.to_string()));
 		content.insert("content".to_string(), JsonValue::String(self.content.clone()));
 		content.insert("type".to_string(), JsonValue::String(self.typeModule.clone()));
 		content.insert("posX".to_string(), JsonValue::Number(self.pos[0] as f64));
@@ -92,11 +94,13 @@ impl ModuleContent
 	pub fn retrieve(&mut self, config: Hconfig::HConfig::HConfig) -> Result<(), ModuleErrors>
 	{
 		use Hconfig::tinyjson::JsonValue;
+		use Htrace::HTrace;
 
 		let Some(JsonValue::Object(ref content)) = config.value_get(&format!("modules/{}", self.name)) else {return Err(ModuleErrors::Empty)};
 
-		if let Some(JsonValue::Number(timestampSaved) ) = content.get("timestamp"){
-			self.timestamp = *timestampSaved as i64;
+		if let Some(JsonValue::String(timestampSaved) ) = content.get("timestamp"){
+			self.timestamp = timestampSaved.parse::<i64>().unwrap_or(0);
+			HTrace!("self.timestamp get for {} : {} => {}",self.name,timestampSaved,self.timestamp);
 		}
 		if let Some(JsonValue::String(content) ) = content.get("content"){
 			self.content = content.clone();

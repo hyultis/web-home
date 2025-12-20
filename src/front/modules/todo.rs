@@ -85,12 +85,13 @@ impl Backable for Todo
 	}
 
 	fn refresh_time(&self) -> RefreshTime {
-		RefreshTime::NONE
+		RefreshTime::MINUTES(1)
 	}
 
 	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String, toaster: ToasterContext) -> Option<BoxFuture> {
+
 		return Some(Box::pin(async move {
-			moduleActions.clone().updateFn.run((currentName.clone()));
+			moduleActions.clone().getOrUpdateFn.run((currentName.clone()));
 		}));
 	}
 
@@ -108,9 +109,11 @@ impl Backable for Todo
 
 	fn import(&mut self, import: ModuleContent)
 	{
-		let Ok(content) = serde_json::from_str(&import.content.clone()) else {return};
+		let Ok(importContent) = serde_json::from_str(&import.content.clone()) else {return};
 
-		self.content = content;
+		self.content.update(|content|{
+			*content = importContent;
+		});
 		self._update.update(|cache|{
 			cache.update_from(import.timestamp);
 		});

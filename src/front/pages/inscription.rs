@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use leptoaster::{expect_toaster, ToastBuilder, ToastLevel};
-use leptos::prelude::{ElementChild, IntoAny, Transition};
+use leptos::prelude::{ElementChild, GetUntracked, IntoAny, Transition};
 use leptos::prelude::BindAttribute;
-use leptos::prelude::{signal, ClassAttribute, Get, OnAttribute, Read, RenderHtml, Set};
+use leptos::prelude::{signal, ClassAttribute, Get, OnAttribute, RenderHtml, Set};
 use leptos::{island, view, IntoView};
 use leptos::__reexports::wasm_bindgen_futures::spawn_local;
 use leptos_router::components::A;
@@ -23,14 +23,14 @@ pub fn Inscription() -> impl IntoView {
 	let pwd = signal("".to_string());
 
 	let submit = move |_| {
-		let login = login.0.get().clone();
-		let pwd = pwd.0.get().clone();
+		let login = login.0.get_untracked().clone();
+		let pwd = pwd.0.get_untracked().clone();
 		let navigate = hooks::use_navigate();
 		let toaster = expect_toaster();
 
 		spawn_local(async move {
 			let (userData, setUserData) = UserData::cookie_signalGet();
-			let mut userData = userData.read().clone().unwrap_or(UserData::new(&"EN".to_string()));
+			let mut userData = userData.get_untracked().unwrap_or(UserData::new(&"EN".to_string()));
 			if let Some(reason) = userData.login_signUp(login, pwd).await
 			{
 				HWebTrace!("user NOT logged because {:?}",&reason);

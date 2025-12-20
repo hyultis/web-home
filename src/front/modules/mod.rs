@@ -9,12 +9,13 @@ use crate::front::utils::all_front_enum::AllFrontErrorEnum;
 use crate::front::utils::users_data::UserData;
 use leptoaster::ToasterContext;
 use leptos::logging::log;
-use leptos::prelude::{Callable, Read, RwSignal, Update};
+use leptos::prelude::{Callable, GetUntracked, ReadUntracked, RwSignal, Update};
 use leptos_use::use_interval_fn;
 use module_positions::ModulePositions;
 use module_type::ModuleType;
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::HWebTrace;
 
 pub mod components;
 pub mod link;
@@ -259,6 +260,45 @@ impl ModuleHolder
 		return None;
 	}
 
+	/// try to get the module from the server,
+	/// but only if its the most recent version.
+	/// if the local version is the most recent, the module is updated onto the server
+	pub async fn module_getOrUpdate(
+		&mut self,
+		login: String,
+		name: String,
+	) -> Option<AllFrontErrorEnum>
+	{
+		let Some(oneModule) = self._blocks.get_mut(&name)
+		else
+		{
+			return None;
+		};
+
+		if(oneModule.inner().cache_mustUpdate())
+		{
+			HWebTrace!("module_getOrUpdate update to server for {}",name);
+			HWebTrace!("module_getOrUpdate update timestamp {}",oneModule.inner().cache_getUpdate().get_untracked().get());
+			let mut exportedModule = oneModule.export();
+			exportedModule.name = name.clone();
+			return Self::inner_update(login, exportedModule).await;
+		}
+
+		HWebTrace!("module_getOrUpdate retrieve from server for {}",name);
+		return Self::inner_retrieve(
+			login.clone(),
+			name.clone(),
+			oneModule,
+			|module, moduleContent| {
+
+				HWebTrace!("module_getOrUpdate timestamp {}>{}",moduleContent.timestamp,module.inner().cache_getUpdate().get_untracked().get());
+				if(moduleContent.timestamp>module.inner().cache_getUpdate().get_untracked().get()) {
+					module.import(moduleContent);
+				}
+			},
+		).await;
+	}
+
 	pub async fn module_refresh(&self, moduleName: String, toaster: ToasterContext)
 	{
 		let Some(oneModule) = self._blocks.get(&moduleName)
@@ -374,7 +414,6 @@ impl ModuleHolder
 
 		let mut module = oneModule.export();
 		module.name = name.clone();
-
 		return Self::inner_update(login, module).await;
 	}
 
@@ -426,7 +465,7 @@ impl ModuleHolder
 	fn import_decrypt_content(moduleContent: &mut ModuleContent) -> bool
 	{
 		let (userData, _) = UserData::cookie_signalGet();
-		let Some(userData) = &*userData.read()
+		let Some(userData) = &*userData.read_untracked()
 		else
 		{
 			return false;
@@ -445,7 +484,7 @@ impl ModuleHolder
 	fn import_crypt_content(moduleContent: &mut ModuleContent) -> bool
 	{
 		let (userData, _) = UserData::cookie_signalGet();
-		let Some(userData) = &*userData.read()
+		let Some(userData) = &*userData.read_untracked()
 		else
 		{
 			return false;

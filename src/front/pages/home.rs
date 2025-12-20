@@ -36,62 +36,14 @@ pub fn Home() -> impl IntoView
 	};
 	let toaster = expect_toaster();
 
+	// pre init ModuleHolder
 	let moduleActions = ModuleActionFn::new(moduleContent.clone(),toaster.clone());
 	let innerModuleActions = moduleActions.clone();
 	moduleContent.update(|modules|{
 		modules.moduleActions_set(innerModuleActions);
 	});
 
-	let editModeValidateFn = editMode_validate(
-		moduleContent.clone(),
-		editMode.clone(),
-		toaster.clone(),
-		dialogManager.clone(),
-	);
-
-	let editModeCancelFn = editMode_cancel(
-		moduleContent.clone(),
-		editMode.clone(),
-		toaster.clone(),
-		dialogManager.clone(),
-	);
-
-	let editModeActivateFn = move |_| {
-		editMode.update(|content| {
-			*content = true;
-		});
-	};
-
-	let forceResyncFn = move |_| {
-	};
-
-	let editModeAddModuleFn = editMode_AddBlock(moduleContent.clone(), dialogManager.clone());
-
-	let (userData, setUserData) = UserData::cookie_signalGet();
-	let toasterInnerDisconnect = toaster.clone();
-	let disconnectFn = move |_| {
-		let navigate = hooks::use_navigate();
-		let toaster = toasterInnerDisconnect.clone();
-
-		let dialogContent = DialogData::new()
-			.setTitle(AllFrontLoginEnum::LOGIN_USER_WANT_DISCONNECTED)
-			.setOnValidate(Callback::new(move |_| {
-				let navigate = navigate.clone();
-				let toaster = toaster.clone();
-				spawn_local(async move {
-					let Some(mut userData) = userData.get() else {return};
-					userData.login_disconnect().await;
-					toastingSuccess(&toaster, AllFrontLoginEnum::LOGIN_USER_DISCONNECTED).await;
-					HWebTrace!("user disconnected");
-					setUserData.set(None);
-					navigate("/", Default::default());
-				});
-				return true;
-			}));
-
-		dialogManager.open(dialogContent);
-	};
-
+	// initialise ModuleHolder
 	let moduleContentInnerInitialLoad = moduleContent.clone();
 	let toasterInnerInitialLoad = toaster.clone();
 	let is_initialized = RwSignal::new(false);
@@ -137,6 +89,56 @@ pub fn Home() -> impl IntoView
 		});
 	});
 
+	let editModeValidateFn = editMode_validate(
+		moduleContent.clone(),
+		editMode.clone(),
+		toaster.clone(),
+		dialogManager.clone(),
+	);
+
+	let editModeCancelFn = editMode_cancel(
+		moduleContent.clone(),
+		editMode.clone(),
+		toaster.clone(),
+		dialogManager.clone(),
+	);
+
+	let editModeActivateFn = move |_| {
+		editMode.update(|content| {
+			*content = true;
+		});
+	};
+
+	let forceResyncFn = move |_| {
+	};
+
+	let editModeAddModuleFn = editMode_AddBlock(moduleContent.clone(), dialogManager.clone());
+
+	let (userData, setUserData) = UserData::cookie_signalGet();
+	let toasterInnerDisconnect = toaster.clone();
+	let disconnectFn = move |_| {
+		let navigate = hooks::use_navigate();
+		let toaster = toasterInnerDisconnect.clone();
+
+		let dialogContent = DialogData::new()
+			.setTitle(AllFrontLoginEnum::LOGIN_USER_WANT_DISCONNECTED)
+			.setOnValidate(Callback::new(move |_| {
+				let navigate = navigate.clone();
+				let toaster = toaster.clone();
+				spawn_local(async move {
+					let Some(mut userData) = userData.get_untracked() else {return};
+					userData.login_disconnect().await;
+					toastingSuccess(&toaster, AllFrontLoginEnum::LOGIN_USER_DISCONNECTED).await;
+					HWebTrace!("user disconnected");
+					setUserData.set(None);
+					navigate("/", Default::default());
+				});
+				return true;
+			}));
+
+		dialogManager.open(dialogContent);
+	};
+
 	let moduleContentInnerView = moduleContent.clone();
 	let moduleContentInnerModuleView = moduleContent.clone();
 	let moduleActionsInnerModuleView = moduleActions.clone();
@@ -145,8 +147,7 @@ pub fn Home() -> impl IntoView
 			<div class="header">
 				<div class="left">
 					{move || {
-						let moduleContentDraw = moduleContentInnerView.clone();
-						let Some(binding) = moduleContentInnerView.clone().try_read() else {return view!{<span/>}.into_any()};
+						let Some(binding) = moduleContentInnerView.clone().try_read() else {return view!{<span>loading</span>}.into_any()};
 						let tmp = binding.links_get();
 						tmp.draw(editMode,moduleActionsInnerModuleView.clone(),"links".to_string())
 					}}
@@ -177,8 +178,7 @@ pub fn Home() -> impl IntoView
 			</div>
 			<div class="modules">
 				{move || {
-					let moduleContentIntoDraw = moduleContentInnerModuleView.clone();
-					let Some(binding) = moduleContentInnerModuleView.clone().try_read() else {return view!{<span/>}.into_any()};
+					let Some(binding) = moduleContentInnerModuleView.clone().try_read() else {return view!{<span>loading</span>}.into_any()};
 					binding.blocks_get().iter().map( |(currentName,d)|d.draw(editMode,moduleActions.clone(),currentName.clone())).collect_view().into_any()
 				}}
 			</div>

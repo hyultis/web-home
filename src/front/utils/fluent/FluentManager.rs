@@ -5,7 +5,7 @@ use fluent::bundle::FluentBundle;
 use fluent::{FluentArgs, FluentResource};
 use intl_memoizer::concurrent::IntlLangMemoizer;
 use leptos::logging::log;
-use leptos::prelude::{Read, Resource};
+use leptos::prelude::{Get, Resource};
 use crate::api::translateBooks::API_translate_getBook;
 use crate::front::utils::users_data::UserData;
 use crate::HWebTrace;
@@ -98,15 +98,7 @@ impl FluentManager {
 		return Resource::new(
 			move || {
 				let (userData, _) = UserData::cookie_signalGet();
-				let mut lang = "EN".to_string();
-				if let Some(userDataContent) = userData.try_read()
-				{
-					if let Some(userDataContent) = &*userDataContent
-					{
-						lang = userDataContent.lang_get().clone();
-					}
-				}
-				lang
+				return userData.get().map(|userDataContent| userDataContent.lang_get()).unwrap_or("EN".to_string());
 			},
 			move |lang| {
 				FluentManager::singleton().translate(lang, name.clone()(), params.clone())

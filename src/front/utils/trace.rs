@@ -2,12 +2,14 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Display};
-use leptos::prelude::Action;
+use leptos::logging::log;
+use leptos::prelude::{use_context, Action};
 use crate::api::Htrace::{API_Htrace_log, Type};
 
 pub fn action_to_trace<T>(rawEntry: &T, htype: Type, file: &str, line: u32)
 	where T: Any + Debug // + ?Display
 {
+
 	let anyEntry = rawEntry as &dyn Any;
 	let tmp = if let Some(content) = anyEntry.downcast_ref::<String>() {
 		content.to_string()
@@ -32,6 +34,12 @@ pub fn action_to_trace<T>(rawEntry: &T, htype: Type, file: &str, line: u32)
 	};
 
 	let file = file.to_string();
+
+	let isProd = crate::api::IS_PROD.get().map(|ab| ab.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(true);
+	if(isProd) {
+		log!("{:?} ({}:{}) : {}", htype,file, line,tmp);
+		return;
+	}
 
 	let tmptrace = Action::new(move |_|{
 		let tmp = tmp.clone();

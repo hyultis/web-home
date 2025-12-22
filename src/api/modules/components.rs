@@ -100,7 +100,6 @@ impl ModuleContent
 
 		if let Some(JsonValue::String(timestampSaved) ) = content.get("timestamp"){
 			self.timestamp = timestampSaved.parse::<i64>().unwrap_or(0);
-			HTrace!("self.timestamp get for {} : {} => {}",self.name,timestampSaved,self.timestamp);
 		}
 		if let Some(JsonValue::String(content) ) = content.get("content"){
 			self.content = content.clone();

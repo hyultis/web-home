@@ -104,12 +104,11 @@ pub fn Home() -> impl IntoView
 	);
 
 	let editModeActivateFn = move |_| {
+
+		HWebTrace!("editModeActivateFn");
 		editMode.update(|content| {
 			*content = true;
 		});
-	};
-
-	let forceResyncFn = move |_| {
 	};
 
 	let editModeAddModuleFn = editMode_AddBlock(moduleContent.clone(), dialogManager.clone());
@@ -154,7 +153,6 @@ pub fn Home() -> impl IntoView
 				</div>
 				<div class="right">
 					<i class="iconoir-key" on:click=disconnectFn></i>
-					<i class="iconoir-reload-window" on:click=forceResyncFn></i>
 					{move || {
 						let editModeValidateFn = editModeValidateFn.clone();
 						let editModeCancelFn = editModeCancelFn.clone();

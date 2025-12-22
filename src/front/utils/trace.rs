@@ -35,8 +35,8 @@ pub fn action_to_trace<T>(rawEntry: &T, htype: Type, file: &str, line: u32)
 
 	let file = file.to_string();
 
-	let isProd = crate::api::IS_PROD.get().map(|ab| ab.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(true);
-	if(isProd) {
+	let traceFrontLog = crate::api::IS_TRACE_FRONT_LOG.get().map(|ab| ab.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false);
+	if(!traceFrontLog) {
 		log!("{:?} ({}:{}) : {}", htype,file, line,tmp);
 		return;
 	}

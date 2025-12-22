@@ -7,11 +7,12 @@
 use std::sync::atomic::AtomicBool;
 use axum::middleware;
 use Hconfig::IO::json::WrapperJson;
+use Hconfig::tinyjson::JsonValue;
 use Htrace::HTraceError;
 use time::Duration;
 use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
 use web_home::entry::AppProps;
-use crate::api::IS_PROD;
+use crate::api::IS_TRACE_FRONT_LOG;
 use crate::api::proxys::proxy_cache::CACHE_DIR;
 use crate::global_security::generate_salt;
 
@@ -61,11 +62,17 @@ async fn main() {
 		.expect("bug from hconfig");
 
 	// set default site config
+	let mut trace_front_log = false;
 	if let Some(mut siteConfig) = HConfigManager::singleton().get("site")
 	{
 		let config = siteConfig.value_mut();
 		helper::preFillConfig(config,"salt",generate_salt().expect("Cannot generate a salt for website (site.json/salt)"));
 		helper::preFillConfig(config,"allow_registration",true);
+		helper::preFillConfig(config,"trace_front_log",conf.leptos_options.env!=Env::PROD);
+		if let Some(JsonValue::Boolean(trace_front_log_raw)) = config.value_get("trace_front_log")
+		{
+			trace_front_log = trace_front_log_raw;
+		}
 		HTraceError!(config.file_save());
 	}
 
@@ -83,9 +90,12 @@ async fn main() {
 	{
 		global_context.level_setMin(Some(Level::NOTICE));
 	}
-	let _ = IS_PROD.set(AtomicBool::new(conf.leptos_options.env==Env::PROD));
 	HTracer::globalContext_set(global_context);
+
+
 	HTrace!((Level::DEBUG) "leptos option env : {:?}",conf.leptos_options.env);
+	HTrace!((Level::DEBUG) "is trace_front_log ? : {:?}",trace_front_log);
+	let _ = IS_TRACE_FRONT_LOG.set(AtomicBool::new(trace_front_log));
 
 	//conf.leptos_options.site_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 3000);
     let addr = conf.leptos_options.site_addr;
@@ -101,12 +111,12 @@ async fn main() {
     let app = Router::new()
         .leptos_routes(&leptos_options, generate_route_list(move || {
 	        let leptos_options = leptos_options_inner_app.clone();
-	        App(AppProps { isProd: leptos_options.env == Env::PROD })
+	        App(AppProps { traceFrontLog: trace_front_log })
         }), {
             let leptos_options = leptos_options.clone();
-            move || shell(leptos_options.clone())
+            move || shell((leptos_options.clone(),trace_front_log))
         })
-        .fallback(leptos_axum::file_and_error_handler(shell))
+        .fallback(leptos_axum::file_and_error_handler(move |lo|shell((lo,trace_front_log))))
 	    .layer(middleware::from_fn(helper::tracing_request))
 	    .layer(middleware::from_fn(helper::http_good_practice))
 	    .layer(session_layer)

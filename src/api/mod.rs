@@ -24,4 +24,4 @@ pub trait IsToastable: ToString {
 	fn level(&self) -> Option<ToastLevel>;
 }
 
-pub static IS_PROD: OnceLock<AtomicBool> = OnceLock::new();
+pub static IS_TRACE_FRONT_LOG: OnceLock<AtomicBool> = OnceLock::new();

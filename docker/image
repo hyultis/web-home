@@ -1,0 +1,50 @@
+# Get started with a build env with Rust nightly
+FROM rust:1.92-slim AS builder
+
+ENV BUILDNAME=web-home
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+            bash curl npm libc6-dev binaryen perl make \
+            libssl-dev pkg-config
+
+RUN npm install -g sass
+
+# rust set up
+RUN rustup target add wasm32-unknown-unknown
+RUN cargo install cargo-leptos
+
+# build set up
+WORKDIR /work
+COPY . .
+RUN rm -R target; exit 0
+RUN cargo leptos build --release --precompress
+RUN ls /work/target/release/
+
+# post build stuff
+RUN mkdir /work/build
+RUN cp /work/target/release/$BUILDNAME /work/build/leptosapp
+RUN cp -R /work/target/site /work/build/site
+RUN rm -R /work/target
+
+FROM rust:1.92-slim AS runner
+
+WORKDIR /app
+
+RUN mkdir dynamic
+RUN mkdir config
+
+COPY --from=builder /work/build /app
+COPY --from=builder /work/Cargo.toml /app/
+COPY --from=builder /work/Cargo.lock /app/
+COPY --from=builder /work/static /app/static
+
+# clean cargo (reduce size)
+RUN ls /app
+
+ENV ENV="PROD"
+ENV LEPTOS_SITE_ADDR="0.0.0.0:3002"
+ENV LEPTOS_SITE_ROOT=./site
+EXPOSE 3002
+
+CMD ["/app/leptosapp"]

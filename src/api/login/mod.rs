@@ -10,46 +10,43 @@ use Htrace::HTrace;
 
 use leptos::prelude::ServerFnError;
 use leptos::server;
-use components::LoginStatus;
-use components::SaltReturn;
+use components::LoginStatusErrors;
 
 #[server]
-pub async fn API_user_salt(generatedId: String) -> Result<SaltReturn, ServerFnError>
+pub async fn API_user_salt(generatedId: String) -> Result<String, LoginStatusErrors>
 {
 	return match salt::getSiteSaltForUser(generatedId)
 	{
-		Some(ok) => Ok(SaltReturn::SALT(ok)),
-		None => Ok(SaltReturn::ERROR("Cannot generate salt".to_string())),
+		Some(ok) => Ok(ok),
+		None => Err(LoginStatusErrors::SALT_INVALID),
 	};
 }
 
 #[server]
-pub async fn API_user_login(generatedId: String, hashedPawd: String) -> Result<LoginStatus, ServerFnError>
+pub async fn API_user_login(generatedId: String, hashedPawd: String) -> Result<(), LoginStatusErrors>
 {
-	let result = match user_back::UserBackHelper::loginCheckAndCreate(generatedId, hashedPawd).await
+	return match user_back::UserBackHelper::loginCheckAndCreate(generatedId, hashedPawd).await
 	{
-		Ok(result) => result,
-		Err(user_back::UserBackHelperError::LoginError(err)) => return Ok(err),
+		Ok(_) => Ok(()),
+		Err(user_back::UserBackHelperError::LoginError(err)) => Err(err),
 		Err(error) => {
 			HTrace!("API_user_login error : {:?}",error);
-			return Ok(LoginStatus::SERVER_ERROR)
+			Err(LoginStatusErrors::SERVER_ERROR)
 		},
-	};
-
-	return Ok(LoginStatus::USER_CONNECTED);
+	}
 }
 
 #[server]
-pub async fn API_user_sign(generatedId: String, hashedPawd: String) -> Result<LoginStatus, ServerFnError>
+pub async fn API_user_sign(generatedId: String, hashedPawd: String) -> Result<(), LoginStatusErrors>
 {
 	return match user_back::UserBackHelper::signCheckAndCreate(generatedId, hashedPawd).await
 	{
-		Ok(true) => Ok(LoginStatus::USER_CONNECTED),
-		Ok(false) => Ok(LoginStatus::USER_ALREADY_EXISTS),
-		Err(user_back::UserBackHelperError::LoginError(err)) => Ok(err),
+		Ok(true) => Ok(()),
+		Ok(false) => Err(LoginStatusErrors::USER_ALREADY_EXISTS),
+		Err(user_back::UserBackHelperError::LoginError(err)) => Err(err),
 		Err(error) => {
 			HTrace!("API_user_login error : {:?}",error);
-			Ok(LoginStatus::SERVER_ERROR)
+			Err(LoginStatusErrors::SERVER_ERROR)
 		},
 	};
 }

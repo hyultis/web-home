@@ -1,11 +1,13 @@
 use std::fmt::Display;
+use leptos::prelude::{FromServerFnError, ServerFnErrorErr};
+use leptos::server_fn::codec::JsonEncoding;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum LoginStatus
+pub enum LoginStatusErrors
 {
-	USER_IS_CONNECTED(bool),
-	USER_CONNECTED,
+	SIGN_DISABLED,
+	SALT_INVALID,
 	USER_DISCONNECTED,
 	USER_NOT_FOUND,
 	USER_INVALID_PWD,
@@ -14,7 +16,7 @@ pub enum LoginStatus
 	SERVER_ERROR,
 }
 
-impl Display for LoginStatus
+impl Display for LoginStatusErrors
 {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
 	{
@@ -27,4 +29,12 @@ pub enum SaltReturn
 {
 	SALT(String),
 	ERROR(String)
+}
+
+impl FromServerFnError for LoginStatusErrors {
+	type Encoder = JsonEncoding;
+
+	fn from_server_fn_error(value: ServerFnErrorErr) -> Self {
+		LoginStatusErrors::SERVER_ERROR
+	}
 }

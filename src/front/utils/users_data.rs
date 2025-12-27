@@ -6,7 +6,7 @@ use leptos::prelude::{GetUntracked, Signal, WriteSignal};
 use leptos_use::{use_cookie_with_options, SameSite, UseCookieOptions};
 use serde::{Deserialize, Serialize};
 use crate::api::login::{API_user_login, API_user_salt, API_user_sign};
-use crate::api::login::components::{LoginStatus, SaltReturn};
+use crate::api::login::components::{LoginStatusErrors};
 use crate::global_security::{generate_salt_raw, hash};
 use base64ct::{Base64, Encoding};
 use crate::front::utils::all_front_enum::AllFrontLoginEnum;
@@ -86,37 +86,33 @@ impl UserData {
 		return self.userSalt.is_some();
 	}
 
-	pub async fn login_set(&mut self, login: String, pwd: String) -> Option<String>
+	pub async fn login_set(&mut self, login: String, pwd: String) -> Option<AllFrontLoginEnum>
 	{
 		let generatedId = hash(login);
-		let Ok(SaltReturn::SALT(serverUserSalt)) = API_user_salt(generatedId.clone()).await else {return None};
+		let Ok(serverUserSalt) = API_user_salt(generatedId.clone()).await else {return Some(AllFrontLoginEnum::fromLoginStatus(LoginStatusErrors::SALT_INVALID))};
 		let user_salt = Self::pwdHash(pwd, serverUserSalt.clone());
 
 		return match API_user_login(generatedId.clone(), hash(user_salt.clone())).await
 		{
-			Ok(LoginStatus::USER_CONNECTED) => {
+			Ok(_) => {
 				self.userSalt = Some(user_salt);
 				self.generatedId = Some(generatedId);
 				None
 			},
-			Ok(LoginStatus::SERVER_ERROR) => Some("FRONTERROR_SERVER_ERROR".to_string()),
-			Ok(reason) => Some(AllFrontLoginEnum::fromLoginStatus(reason).to_string()),
-			Err(_) => Some("FRONTERROR_SERVER_ERROR".to_string()),
+			Err(reason) => Some(AllFrontLoginEnum::fromLoginStatus(reason)),
 		};
 	}
 
 	/// return None if the user is correctly created connected, else return the error in translated string
-	pub async fn login_signUp(&mut self, login: String, pwd: String) -> Option<String>
+	pub async fn login_signUp(&mut self, login: String, pwd: String) -> Option<AllFrontLoginEnum>
 	{
 		let generatedId = hash(login);
-		let Ok(SaltReturn::SALT(serverUserSalt)) = API_user_salt(generatedId.clone()).await else {return None};
+		let Ok(serverUserSalt) = API_user_salt(generatedId.clone()).await else {return Some(AllFrontLoginEnum::fromLoginStatus(LoginStatusErrors::SALT_INVALID))};
 		let user_salt = Self::pwdHash(pwd, serverUserSalt);
 
 		return match API_user_sign(generatedId, hash(user_salt)).await {
-			Ok(LoginStatus::USER_CONNECTED) => None,
-			Ok(LoginStatus::SERVER_ERROR) => Some("FRONTERROR_SERVER_ERROR".to_string()),
-			Ok(reason) => Some(AllFrontLoginEnum::fromLoginStatus(reason).to_string()),
-			Err(_) => Some("FRONTERROR_SERVER_ERROR".to_string()),
+			Ok(_) => None,
+			Err(reason) => Some(AllFrontLoginEnum::fromLoginStatus(reason)),
 		}
 	}
 

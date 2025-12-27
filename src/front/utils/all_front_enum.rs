@@ -1,4 +1,4 @@
-use crate::api::login::components::LoginStatus;
+use crate::api::login::components::LoginStatusErrors;
 
 /// contains all error key present into translate files
 #[derive(strum_macros::Display)]
@@ -38,25 +38,28 @@ pub enum AllFrontLoginEnum
 	LOGIN_USER_DISCONNECTED,
 	LOGIN_USER_SIGNEDUP,
 	LOGIN_USER_NOT_FOUND,
+	SIGN_DISABLED,
+	SALT_INVALID,
 	LOGIN_USER_INVALID_PWD,
 	LOGIN_USER_ALREADY_EXISTS,
 	LOGIN_LOCKED,
 	LOGIN_USER_WANT_DISCONNECTED,
+	SERVER_ERROR
 }
 
 impl AllFrontLoginEnum
 {
-	pub fn fromLoginStatus(status: LoginStatus) -> Self
+	pub fn fromLoginStatus(status: LoginStatusErrors) -> Self
 	{
 		match status {
-			LoginStatus::USER_IS_CONNECTED(_) => AllFrontLoginEnum::LOGIN_USER_CONNECTED,
-			LoginStatus::USER_CONNECTED => AllFrontLoginEnum::LOGIN_USER_CONNECTED,
-			LoginStatus::USER_DISCONNECTED => AllFrontLoginEnum::LOGIN_USER_DISCONNECTED,
-			LoginStatus::USER_NOT_FOUND => AllFrontLoginEnum::LOGIN_USER_NOT_FOUND,
-			LoginStatus::USER_INVALID_PWD => AllFrontLoginEnum::LOGIN_USER_INVALID_PWD,
-			LoginStatus::USER_ALREADY_EXISTS => AllFrontLoginEnum::LOGIN_USER_ALREADY_EXISTS,
-			LoginStatus::LOCKED(_) => AllFrontLoginEnum::LOGIN_LOCKED,
-			LoginStatus::SERVER_ERROR => AllFrontLoginEnum::LOGIN_USER_NOT_FOUND,
+			LoginStatusErrors::USER_DISCONNECTED => AllFrontLoginEnum::LOGIN_USER_DISCONNECTED,
+			LoginStatusErrors::USER_NOT_FOUND => AllFrontLoginEnum::LOGIN_USER_NOT_FOUND,
+			LoginStatusErrors::USER_INVALID_PWD => AllFrontLoginEnum::LOGIN_USER_INVALID_PWD,
+			LoginStatusErrors::USER_ALREADY_EXISTS => AllFrontLoginEnum::LOGIN_USER_ALREADY_EXISTS,
+			LoginStatusErrors::LOCKED(_) => AllFrontLoginEnum::LOGIN_LOCKED,
+			LoginStatusErrors::SERVER_ERROR => AllFrontLoginEnum::SERVER_ERROR,
+			LoginStatusErrors::SIGN_DISABLED => AllFrontLoginEnum::SIGN_DISABLED,
+			LoginStatusErrors::SALT_INVALID => AllFrontLoginEnum::SALT_INVALID
 		}
 	}
 }

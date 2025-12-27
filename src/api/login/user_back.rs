@@ -14,16 +14,15 @@ use sha3::{Digest, Sha3_256};
 use time::macros::format_description;
 use time::OffsetDateTime;
 use tower_sessions::Session;
-use crate::api::{SESSION_LOGIN_NBTRY, SESSION_LOGIN_NBTRY_DELAY_RESET, SESSION_LOGIN_NBTRY_LAST,
-                 SESSION_LOGIN_NBTRY_MAX, SESSION_SIGN_NBTRY, SESSION_SIGN_NBTRY_DELAY_RESET, SESSION_SIGN_NBTRY_LAST, SESSION_SIGN_NBTRY_MAX};
-use crate::api::login::components::LoginStatus;
+use crate::api::{SESSION_LOGIN_NBTRY, SESSION_LOGIN_NBTRY_DELAY_RESET, SESSION_LOGIN_NBTRY_LAST, SESSION_LOGIN_NBTRY_MAX, SESSION_SIGN_NBTRY, SESSION_SIGN_NBTRY_DELAY_RESET, SESSION_SIGN_NBTRY_LAST, SESSION_SIGN_NBTRY_MAX};
+use crate::api::login::components::LoginStatusErrors;
 
 #[derive(Debug)]
 pub enum UserBackHelperError
 {
 	HConfigError(Errors),
 	ServerError(ServerFnErrorErr),
-	LoginError(LoginStatus),
+	LoginError(LoginStatusErrors),
 }
 
 impl Into<ServerFnError> for UserBackHelperError
@@ -62,7 +61,7 @@ impl UserBackHelper {
 		if (retryValue >= maxRetry)
 		{
 			let timestamp = OffsetDateTime::now_utc().unix_timestamp();
-			return Err(UserBackHelperError::LoginError(LoginStatus::LOCKED(timestamp)));
+			return Err(UserBackHelperError::LoginError(LoginStatusErrors::LOCKED(timestamp)));
 		}
 
 		return Ok((session, retryValue));
@@ -73,6 +72,11 @@ impl UserBackHelper {
 	/// if not created, return Ok(true)
 	pub async fn signCheckAndCreate(generatedId: String, hashedPwd: String) -> Result<bool, UserBackHelperError>
 	{
+		let allowRegistration = crate::api::ALLOW_REGISTRATION.get().map(|ab| ab.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false);
+		if(!allowRegistration) {
+			return Err(UserBackHelperError::LoginError(LoginStatusErrors::SIGN_DISABLED));
+		}
+
 		let (session, retryValue) = match UserBackHelper::checkSession(SESSION_SIGN_NBTRY_LAST, SESSION_SIGN_NBTRY, SESSION_SIGN_NBTRY_MAX, SESSION_SIGN_NBTRY_DELAY_RESET).await
 		{
 			Ok(d) => d,
@@ -101,7 +105,7 @@ impl UserBackHelper {
 	/// Check if the user is already created and create it if not
 	/// is already created, return Ok(false)
 	/// if not created, return Ok(true)
-	pub async fn loginCheckAndCreate(generatedId: String, hashedPwd: String) -> Result<bool, UserBackHelperError>
+	pub async fn loginCheckAndCreate(generatedId: String, hashedPwd: String) -> Result<(), UserBackHelperError>
 	{
 		let (session, retryValue) = match UserBackHelper::checkSession(SESSION_LOGIN_NBTRY_LAST, SESSION_LOGIN_NBTRY, SESSION_LOGIN_NBTRY_MAX, SESSION_LOGIN_NBTRY_DELAY_RESET).await
 		{
@@ -118,13 +122,13 @@ impl UserBackHelper {
 			{
 				let _ = session.remove::<u8>(SESSION_LOGIN_NBTRY).await;
 				let _ = session.remove::<Duration>(SESSION_LOGIN_NBTRY_LAST).await;
-				return Ok(true);
+				return Ok(());
 			}
 		}
 
 		HTraceError!("UserBackHelper.loginCheckAndCreate fail to insert SESSION_LOGIN_NBTRY : {}",session.insert(SESSION_LOGIN_NBTRY, retryValue+1).await);
 		HTraceError!("UserBackHelper.loginCheckAndCreate fail to insert SESSION_LOGIN_NBTRY_LAST : {}",session.insert(SESSION_LOGIN_NBTRY_LAST, OffsetDateTime::now_utc().unix_timestamp()).await);
-		return Err(UserBackHelperError::LoginError(LoginStatus::USER_INVALID_PWD));
+		return Err(UserBackHelperError::LoginError(LoginStatusErrors::USER_INVALID_PWD));
 	}
 
 	/// get config file corresponding to the user
@@ -137,7 +141,7 @@ impl UserBackHelper {
 			if let Err(_) = File::open(filepath.clone())
 			{
 				println!("trying open : {}",filepath);
-				return Err(UserBackHelperError::LoginError(LoginStatus::USER_NOT_FOUND));
+				return Err(UserBackHelperError::LoginError(LoginStatusErrors::USER_NOT_FOUND));
 			}
 		}
 

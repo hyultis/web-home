@@ -1,4 +1,4 @@
-use leptoaster::{expect_toaster, ToastBuilder, ToastLevel};
+use leptoaster::{expect_toaster};
 use leptos::prelude::{BindAttribute, ClassAttribute, GetUntracked, IntoAny, Set, Transition};
 use leptos::prelude::{signal, ElementChild, Get};
 use leptos::prelude::{OnAttribute, RenderHtml};
@@ -6,7 +6,9 @@ use leptos::{island, view, IntoView};
 use leptos::__reexports::wasm_bindgen_futures::spawn_local;
 use leptos_router::components::A;
 use leptos_router::hooks;
+use crate::front::utils::all_front_enum::AllFrontLoginEnum;
 use crate::front::utils::fluent::FluentManager::FluentManager;
+use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
 use crate::front::utils::translate::Translate;
 use crate::front::utils::users_data::UserData;
 use crate::HWebTrace;
@@ -28,16 +30,12 @@ pub fn Connection() -> impl IntoView {
 			let mut userData = userData.get_untracked().unwrap_or(UserData::new(&"EN".to_string()));
 			if let Some(reason) = userData.login_set(login, pwd).await
 			{
-				HWebTrace!("user NOT logged because {:?}",&reason);
-				toaster.toast(ToastBuilder::new(FluentManager::singleton().translateParamsLess(userData.lang_get(), reason).await)
-					.with_expiry(Some(5_000))
-					.with_level(ToastLevel::Error));
+				HWebTrace!("user NOT logged because {}",&reason);
+				toastingErr(&toaster,reason).await;
 			}
 			else
 			{
-				toaster.toast(ToastBuilder::new(FluentManager::singleton().translateParamsLess(userData.lang_get(), "LOGIN_USER_CONNECTED").await)
-					.with_expiry(Some(5_000))
-					.with_level(ToastLevel::Success));
+				toastingSuccess(&toaster,AllFrontLoginEnum::LOGIN_USER_CONNECTED).await;
 				HWebTrace!("user logged");
 				setUserData.set(Some(userData));
 				navigate("/home", Default::default());
@@ -68,7 +66,14 @@ pub fn Connection() -> impl IntoView {
 					}}
 				</Transition>
 			</div>
-			<A href="/newuser"><Translate key="pageRoot_signup"/></A>
+			{
+				let allowRegistration = crate::api::ALLOW_REGISTRATION.get().map(|ab| ab.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false);
+				if(allowRegistration) {
+					view!{<A href="/newuser"><Translate key="pageRoot_signup"/></A>}.into_any()
+				} else {
+					view!{}.into_any()
+				}
+			}
 		</div>
 
 		<footer>

@@ -94,7 +94,6 @@ impl ModuleContent
 	pub fn retrieve(&mut self, config: Hconfig::HConfig::HConfig) -> Result<(), ModuleErrors>
 	{
 		use Hconfig::tinyjson::JsonValue;
-		use Htrace::HTrace;
 
 		let Some(JsonValue::Object(ref content)) = config.value_get(&format!("modules/{}", self.name)) else {return Err(ModuleErrors::Empty)};
 

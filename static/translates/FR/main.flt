@@ -27,6 +27,7 @@ FRONTLOGIN_LOGIN_USER_NOT_FOUND = Ce login n'existe pas
 FRONTLOGIN_LOGIN_USER_INVALID_PWD = Password invalide
 FRONTLOGIN_LOGIN_USER_ALREADY_EXISTS = Ce login existe déjà
 FRONTLOGIN_LOGIN_LOCKED = Ce login est verrouillé suite a de nombreuses tentatives de connexion
+FRONTLOGIN_SIGN_DISABLED = Inscription désactivée
 
 #global errors
 FRONTERROR_SERVER_ERROR = Erreur serveur
@@ -45,6 +46,7 @@ FRONTUI_NOTITLE = Sans titre
 FRONTUI_HOME_CHANGE_OK = Enregistrer les changements ?
 FRONTUI_HOME_CHANGE_CANCEL = Annuler les changements ?
 FRONTUI_HOME_CHANGE_NEW = Type du nouveau module ?
+
 
 #time
 DISTANT_TIME_RESULT_SEC = s

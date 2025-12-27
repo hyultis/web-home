@@ -8,7 +8,7 @@ use leptos_router::components::{Route, Router, Routes, A};
 use leptos_router::{hooks, path};
 use leptos_use::use_locales;
 use leptos::__reexports::wasm_bindgen_futures::spawn_local;
-use crate::api::IS_TRACE_FRONT_LOG;
+use crate::api::{ALLOW_REGISTRATION, IS_TRACE_FRONT_LOG};
 use crate::front::pages::home::Home;
 use crate::front::pages::connection::Connection;
 use crate::front::pages::inscription::Inscription;
@@ -16,12 +16,7 @@ use crate::front::utils::dialog::{DialogHost, DialogManager};
 use crate::front::utils::translate::Translate;
 use crate::front::utils::users_data::UserData;
 
-pub fn setData(traceFrontLog:bool)
-{
-	let _ = IS_TRACE_FRONT_LOG.set(AtomicBool::new(traceFrontLog));
-}
-
-pub fn shell((options,trace_front_log): (LeptosOptions, bool)) -> impl IntoView {
+pub fn shell((options,trace_front_log,allowRegistration): (LeptosOptions, bool, bool)) -> impl IntoView {
 	//	<meta http-equiv="Content-Security-Policy" modules="default-src https: * 'unsafe-inline' 'unsafe-eval' 'strict-dynamic' 'wasm-unsafe-eval'; script-src-elem *"/>
 
 	view! {
@@ -39,14 +34,14 @@ pub fn shell((options,trace_front_log): (LeptosOptions, bool)) -> impl IntoView 
 				<MetaTags/>
 			</head>
 			<body>
-				<App traceFrontLog={trace_front_log}/>
+				<App traceFrontLog={trace_front_log} allowRegistration={allowRegistration}/>
 			</body>
 		</html>
 	}
 }
 
 #[island]
-pub fn App(traceFrontLog: bool) -> impl IntoView {
+pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 	// Provides context that manages stylesheets, titles, meta tags, etc.
 	provide_meta_context();
 	provide_toaster();
@@ -62,6 +57,7 @@ pub fn App(traceFrontLog: bool) -> impl IntoView {
 		}
 		is_initialized.set(true);
 		let _ = IS_TRACE_FRONT_LOG.set(AtomicBool::new(traceFrontLog));
+		let _ = ALLOW_REGISTRATION.set(AtomicBool::new(allowRegistration));
 
 		// set default userData
 		if (userDataSignal.read_untracked().is_none())

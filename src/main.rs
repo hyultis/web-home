@@ -12,7 +12,7 @@ use Htrace::HTraceError;
 use time::Duration;
 use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
 use web_home::entry::AppProps;
-use crate::api::IS_TRACE_FRONT_LOG;
+use crate::api::{ALLOW_REGISTRATION, IS_TRACE_FRONT_LOG};
 use crate::api::proxys::proxy_cache::CACHE_DIR;
 use crate::global_security::generate_salt;
 
@@ -63,15 +63,20 @@ async fn main() {
 
 	// set default site config
 	let mut trace_front_log = false;
+	let mut allow_registration = false;
 	if let Some(mut siteConfig) = HConfigManager::singleton().get("site")
 	{
 		let config = siteConfig.value_mut();
 		helper::preFillConfig(config,"salt",generate_salt().expect("Cannot generate a salt for website (site.json/salt)"));
 		helper::preFillConfig(config,"allow_registration",true);
 		helper::preFillConfig(config,"trace_front_log",conf.leptos_options.env!=Env::PROD);
-		if let Some(JsonValue::Boolean(trace_front_log_raw)) = config.value_get("trace_front_log")
+		if let Some(JsonValue::Boolean(raw)) = config.value_get("trace_front_log")
 		{
-			trace_front_log = trace_front_log_raw;
+			trace_front_log = raw;
+		}
+		if let Some(JsonValue::Boolean(raw)) = config.value_get("allow_registration")
+		{
+			allow_registration = raw;
 		}
 		HTraceError!(config.file_save());
 	}
@@ -94,8 +99,10 @@ async fn main() {
 
 
 	HTrace!((Level::DEBUG) "leptos option env : {:?}",conf.leptos_options.env);
-	HTrace!((Level::DEBUG) "is trace_front_log ? : {:?}",trace_front_log);
+	HTrace!((Level::DEBUG) "is IS_TRACE_FRONT_LOG ? : {:?}",trace_front_log);
+	HTrace!((Level::DEBUG) "is ALLOW_REGISTRATION ? : {:?}",allow_registration);
 	let _ = IS_TRACE_FRONT_LOG.set(AtomicBool::new(trace_front_log));
+	let _ = ALLOW_REGISTRATION.set(AtomicBool::new(allow_registration));
 
 	//conf.leptos_options.site_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 3000);
     let addr = conf.leptos_options.site_addr;
@@ -111,12 +118,12 @@ async fn main() {
     let app = Router::new()
         .leptos_routes(&leptos_options, generate_route_list(move || {
 	        let leptos_options = leptos_options_inner_app.clone();
-	        App(AppProps { traceFrontLog: trace_front_log })
+	        App(AppProps { traceFrontLog: trace_front_log, allowRegistration: allow_registration })
         }), {
             let leptos_options = leptos_options.clone();
-            move || shell((leptos_options.clone(),trace_front_log))
+            move || shell((leptos_options.clone(),trace_front_log,allow_registration))
         })
-        .fallback(leptos_axum::file_and_error_handler(move |lo|shell((lo,trace_front_log))))
+        .fallback(leptos_axum::file_and_error_handler(move |lo|shell((lo,trace_front_log,allow_registration))))
 	    .layer(middleware::from_fn(helper::tracing_request))
 	    .layer(middleware::from_fn(helper::http_good_practice))
 	    .layer(session_layer)

@@ -29,7 +29,7 @@ impl FluentManager {
 	}
 
 	/// Same as translate() without the params
-	pub async fn translateParamsLess(&self, lang: impl Into<String>, key: impl Into<String>) -> String
+	pub async fn translateParamsLess(&self, lang: impl ToString, key: impl ToString) -> String
 	{
 		return self.translate(lang,key,Arc::new(HashMap::new())).await;
 	}
@@ -40,10 +40,10 @@ impl FluentManager {
 	/// - `lang`: A type that can be converted into a `String`, representing the target language code (e.g., "en", "fr").
 	/// - `key`: A type that can be converted into a `String`, representing the message identifier or key to be translated.
 	/// - `params`: An `Arc<HashMap<String, String>>` containing key-value pairs for dynamic parameter substitution in the translated message.
-	pub async fn translate(&self, lang: impl Into<String>, key: impl Into<String>, params: Arc<HashMap<String,String>>) -> String
+	pub async fn translate(&self, lang: impl ToString, key: impl ToString, params: Arc<HashMap<String,String>>) -> String
 	{
-		let lang = lang.into();
-		let key = key.into();
+		let lang = lang.to_string();
+		let key = key.to_string();
 		let mut lock = self._resources.write().await;
 		if(!lock.contains_key(&lang))
 		{

@@ -1,4 +1,4 @@
-use leptos::prelude::{GetUntracked, OnTargetAttribute, ReadUntracked};
+use leptos::prelude::{GetUntracked, OnTargetAttribute, ReadUntracked, StyleAttribute};
 use leptos::prelude::{CollectView, Get, PropAttribute};
 use crate::front::modules::components::Backable;
 use crate::front::modules::ModuleHolder;
@@ -146,7 +146,7 @@ pub fn Home() -> impl IntoView
 			<div class="header">
 				<div class="left">
 					{move || {
-						let Some(binding) = moduleContentInnerView.clone().try_read() else {return view!{<span>loading</span>}.into_any()};
+						let Some(binding) = moduleContentInnerView.clone().try_read() else {return view!{}.into_any()};
 						let tmp = binding.links_get();
 						tmp.draw(editMode,moduleActionsInnerModuleView.clone(),"links".to_string())
 					}}
@@ -176,7 +176,7 @@ pub fn Home() -> impl IntoView
 			</div>
 			<div class="modules">
 				{move || {
-					let Some(binding) = moduleContentInnerModuleView.clone().try_read() else {return view!{<span>loading</span>}.into_any()};
+					let Some(binding) = moduleContentInnerModuleView.clone().try_read() else {return view!{<img src="cog03.svg" style="filter: invert(100%) sepia(0%) saturate(0%) hue-rotate(87deg) brightness(103%) contrast(101%);"/>}.into_any()};
 					binding.blocks_get().iter().map( |(currentName,d)|d.draw(editMode,moduleActions.clone(),currentName.clone())).collect_view().into_any()
 				}}
 			</div>

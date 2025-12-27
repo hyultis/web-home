@@ -25,3 +25,4 @@ pub trait IsToastable: ToString {
 }
 
 pub static IS_TRACE_FRONT_LOG: OnceLock<AtomicBool> = OnceLock::new();
+pub static ALLOW_REGISTRATION: OnceLock<AtomicBool> = OnceLock::new();

@@ -19,7 +19,6 @@ WORKDIR /work
 COPY . .
 RUN rm -R target; exit 0
 RUN cargo leptos build --release --precompress
-RUN ls /work/target/release/
 
 # post build stuff
 RUN mkdir /work/build

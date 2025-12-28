@@ -7,9 +7,9 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-leptos = { version = "0.8.14", features = ["islands"] }
-leptos_router = { version = "0.8.10" }
-axum = { version = "0.8.7", optional = true }
+leptos = { version = "0.8.15", features = ["islands"] }
+leptos_router = { version = "0.8.11" }
+axum = { version = "0.8.8", optional = true }
 console_error_panic_hook = "0.1"
 leptos_axum = { version = "0.8.7", optional = true }
 leptos_meta = { version = "0.8.5" }
@@ -18,7 +18,7 @@ tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
 tower = { version = "0.5", optional = true }
 tower-http = { version = "0.6", features = ["fs"], optional = true }
 tower-sessions = { git = "https://github.com/maxcountryman/tower-sessions", commit = "7800836"} # version 0.14 use an old version of rand
-wasm-bindgen = "=0.2.104"
+wasm-bindgen = "=0.2.106"
 Hconfig = {  version = "2.0", optional = true }
 Htrace = {  version = "2.0", optional = true }
 serde = { version = "1.0", features = ["derive"] }
@@ -30,7 +30,7 @@ anyhow = "1.0.95"
 time = { version = "0.3", features = ["macros","wasm-bindgen"] }
 sha3 = {  version = "0.10.8", features = ["default"] }
 base64ct = { version = "1.8.0", features = ["alloc"] }
-getrandom = { version = "0.3", optional = true }
+getrandom = { version = "=0.3.4", optional = true }
 rust-argon2 = "3.0"
 aes-gcm = "0.11.0-rc.1"
 serde_json = "1.0.145"
@@ -145,6 +145,6 @@ lib-profile-release = "wasm-release"
 
 #fix for getrandom backend setup from https://github.com/bevyengine/bevy/issues/20476#issuecomment-3173383130
 [target.'cfg(all(target_family = "wasm", any(target_os = "unknown", target_os = "none")))'.dependencies]
-getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom = { version = "=0.3.4", features = ["wasm_js"] }
 getrandom_02 = { version = "0.2", features = ["js"], package = "getrandom" }
 uuid = { version = "1.17", features = ["js"] }

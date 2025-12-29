@@ -12,6 +12,7 @@ pub struct ModulePositions<module: moduleContent>
 {
 	_pos: ArcRwSignal<[i32;2]>,
 	_size: ArcRwSignal<[u32;2]>,
+	_depth: ArcRwSignal<u32>,
 	_module: module
 }
 
@@ -22,6 +23,7 @@ impl<module: moduleContent> ModulePositions<module>
 		Self {
 			_pos: ArcRwSignal::new([0,0]),
 			_size: ArcRwSignal::new([100,100]),
+			_depth: Default::default(),
 			_module: module
 		}
 	}
@@ -31,8 +33,14 @@ impl<module: moduleContent> ModulePositions<module>
 		Self {
 			_pos: ArcRwSignal::new(from.pos.clone()),
 			_size: ArcRwSignal::new(from.size.clone()),
+			_depth: ArcRwSignal::new(from.depth.clone()),
 			_module: module
 		}
+	}
+
+	pub fn depth_set(&self, depth: u32)
+	{
+		self._depth.set(depth);
 	}
 
 	pub fn inner(&self) -> &module
@@ -40,9 +48,9 @@ impl<module: moduleContent> ModulePositions<module>
 		return &self._module;
 	}
 
-	fn intoStyle(pos: [i32;2], size: [u32;2]) -> String
+	fn intoStyle(pos: [i32;2], size: [u32;2], depth: u32) -> String
 	{
-		return format!("position: absolute; left: {}px; top: {}px; width: {}px; height: {}px;", pos[0], pos[1], size[0], size[1]);
+		return format!("position: absolute; left: {}px; top: {}px; width: {}px; height: {}px; z-index: {}", pos[0], pos[1], size[0], size[1], depth);
 	}
 
 	pub fn export(&self) -> ModuleContent
@@ -50,6 +58,7 @@ impl<module: moduleContent> ModulePositions<module>
 		let mut export = self._module.export();
 		export.pos = self._pos.get();
 		export.size = self._size.get();
+		export.depth = self._depth.get();
 		return export;
 	}
 
@@ -63,6 +72,7 @@ impl<module: moduleContent> ModulePositions<module>
 			size[0] = import.size[0];
 			size[1] = import.size[1];
 		});
+		self._depth.set(import.depth);
 		self._module.import(import);
 	}
 
@@ -76,6 +86,7 @@ impl<module: moduleContent> ModulePositions<module>
 
 		let pos = self._pos.clone();
 		let size = self._size.clone();
+		let depth = self._depth.clone();
 
 		let elMove = self.moveFn();
 		let elResize = self.resizeFn();
@@ -90,7 +101,7 @@ impl<module: moduleContent> ModulePositions<module>
 			{
 				if editMode.get()
 				{
-					view!{<div style={move || Self::intoStyle(pos.clone().get(), size.clone().get())}>
+					view!{<div style={move || Self::intoStyle(pos.clone().get(), size.clone().get(),depth.clone().get())}>
 						<div class="module">
 						<div class="module_header"><i class="iconoir-path-arrow-solid" node_ref=elMove></i><i class="iconoir-xmark" on:click=removeFn></i></div>
 						{view(&self._module,editMode)}
@@ -100,7 +111,7 @@ impl<module: moduleContent> ModulePositions<module>
 				}
 				else
 				{
-					view!{<div class="module" style={move || Self::intoStyle(pos.clone().get(), size.clone().get())}>
+					view!{<div class="module" style={move || Self::intoStyle(pos.clone().get(), size.clone().get(),depth.clone().get())}>
 					{view(&self._module,editMode)}
 					</div>
 					}.into_any()
@@ -132,7 +143,9 @@ impl<module: moduleContent> ModulePositions<module>
 		Effect::new(move |_| {
 			if !is_dragging.get() {return;}
 			let newPosX = position.get().x as i32 -8; // 8 is the half-width of the icon
+			let newPosX = newPosX.max(0);
 			let newPosY = position.get().y as i32 -8 -30; // -30 is the header bar height ... TODO : need to automatise that
+			let newPosY = newPosY.max(0);
 			cache.update(|data| data.update());
 			posMove.update(|size|{
 				size[0] = newPosX;

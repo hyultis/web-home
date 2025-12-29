@@ -31,6 +31,13 @@ Additionally, the `site.json` configuration file on the server contains a "serve
 
 ## Todo
 
+Features to fix :
+
+- Module weather need a fix to weather code (its show "fog" too often, that the data got from api)
+- "allow registration" do not work on connection page to show the button if true
+- module link error if new user (module not found)
+
+
 Features I plan to add in the future:
 
 - Calendar module

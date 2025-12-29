@@ -144,7 +144,7 @@ impl Backable for Weather
 		                                  |ev,inner| inner.maxday = ev.target().value().parse::<u8>().unwrap_or(0));
 				view!{
 				<div class="module_weather_config">
-					{titleF.draw()}<br/>
+					{titleF.draw()}
 					{latitudeF.draw()}/
 					{longitudeF.draw()}<br/>
 					<button on:click={locateFn}><Translate key="MODULE_WEATHER_LOCATE"/></button><br/>
@@ -198,8 +198,7 @@ impl Backable for Weather
 			typeModule: self.typeModule(),
 			timestamp: self._update.get_untracked().get(),
 			content: serde_json::to_string(&self.config.get_untracked()).unwrap_or_default(),
-			pos: [0,0],
-			size: [0,0],
+			..Default::default()
 		};
 	}
 

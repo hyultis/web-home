@@ -1,5 +1,5 @@
 services:
-  hyultisfr:
+  webhome:
     image: webhome:latest #use port 3002, I do not use "ports", because that doesn't change the container to container port number, only the external port (and we don't want that)
     restart: unless-stopped
     networks:

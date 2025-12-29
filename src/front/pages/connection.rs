@@ -57,7 +57,7 @@ pub fn Connection() -> impl IntoView {
 
 			<div class="login_box">
 				<label for="login"><Translate key="pageRoot_form_login"/></label><input type="text" name="login" bind:value=login/>
-				<label for="pwd"><Translate key="pageRoot_form_pwd"/></label><input type="text" name="pwd" bind:value=pwd/>
+				<label for="pwd"><Translate key="pageRoot_form_pwd"/></label><input type="password" name="pwd" bind:value=pwd/>
 				<Transition fallback=move || view! { <span/> }.into_any()>
 					{move || {
 						submitTranslate.get().map(|translated|{

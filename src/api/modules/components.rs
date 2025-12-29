@@ -22,6 +22,23 @@ pub struct ModuleContent
 	pub content: String,
 	pub pos: [i32; 2],
 	pub size: [u32; 2],
+	#[serde(default)]
+	pub depth: u32,
+}
+
+impl Default for ModuleContent
+{
+	fn default() -> Self {
+		Self {
+			name: "".to_string(),
+			typeModule: "".to_string(),
+			timestamp: 0,
+			content: "".to_string(),
+			pos: [0,0],
+			size: [0,0],
+			depth: 0,
+		}
+	}
 }
 
 impl ModuleContent
@@ -31,10 +48,7 @@ impl ModuleContent
 		Self {
 			name,
 			typeModule,
-			timestamp: 0,
-			content: "".to_string(),
-			pos: [0,0],
-			size: [0,0],
+			..Default::default()
 		}
 	}
 
@@ -42,11 +56,7 @@ impl ModuleContent
 	{
 		Self {
 			name,
-			typeModule: "".to_string(),
-			timestamp: 0,
-			content: "".to_string(),
-			pos: [0,0],
-			size: [0,0],
+			..Default::default()
 		}
 	}
 
@@ -83,6 +93,7 @@ impl ModuleContent
 		content.insert("posY".to_string(), JsonValue::Number(self.pos[1] as f64));
 		content.insert("sizeX".to_string(), JsonValue::Number(self.size[0] as f64));
 		content.insert("sizeY".to_string(), JsonValue::Number(self.size[1] as f64));
+		content.insert("depth".to_string(), JsonValue::Number(self.depth as f64));
 
 		config.value_set(&configPath,JsonValue::Object(content));
 		config.file_save().map_err(|err| ModuleErrors::ConfigError(err))?;
@@ -119,6 +130,9 @@ impl ModuleContent
 		}
 		if let Some(JsonValue::Number(content) ) = content.get("sizeY"){
 			self.size[1] = *content as u32;
+		}
+		if let Some(JsonValue::Number(content) ) = content.get("depth"){
+			self.depth = *content as u32;
 		}
 
 		return Ok(());

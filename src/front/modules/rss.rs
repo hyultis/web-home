@@ -218,8 +218,7 @@ impl Backable for Rss
 			typeModule: self.typeModule(),
 			timestamp: self._update.get_untracked().get(),
 			content: serde_json::to_string(&self.config.get_untracked()).unwrap_or_default(),
-			pos: [0,0],
-			size: [0,0],
+			..Default::default()
 		};
 	}
 

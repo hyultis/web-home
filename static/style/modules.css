@@ -217,6 +217,10 @@
 	width: 4em;
 }
 
+.module_weather_config {
+	overflow-y: scroll;
+}
+
 .module_mail_config {
 	overflow-y: scroll;
 }

@@ -28,7 +28,7 @@ body
 	background: var(--backgroundcolor);
 	color: var(--defaultfontcolor);
 	font-size: 1.1em;
-	font-family: sans-serif;
+	font-family: system-ui, sans-serif;
 	line-height: 1.5em;
 }
 
@@ -90,6 +90,7 @@ input
 	border-radius: 5px;
 	padding: 0.5em;
 	color: var(--defaultfontcolor);
+	font-family: Inter, Roboto, 'Helvetica Neue', 'Arial Nova', 'Nimbus Sans', Arial, sans-serif;
 }
 
 input[type=button], button
@@ -158,6 +159,8 @@ textarea {
 	width: 100%;
 	height: 100%;
 	background-color: var(--backgroundcolor);
+	font-family: Inter, Roboto, 'Helvetica Neue', 'Arial Nova', 'Nimbus Sans', Arial, sans-serif;
+	font-size: 0.9em;
 }
 
 .grabbable {

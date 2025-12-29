@@ -55,9 +55,6 @@ async fn main() {
 
 	HConfigManager::singleton().confPath_set("./config");
 	HConfigManager::singleton()
-		.create::<WrapperJson>("htrace")
-		.expect("bug from hconfig");
-	HConfigManager::singleton()
 		.create::<WrapperJson>("site")
 		.expect("bug from hconfig");
 

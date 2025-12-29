@@ -450,6 +450,7 @@ impl ModuleHolder
 
 	pub fn blocks_insert(&mut self, newmodule: ModulePositions<ModuleType>)
 	{
+		newmodule.depth_set(self._blockNb as u32);
 		let name = format!("{}_{}", self._blockNb, newmodule.inner().typeModule());
 		self._blocks.insert(name, newmodule);
 		self._blockNb += 1;

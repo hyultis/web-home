@@ -1,3 +1,4 @@
+use leptos::prelude::StyleAttribute;
 use leptos::prelude::{ElementChild, IntoAny};
 use leptos::prelude::OnAttribute;
 use leptos::prelude::{AnyView, ClassAttribute, Signal, Update};
@@ -5,6 +6,7 @@ use leptos::prelude::{Callable, Callback, Get, GetUntracked, RwSignal, Set};
 use leptos::{component, view, IntoView};
 use leptos_use::{use_css_var, use_timeout_fn, UseTimeoutFnReturn};
 use std::sync::Arc;
+use leptos::html::ElementExt;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::translate::Translate;
 
@@ -58,7 +60,7 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 							let mut larger = "";
 							if data.is_larger {larger = " larger";}
 							format!("dialog-backdrop{}{}",closing,larger)
-						}} on:click=closeFn.clone()>
+						}} style="z-index: 9999" on:click=closeFn.clone()>
 						<div class="dialog-window" on:click=|e| e.stop_propagation()>
 							<h2>{
 								if(data.title.starts_with("€")) {

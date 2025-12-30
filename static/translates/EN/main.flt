@@ -1,0 +1,102 @@
+#Menu
+swap_to_EN = 🇬🇧
+swap_to_FR = 🇫🇷
+
+# Root
+pageRoot_desc = Webhome is a site that serves as your homepage.
+pageRoot_foot = <a class="externe" href="https://github.com/hyul...e" rel="noopener noreferrer nofollow" target="_blank">Source</a>
+pageRoot_signup = Sign up
+pageRoot_title_login = Login
+pageRoot_title_signup = Registration
+pageRoot_form_login = Login:
+pageRoot_form_pwd = Password:
+pageRoot_form_submit_login = Login
+pageRoot_form_submit_signup = Create my account
+
+#page 404
+page404_title = Page not found
+page404_content = Sorry, this page could not be found. You can go to { $children }.
+menu_home = Back to home
+
+#login and sign
+FRONTLOGIN_LOGIN_USER_WANT_DISCONNECTED = Do you want to log out?
+FRONTLOGIN_LOGIN_USER_CONNECTED = User connected
+FRONTLOGIN_LOGIN_USER_DISCONNECTED = User disconnected
+FRONTLOGIN_LOGIN_USER_SIGNEDUP = User registered
+FRONTLOGIN_LOGIN_USER_NOT_FOUND = This login does not exist
+FRONTLOGIN_LOGIN_USER_INVALID_PWD = Invalid password
+FRONTLOGIN_LOGIN_USER_ALREADY_EXISTS = This login already exists
+FRONTLOGIN_LOGIN_LOCKED = This login is locked due to too many login attempts
+FRONTLOGIN_SIGN_DISABLED = Registration disabled
+
+#global errors
+FRONTERROR_SERVER_ERROR = Server error
+FRONTERROR_MODULE_OUTDATED = The module is older than the server version
+FRONTERROR_MODULE_NOTEXIST = The module does not exist
+
+#front utility
+FRONTUI_VALID = Validate
+FRONTUI_CLOSE = Close
+FRONTUI_MUST_NOT_EMPTY = { $input } must not be empty
+FRONTUI_INVALID_URL = Invalid URL format
+FRONTUI_UPDATE = Save
+FRONTUI_REFRESH = Refresh
+FRONTUI_REMOVED = Delete
+FRONTUI_NOTITLE = Untitled
+FRONTUI_HOME_CHANGE_OK = Save changes?
+FRONTUI_HOME_CHANGE_CANCEL = Cancel changes?
+FRONTUI_HOME_CHANGE_NEW = Type of the new module?
+
+#time
+DISTANT_TIME_RESULT_SEC = s
+DISTANT_TIME_RESULT_MIN = m
+DISTANT_TIME_RESULT_HOUR = h
+DISTANT_TIME_RESULT_DAY = D
+DISTANT_TIME_RESULT_MON = M
+DISTANT_TIME_RESULT_YEAR = Y
+
+#modules
+MODULE_TITLE_CONF = Title:
+
+#module link
+MODULE_RSS_DEL = Delete a link?
+MODULE_RSS_ADD = Add a link
+
+#module rss
+MODULE_RSS_LINK = RSS link:
+MODULE_RSS_MAXLINE = Number of lines:
+MODULE_RSS_DEMO = Example:
+WGET_ERROR_BLANK_URL = The configured URL is empty.
+WGET_ERROR_SERVER_ERROR = { FRONTERROR_SERVER_ERROR }
+
+#module weather
+MODULE_WEATHER_SUN = Sunny
+MODULE_WEATHER_CLOUDY = Partly cloudy
+MODULE_WEATHER_CLOUD = Cloudy
+MODULE_WEATHER_CLOUDY_RAIN = Cloudy with rain
+MODULE_WEATHER_RAIN = Rain
+MODULE_WEATHER_FOG = Fog
+MODULE_WEATHER_LIGH_SNOW = Light frost
+MODULE_WEATHER_SNOW = Snow
+MODULE_WEATHER_SNOW_GRAIN = Hail
+MODULE_WEATHER_STORM = Storms
+MODULE_WEATHER_HEAVYSTORM = Severe storms
+MODULE_WEATHER_POSITION = Position:
+MODULE_WEATHER_LOCATE = Locate
+MODULE_WEATHER_MAXDAY = Max days:
+
+#module mail
+MODULE_MAIL_HOST = Host/port:
+MODULE_MAIL_USERNAME = Login:
+MODULE_MAIL_PASSWORD = Password:
+MODULE_MAIL_GETBOXS = Fetch mailboxes / check connection
+MODULE_MAIL_BOXS_LIST = Mailbox list (click to blacklist)
+MODULE_MAIL_NO_MAIL = No new mail
+MODULE_MAIL_NO_SUBJECT = <no subject>
+MODULE_MAIL_FROM = From:
+MODULE_MAIL_TO = To:
+MODULE_MAIL_DATE = Date:
+MODULE_MAIL_ATTACHEMENT = Attachments:
+MODULE_MAIL_BLOBCREATORERROR = Unable to create the download for this file
+MODULE_MAIL_SYNCERROR = Mail synchronization failed
+MODULE_MAIL_MAILCONTENTSEEN = Mark as read

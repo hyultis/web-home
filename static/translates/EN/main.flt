@@ -4,7 +4,7 @@ swap_to_FR = 🇫🇷
 
 # Root
 pageRoot_desc = Webhome is a site that serves as your homepage.
-pageRoot_foot = <a class="externe" href="https://github.com/hyul...e" rel="noopener noreferrer nofollow" target="_blank">Source</a>
+pageRoot_foot = <a class="externe" href="https://github.com/hyultis/web-home" rel="noopener noreferrer nofollow" target="_blank">Source</a>
 pageRoot_signup = Sign up
 pageRoot_title_login = Login
 pageRoot_title_signup = Registration

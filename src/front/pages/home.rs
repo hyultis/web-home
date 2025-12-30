@@ -8,7 +8,7 @@ use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
 use crate::front::utils::users_data::UserData;
 use crate::{HWebTrace};
 use leptoaster::{expect_toaster, ToasterContext};
-use leptos::__reexports::wasm_bindgen_futures::spawn_local;
+use leptos::task::spawn_local;
 use leptos::ev::MouseEvent;
 use leptos::prelude::ElementChild;
 use leptos::prelude::{

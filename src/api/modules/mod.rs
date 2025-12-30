@@ -58,11 +58,7 @@ pub async fn API_module_retrieveMissingModule(generatedId: String, #[server(defa
 	use crate::api::login::user_back::UserBackHelper;
 	let config = UserBackHelper::getUserConfig(generatedId,false).map_err(|err| ServerFnError::new(format!("{:?}",err)))?;
 
-	let missing_module = match ModuleContent::retrieveMissingModule(config,modules) {
-		Ok(result) => {result}
-		Err(err) => return Err(ServerFnError::new(format!("{:?}",err))),
-	};
-
+	let missing_module = ModuleContent::retrieveMissingModule(config,modules);
 	return Ok(missing_module);
 }
 

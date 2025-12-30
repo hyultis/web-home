@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use js_sys::{Array, Intl, Object, Reflect};
 use leptoaster::ToasterContext;
 use leptos::prelude::{ClassAttribute, CollectView, ElementChild, Get, GetUntracked, OnAttribute, StyleAttribute, Update};
@@ -14,7 +15,7 @@ use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, F
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::translate::Translate;
 use crate::HWebTrace;
-use time::UtcDateTime;
+use time::{Date, UtcDateTime};
 use wasm_bindgen::prelude::Closure;
 use crate::front::utils::draw_title_if_present;
 
@@ -161,14 +162,13 @@ impl Backable for Weather
 					self.weatherContent.get().map(|haveContent| {
 						let units = haveContent.unit.clone();
 						haveContent.days.iter().map(|days| {
-							let date = UtcDateTime::from_unix_timestamp(days.timestampDay as i64).unwrap_or(UtcDateTime::now());
 							view!{
 								<div class="day">
-									{format!("{:0>2}",date.day())}/{format!("{:0>2}",date.month() as u8)}<br/>
+									{format!("{:0>2}",days.day.day())}/{format!("{:0>2}",days.day.month() as u8)}<br/>
 									<img src={format!("weather/{}.png",days.codeIntoImg())} alt={days.codeIntoImg()} /><br/>
 									<Translate key={days.codeIntoTranslate()}/><br/>
 									<span style={Self::celsiusToColor(days.temp_min)}>{days.temp_min}{units.clone().temp}</span>{" - "}<span style={Self::celsiusToColor(days.temp_max)}>{days.temp_max}{units.clone().temp}</span><br/>
-									<i class="iconoir-wind"/>{" "}{days.wind}{units.clone().wind}<br/>
+									<i class="iconoir-wind"/>{" "}{days.wind_max}{units.clone().wind}<br/>
 									<i class="iconoir-heavy-rain"/>{" "}{days.precipitation}{units.clone().precipitation}
 								</div>
 							}
@@ -256,14 +256,51 @@ impl Cacheable for Weather
 	}
 }
 
+
+struct WeatherApiResultOneDayByHour
+{
+	pub day: Date,
+	pub temp: Vec<f64>,
+	pub precipitation: Vec<u8>,
+	pub winds: Vec<f64>,
+	pub codes: Vec<u8>,
+}
+
+impl Into<WeatherApiResultOneDay> for WeatherApiResultOneDayByHour
+{
+	fn into(self) -> WeatherApiResultOneDay {
+		WeatherApiResultOneDay {
+			day: self.day,
+			temp_min: self.temp.iter().fold(f64::INFINITY, |a, &b| a.min(b)),
+			temp_max: self.temp.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b)),
+			precipitation: (self.precipitation.iter().map(|v| *v as f32).sum::<f32>() / self.temp.len() as f32) as u8,
+			wind_max: self.winds.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b)),
+			code: self.codes.iter()
+				.fold(HashMap::new(), |mut acc, &b| {
+					if let Some(data) = acc.get_mut(&b) {
+						*data += 1;
+					}
+					else {
+						acc.insert(b, 1);
+					}
+					acc
+				})
+				.iter()
+				.enumerate()
+				.max_by_key(|&(_, (_,count))| count)
+				.map(|(_, (i,_))| *i).unwrap_or_default(),
+		}
+	}
+}
+
 #[derive(Debug, Clone)]
 struct WeatherApiResultOneDay
 {
-	pub timestampDay: u64,
+	pub day: Date,
 	pub temp_min: f64,
 	pub temp_max: f64,
 	pub precipitation: u8,
-	pub wind: f64,
+	pub wind_max: f64,
 	pub code: u8,
 }
 
@@ -332,14 +369,14 @@ async fn sync_weather_api(config: ArcRwSignal<WeatherConfig>,weatherContent: Arc
 
 	let config = config.get_untracked();
 	let url = format!(
-		"https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=apparent_temperature_min,apparent_temperature_max,precipitation_probability_max,wind_speed_10m_max,weather_code{}&forecast_days={}&wind_speed_unit=ms&format=json&timeformat=unixtime",
+		"https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&hourly=weather_code,precipitation_probability,wind_speed_10m,apparent_temperature{}&forecast_days={}&wind_speed_unit=ms&format=json&timeformat=unixtime",
 		config.latitude, config.longitude, timezone, config.maxday
 	);
 
 	let text = if(false)
 	{
 		// debug
-		"{\"latitude\":42.98,\"longitude\":3.12,\"generationtime_ms\":0.26226043701171875,\"utc_offset_seconds\":3600,\"timezone\":\"Europe/Paris\",\"timezone_abbreviation\":\"GMT+1\",\"elevation\":81.0,\"daily_units\":{\"time\":\"unixtime\",\"apparent_temperature_min\":\"°C\",\"apparent_temperature_max\":\"°C\",\"precipitation_probability_max\":\"%\",\"wind_speed_10m_max\":\"m/s\",\"weather_code\":\"wmo code\"},\"daily\":{\"time\":[1764975600,1765062000,1765148400,1765234800,1765321200,1765407600,1765494000],\"apparent_temperature_min\":[3.7,8.4,7.0,10.7,10.6,6.4,6.1],\"apparent_temperature_max\":[11.4,17.4,16.5,14.3,14.4,17.3,12.3],\"precipitation_probability_max\":[38,5,0,58,51,14,42],\"wind_speed_10m_max\":[2.10,2.27,2.36,3.98,2.84,1.87,3.36],\"weather_code\":[80,45,45,80,80,45,3]}}".to_string()
+		"{\"latitude\":40.0,\"longitude\":3.0,\"generationtime_ms\":0.2378225326538086,\"utc_offset_seconds\":3600,\"timezone\":\"Europe/Paris\",\"timezone_abbreviation\":\"GMT+1\",\"elevation\":58.0,\"hourly_units\":{\"time\":\"unixtime\",\"weather_code\":\"wmo code\",\"precipitation_probability\":\"%\",\"wind_speed_10m\":\"km/h\",\"apparent_temperature\":\"°C\"},\"hourly\":{\"time\":[1767049200,1767052800,1767056400,1767060000,1767063600,1767067200,1767070800,1767074400,1767078000,1767081600,1767085200,1767088800,1767092400,1767096000,1767099600,1767103200,1767106800,1767110400,1767114000,1767117600,1767121200,1767124800,1767128400,1767132000,1767135600,1767139200,1767142800,1767146400,1767150000,1767153600,1767157200,1767160800,1767164400,1767168000,1767171600,1767175200,1767178800,1767182400,1767186000,1767189600,1767193200,1767196800,1767200400,1767204000,1767207600,1767211200,1767214800,1767218400,1767222000,1767225600,1767229200,1767232800,1767236400,1767240000,1767243600,1767247200,1767250800,1767254400,1767258000,1767261600,1767265200,1767268800,1767272400,1767276000,1767279600,1767283200,1767286800,1767290400,1767294000,1767297600,1767301200,1767304800],\"weather_code\":[45,45,45,45,45,45,45,1,45,45,1,0,0,0,0,0,0,0,0,0,0,0,0,0,45,45,45,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,2,2,2,1,1,2,3,3,0,1,48,48],\"precipitation_probability\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"wind_speed_10m\":[4.0,4.3,4.5,4.1,4.0,4.0,4.0,4.0,3.6,3.2,3.6,3.4,2.8,1.8,2.6,4.6,6.9,3.6,5.6,5.6,4.1,2.5,2.3,3.4,3.7,3.4,3.9,3.8,4.3,4.1,4.1,4.6,4.3,4.1,3.6,2.4,4.0,6.8,8.0,9.6,8.6,5.8,4.5,4.0,4.0,4.0,3.9,3.9,3.9,4.0,4.0,4.0,4.0,4.2,4.4,3.7,3.9,4.0,3.5,2.4,1.3,1.1,3.0,5.3,6.4,4.9,2.9,3.4,4.1,4.4,5.0,4.9],\"apparent_temperature\":[0.3,-0.2,-0.7,-1.0,-1.3,-1.9,-2.3,-2.7,-3.1,-3.3,-1.6,2.0,4.1,6.1,6.7,6.5,6.1,6.0,4.7,1.9,-0.1,-0.9,-1.8,-2.9,-3.5,-3.7,-4.0,-4.2,-4.5,-4.6,-4.7,-5.0,-5.1,-5.0,-3.7,-0.6,1.8,2.5,3.1,3.2,3.2,2.4,1.0,-0.5,-2.0,-3.0,-3.7,-4.0,-4.3,-4.7,-4.9,-5.1,-5.1,-5.3,-5.5,-5.5,-5.6,-5.5,-4.1,-1.1,1.9,3.2,3.9,4.0,4.2,3.0,1.5,-0.1,-1.7,-3.4,-4.3,-4.6]}}".to_string()
 	}
 	else
 	{
@@ -369,11 +406,11 @@ async fn sync_weather_api(config: ArcRwSignal<WeatherConfig>,weatherContent: Arc
 		Ok(Value::Object(obj)) => {
 			for (key, value) in obj.into_iter() {
 				match key.as_ref() {
-					"daily_units" => {
-						json_read_daily_units(&mut weatherResult,&value);
+					"hourly_units" => {
+						json_read_hourly_units(&mut weatherResult, &value);
 					}
-					"daily" => {
-						json_read_daily(&mut weatherResult,&value);
+					"hourly" => {
+						json_read_hourly(&mut weatherResult, &value);
 					}
 					_ => {}
 				}
@@ -391,13 +428,12 @@ async fn sync_weather_api(config: ArcRwSignal<WeatherConfig>,weatherContent: Arc
 	});
 }
 
-fn json_read_daily(result: &mut WeatherApiResult, json: &Value)
+fn json_read_hourly(result: &mut WeatherApiResult, json: &Value)
 {
 	let mut times = vec![];
-	let mut apparent_temperature_min = vec![];
-	let mut apparent_temperature_max = vec![];
-	let mut precipitation_probability_max = vec![];
-	let mut wind_speed_10m_max = vec![];
+	let mut apparent_temperature = vec![];
+	let mut precipitation_probability = vec![];
+	let mut wind_speed_10m = vec![];
 	let mut code = vec![];
 
 	let Value::Object(obj) = json else {return};
@@ -410,30 +446,23 @@ fn json_read_daily(result: &mut WeatherApiResult, json: &Value)
 						.collect::<Vec<u64>>();
 				}
 			}
-			"apparent_temperature_min" => {
+			"apparent_temperature" => {
 				if let Value::Array(value) = value {
-					apparent_temperature_min = value.iter()
+					apparent_temperature = value.iter()
 						.map(|v| v.as_f64().unwrap_or(0.0))
 						.collect::<Vec<f64>>();
 				}
 			}
-			"apparent_temperature_max" => {
+			"precipitation_probability" => {
 				if let Value::Array(value) = value {
-					apparent_temperature_max = value.iter()
-						.map(|v| v.as_f64().unwrap_or(0.0))
-						.collect::<Vec<f64>>();
-				}
-			}
-			"precipitation_probability_max" => {
-				if let Value::Array(value) = value {
-					precipitation_probability_max = value.iter()
+					precipitation_probability = value.iter()
 						.map(|v| v.as_u8().unwrap_or(0))
 						.collect::<Vec<u8>>();
 				}
 			}
-			"wind_speed_10m_max" => {
+			"wind_speed_10m" => {
 				if let Value::Array(value) = value {
-					wind_speed_10m_max = value.iter()
+					wind_speed_10m = value.iter()
 						.map(|v| v.as_f64().unwrap_or(0.0))
 						.collect::<Vec<f64>>();
 				}
@@ -449,41 +478,66 @@ fn json_read_daily(result: &mut WeatherApiResult, json: &Value)
 		}
 	}
 
-	result.days = times.iter().enumerate().map(|(i,time)|{
-		return WeatherApiResultOneDay{
-			timestampDay: *time,
-			temp_min: apparent_temperature_min[i],
-			temp_max: apparent_temperature_max[i],
-			precipitation: precipitation_probability_max[i],
-			wind: wind_speed_10m_max[i],
-			code: code[i],
-		};
-	}).collect::<Vec<WeatherApiResultOneDay>>();
+	let mut finalResult: HashMap<Date,WeatherApiResultOneDayByHour> = HashMap::new();
+	for (i,time) in times.iter().enumerate() {
+
+		let dateTime = UtcDateTime::from_unix_timestamp(*time as i64).unwrap_or(UtcDateTime::now());
+		let date = dateTime.date();
+		let hour = dateTime.hour();
+
+		if let Some(finalData) = finalResult.get_mut(&date) {
+			finalData.temp.push(apparent_temperature[i]);
+			finalData.precipitation.push(precipitation_probability[i]);
+
+			let hour = dateTime.hour();
+			if(hour < 8 || hour > 22) {continue}
+			finalData.codes.push(code[i]);
+			finalData.winds.push(wind_speed_10m[i]);
+		}
+		else {
+			let mut defaultWind = vec![];
+			let mut defaultCodes = vec![];
+			if(hour >= 8 || hour <= 23) {defaultWind = vec![wind_speed_10m[i]]}
+			if(hour >= 8 || hour <= 23) {defaultCodes = vec![code[i]]}
+
+			finalResult.insert(date, WeatherApiResultOneDayByHour{
+				day: date,
+				temp: vec![apparent_temperature[i]],
+				precipitation: vec![precipitation_probability[i]],
+				winds: defaultWind,
+				codes: defaultCodes,
+			});
+		}
+	};
+
+	let mut beforeOrder = finalResult.into_iter().map(|(_,val)| val.into()).collect::<Vec<WeatherApiResultOneDay>>();
+	beforeOrder.sort_by_key(|x| x.day);
+	result.days = beforeOrder;
 }
 
-fn json_read_daily_units(result: &mut WeatherApiResult, json: &Value)
+fn json_read_hourly_units(result: &mut WeatherApiResult, json: &Value)
 {
 	/*
-		"time":"unixtime",
-		"apparent_temperature_min":"°C",
-		"apparent_temperature_max":"°C",
-		"precipitation_probability_max":"%",
-		"wind_speed_10m_max":"m/s"
+		time = "unixtime"
+		weather_code = "wmo code"
+		precipitation_probability = "%"
+		wind_speed_10m = "km/h"
+		apparent_temperature = "°C"
 	 */
 	let Value::Object(obj) = json else {return};
 	for (key, value) in obj.iter() {
 		match key.as_ref() {
-			"apparent_temperature_min" => {
+			"apparent_temperature" => {
 				if let Value::String(value) = value {
 					result.unit.temp = value.to_string();
 				}
 			}
-			"precipitation_probability_max" => {
+			"precipitation_probability" => {
 				if let Value::String(value) = value {
 					result.unit.precipitation = value.to_string();
 				}
 			}
-			"wind_speed_10m_max" => {
+			"wind_speed_10m" => {
 
 				if let Value::String(value) = value {
 					result.unit.wind = value.to_string();

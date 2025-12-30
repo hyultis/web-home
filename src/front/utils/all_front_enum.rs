@@ -1,7 +1,7 @@
 use crate::api::login::components::LoginStatusErrors;
 
 /// contains all error key present into translate files
-#[derive(strum_macros::Display)]
+#[derive(strum_macros::Display, PartialEq)]
 #[strum(prefix = "FRONTERROR_")]
 pub enum AllFrontErrorEnum
 {

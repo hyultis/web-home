@@ -151,11 +151,11 @@ impl ModuleContent
 	}
 
 	#[cfg(feature = "ssr")]
-	pub fn retrieveMissingModule(config: Hconfig::HConfig::HConfig, modules: Vec<String>) -> Result<Vec<String>, ModuleErrors>
+	pub fn retrieveMissingModule(config: Hconfig::HConfig::HConfig, modules: Vec<String>) -> Vec<String>
 	{
 		use Hconfig::tinyjson::JsonValue;
 
-		let Some(JsonValue::Object(ref arrayOfcontent)) = config.value_get("modules") else {return Err(ModuleErrors::Empty)};
+		let Some(JsonValue::Object(ref arrayOfcontent)) = config.value_get("modules") else {return vec![]};
 
 		let mut returning = vec![];
 		arrayOfcontent.keys().cloned().for_each( |name|
@@ -165,6 +165,6 @@ impl ModuleContent
 			}
 		});
 
-		return Ok(returning);
+		return returning;
 	}
 }

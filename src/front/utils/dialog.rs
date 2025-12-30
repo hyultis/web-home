@@ -6,7 +6,6 @@ use leptos::prelude::{Callable, Callback, Get, GetUntracked, RwSignal, Set};
 use leptos::{component, view, IntoView};
 use leptos_use::{use_css_var, use_timeout_fn, UseTimeoutFnReturn};
 use std::sync::Arc;
-use leptos::html::ElementExt;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::translate::Translate;
 

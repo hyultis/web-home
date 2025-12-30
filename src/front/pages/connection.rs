@@ -3,7 +3,7 @@ use leptos::prelude::{BindAttribute, ClassAttribute, GetUntracked, IntoAny, Set,
 use leptos::prelude::{signal, ElementChild, Get};
 use leptos::prelude::{OnAttribute, RenderHtml};
 use leptos::{island, view, IntoView};
-use leptos::__reexports::wasm_bindgen_futures::spawn_local;
+use leptos::task::spawn_local;
 use leptos_router::components::A;
 use leptos_router::hooks;
 use crate::front::utils::all_front_enum::AllFrontLoginEnum;
@@ -67,6 +67,7 @@ pub fn Connection() -> impl IntoView {
 				</Transition>
 			</div>
 			{
+				//crate::api::ALLOW_REGISTRATION.wait();
 				let allowRegistration = crate::api::ALLOW_REGISTRATION.get().map(|ab| ab.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false);
 				if(allowRegistration) {
 					view!{<A href="/newuser"><Translate key="pageRoot_signup"/></A>}.into_any()

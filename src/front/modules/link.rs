@@ -17,7 +17,7 @@ use crate::front::utils::dialog::{DialogData, DialogManager};
 use crate::front::utils::toaster_helpers::{toastingErr, toastingParams};
 use crate::HWebTrace;
 use std::ops::DerefMut;
-use leptos::__reexports::wasm_bindgen_futures::spawn_local;
+use leptos::task::spawn_local;
 use crate::front::modules::module_actions::ModuleActionFn;
 
 #[derive(Clone, Serialize, Deserialize)]

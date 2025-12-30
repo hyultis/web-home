@@ -4,7 +4,7 @@ swap_to_FR = 🇫🇷
 
 # Root
 pageRoot_desc = Webhome est un site qui vous sert d'accueil.
-pageRoot_foot = <a class="externe" href="https://leptos.dev/" rel="noopener noreferrer nofollow" target="_blank">Source</a>
+pageRoot_foot = <a class="externe" href="https://github.com/hyultis/web-home" rel="noopener noreferrer nofollow" target="_blank">Source</a>
 pageRoot_signup = S'inscrire
 pageRoot_title_login = Connection
 pageRoot_title_signup = Inscription

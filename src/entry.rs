@@ -7,7 +7,7 @@ use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title}
 use leptos_router::components::{Route, Router, Routes, A};
 use leptos_router::{hooks, path};
 use leptos_use::use_locales;
-use leptos::__reexports::wasm_bindgen_futures::spawn_local;
+use leptos::task::spawn_local;
 use crate::api::{ALLOW_REGISTRATION, IS_TRACE_FRONT_LOG};
 use crate::front::pages::home::Home;
 use crate::front::pages::connection::Connection;
@@ -46,6 +46,9 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 	provide_meta_context();
 	provide_toaster();
 
+	let _ = IS_TRACE_FRONT_LOG.set(AtomicBool::new(traceFrontLog));
+	let _ = ALLOW_REGISTRATION.set(AtomicBool::new(allowRegistration));
+
 	let dialog_manager = DialogManager::new();
 	provide_context(dialog_manager.clone());
 	let (userDataSignal, setUserData) = UserData::cookie_signalGet();
@@ -56,8 +59,6 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 			return;
 		}
 		is_initialized.set(true);
-		let _ = IS_TRACE_FRONT_LOG.set(AtomicBool::new(traceFrontLog));
-		let _ = ALLOW_REGISTRATION.set(AtomicBool::new(allowRegistration));
 
 		// set default userData
 		if (userDataSignal.read_untracked().is_none())

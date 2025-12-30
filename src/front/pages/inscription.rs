@@ -4,7 +4,7 @@ use leptos::prelude::{ElementChild, GetUntracked, IntoAny, Transition};
 use leptos::prelude::BindAttribute;
 use leptos::prelude::{signal, ClassAttribute, Get, OnAttribute, RenderHtml, Set};
 use leptos::{island, view, IntoView};
-use leptos::__reexports::wasm_bindgen_futures::spawn_local;
+use leptos::task::spawn_local;
 use leptos_router::components::A;
 use leptos_router::*;
 use crate::front::utils::all_front_enum::AllFrontLoginEnum;

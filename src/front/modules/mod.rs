@@ -109,7 +109,9 @@ impl ModuleHolder
 			)
 			.await
 			{
-				return Some(error);
+				if(error!=AllFrontErrorEnum::MODULE_NOTEXIST) {
+					return Some(error);
+				}
 			}
 		}
 

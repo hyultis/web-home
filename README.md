@@ -31,6 +31,11 @@ Additionally, the `site.json` configuration file on the server contains a "serve
 
 ## Todo
 
+Things to fix :
+
+- crons after a system wakeup seems to be broken
+- after a system wakeup, need to execute all cron one time.
+
 Features I plan to add in the future:
 
 - Calendar module

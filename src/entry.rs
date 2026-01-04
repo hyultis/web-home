@@ -32,6 +32,7 @@ pub fn shell((options,trace_front_log,allowRegistration): (LeptosOptions, bool, 
 				<AutoReload options=options.clone() />
 				<HydrationScripts options islands=true/>
 				<MetaTags/>
+				<script type="module" src="setUpWorkers.js"></script>
 			</head>
 			<body>
 				<App traceFrontLog={trace_front_log} allowRegistration={allowRegistration}/>

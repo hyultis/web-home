@@ -4,6 +4,7 @@
 
 WebHome is a customizable browser home page designed to give you rapid access to the information you need:
 
+- Auto-translation UI (based on your browser language)
 - Weather
 - Notes
 - RSS Feeds
@@ -11,6 +12,12 @@ WebHome is a customizable browser home page designed to give you rapid access to
 - Links
 
 You can freely position any module anywhere on the page to suit your layout preferences.
+
+## Screenshot
+![Screenshot](example.png)
+
+## Edit mode screenshot
+![Screenshot](example_edit.png)
 
 ## Why?
 
@@ -29,11 +36,27 @@ HOWEVER, due to browser security restrictions, the Mail and RSS modules require 
 
 Additionally, the `site.json` configuration file on the server contains a "server salt" that is never sent to the client. If this salt is changed, all data stored on the server will become inaccessible.
 
+## launch/compile
+
+To launch locally :
+
+```bash
+cargo leptos watch --wasm-debug
+```
+
+For production, you can check the docker dir and/or the github action workflows.
+
+## Configuration
+
+The configuration file is located at `config/site.json`.
+Users datas are stored in `config/users` directory.
+`dynamic` contains traces, and caches datas.
+
 ## Todo
 
 Things to fix :
 
-- crons after a system wakeup seems to be broken
+- cron after a system wakeup seems broken
 - after a system wakeup, need to execute all cron one time.
 
 Features I plan to add in the future:
@@ -45,6 +68,7 @@ Features I plan to add in the future:
 - Design improvements
 - Custom background images
 - Theme color configuration
+- Change language inside an option menu
 
 ## License
 
@@ -54,8 +78,6 @@ Licensed under either of:
 * MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
 
 at your option.
-
-Note: Anything under the `static/public` directory is under a private license unless stated otherwise.
 
 ## Contribution
 

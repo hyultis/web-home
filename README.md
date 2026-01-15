@@ -8,7 +8,7 @@ WebHome is a customizable browser home page designed to give you rapid access to
 - Weather
 - Notes
 - RSS Feeds
-- Emails
+- Emails (can mark them as read, view the full content, download attachments)
 - Links
 
 You can freely position any module anywhere on the page to suit your layout preferences.

@@ -56,8 +56,7 @@ Users datas are stored in `config/users` directory.
 
 Things to fix :
 
-- cron after a system wakeup seems broken
-- after a system wakeup, need to execute all cron one time.
+- nothing actually
 
 Features I plan to add in the future:
 
@@ -66,9 +65,10 @@ Features I plan to add in the future:
 - Password change (requires client-side re-encryption of all data)
 - Layout system
 - Design improvements
-- Custom background images
-- Theme color configuration
-- Change language inside an option menu
+- Option menu with : 
+  - Custom background images
+  - Theme color configuration
+  - Change language inside an option menu
 
 ## License
 

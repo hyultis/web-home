@@ -1,4 +1,4 @@
-use leptos::prelude::{GetUntracked, OnTargetAttribute, ReadUntracked, StyleAttribute};
+use leptos::prelude::{GetUntracked, OnTargetAttribute, ReadUntracked, Signal, StyleAttribute, WriteSignal};
 use leptos::prelude::{CollectView, Get, PropAttribute};
 use crate::front::modules::components::Backable;
 use crate::front::modules::ModuleHolder;
@@ -16,8 +16,10 @@ use leptos::prelude::{
 	RenderHtml, RwSignal, Set, Update, Write,
 };
 use leptos::{island, view, IntoView};
-use leptos_router::hooks;
+use leptos_router::{hooks, NavigateOptions};
 use std::ops::DerefMut;
+use leptos::logging::log;
+use leptos_use::use_interval_fn;
 use strum::IntoEnumIterator;
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::modules::module_positions::ModulePositions;
@@ -35,6 +37,33 @@ pub fn Home() -> impl IntoView
 		panic!("cannot get dialogManager in home");
 	};
 	let toaster = expect_toaster();
+
+	// user data checker to force disconnect
+	let toasterInner = toaster.clone();
+	let (userDataSignal, setUserData) = UserData::cookie_signalGet();
+	Effect::new(move || {
+		let mut is_connected = false;
+		if let Some(userDataInner) = userDataSignal.get()
+		{
+			is_connected = userDataInner.login_isConnected();
+		}
+
+		if userDataSignal.get().is_none() || !is_connected
+		{
+			let callback = user_disconnected(hooks::use_navigate(), toasterInner.clone(), userDataSignal.clone(), setUserData.clone(), false);
+			callback(());
+		}
+	});
+
+	// auto refresh cookie every 2 hour
+	use_interval_fn(
+		move || {
+			let (userDataSignal, setUserData) = UserData::cookie_signalGet();
+			setUserData.set(userDataSignal.get_untracked());
+			log!("auto refresh cookie");
+		},
+		2 * 3600 * 1000,
+	);
 
 	// pre init ModuleHolder
 	let moduleActions = ModuleActionFn::new(moduleContent.clone(),toaster.clone());
@@ -113,27 +142,12 @@ pub fn Home() -> impl IntoView
 
 	let editModeAddModuleFn = editMode_AddBlock(moduleContent.clone(), dialogManager.clone());
 
-	let (userData, setUserData) = UserData::cookie_signalGet();
-	let toasterInnerDisconnect = toaster.clone();
+	// disconnect func
+	let toasterInner = toaster.clone();
 	let disconnectFn = move |_| {
-		let navigate = hooks::use_navigate();
-		let toaster = toasterInnerDisconnect.clone();
-
 		let dialogContent = DialogData::new()
 			.setTitle(AllFrontLoginEnum::LOGIN_USER_WANT_DISCONNECTED)
-			.setOnValidate(Callback::new(move |_| {
-				let navigate = navigate.clone();
-				let toaster = toaster.clone();
-				spawn_local(async move {
-					let Some(mut userData) = userData.get_untracked() else {return};
-					userData.login_disconnect().await;
-					toastingSuccess(&toaster, AllFrontLoginEnum::LOGIN_USER_DISCONNECTED).await;
-					HWebTrace!("user disconnected");
-					setUserData.set(None);
-					navigate("/", Default::default());
-				});
-				return true;
-			}));
+			.setOnValidate(Callback::new(user_disconnected(hooks::use_navigate(), toasterInner.clone(), userDataSignal.clone(), setUserData.clone(), true)));
 
 		dialogManager.open(dialogContent);
 	};
@@ -337,4 +351,25 @@ fn editMode_AddBlock(moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 
 		dialogManager.open(dialogContent);
 	}
+}
+
+fn user_disconnected(navigate: impl Fn(&str, NavigateOptions) + Clone + 'static, toaster: ToasterContext, userData: Signal<Option<UserData>>, setUserData: WriteSignal<Option<UserData>>, withToaster: bool) -> impl Fn(()) -> bool + Clone
+{
+	return move |_| {
+		let navigate = navigate.clone();
+		let toaster = toaster.clone();
+		spawn_local(async move {
+			if let Some(mut userData) = userData.get_untracked() {
+				userData.login_disconnect().await;
+				setUserData.set(None);
+			}
+
+			if(withToaster) {
+				toastingSuccess(&toaster, AllFrontLoginEnum::LOGIN_USER_DISCONNECTED).await;
+			}
+			HWebTrace!("user disconnected");
+			navigate("/", Default::default());
+		});
+		return true;
+	};
 }

@@ -244,7 +244,7 @@ impl Mail
 								else {view!{}.into_any()}
 							}
 							<div style="flex-grow: 1; border: none; margin: 0; padding: 0;margin-top: 0.5em">
-						        <iframe srcdoc={mailContent.content.unwrap_or_default(&mailContent.parts)} sandbox style="width:100%; height:100%; background:white; border: none; margin: 0; padding: 0;"></iframe>
+						        <iframe srcdoc={mailContent.content.unwrap_or_default(&mailContent.parts)} sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" style="width:100%; height:100%; background:white; border: none; margin: 0; padding: 0;"></iframe>
 							</div>
 						</div>
 					}.into_any()

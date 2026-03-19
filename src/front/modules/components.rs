@@ -9,8 +9,10 @@ use leptos::view;
 use time::UtcDateTime;
 use serde::{Deserialize, Serialize};
 use web_sys::{Event, HtmlInputElement};
-use crate::api::modules::components::ModuleContent;
+use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::modules::module_actions::ModuleActionFn;
+use crate::front::modules::{ModuleHolder};
+use crate::front::utils::all_front_enum::AllFrontErrorEnum;
 use crate::front::utils::translate::Translate;
 
 #[derive(Clone, Debug, Serialize,Deserialize)]
@@ -73,6 +75,7 @@ impl Default for Cache
 /// struct that can manage cache
 pub trait Cacheable
 {
+	fn cache_time(&self) -> i64;
 	fn cache_mustUpdate(&self) -> bool;
 	fn cache_getUpdate(&self) -> ArcRwSignal<Cache>;
 	fn cache_getSended(&self) -> ArcRwSignal<Cache>;
@@ -81,14 +84,19 @@ pub trait Cacheable
 
 pub type BoxFuture = Pin<Box<dyn Future<Output = ()> + 'static>>;
 
+pub trait ModuleName
+{
+	const MODULE_NAME: &'static str;
+}
+
 /// struct that can be sent to / retrieved from backend
 pub trait Backable
 {
-	fn typeModule(&self) -> String;
-	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn,currentName: String) -> AnyView;
+	fn module_name(&self) -> String;
+	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> AnyView;
 
 	fn refresh_time(&self) -> RefreshTime;
-	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String, toaster: ToasterContext) -> Option<BoxFuture>;
+	fn refresh(&self, moduleActions: ModuleActionFn, moduleId:ModuleID, toaster: ToasterContext) -> Option<BoxFuture>;
 
 	fn export(&self) -> ModuleContent;
 	fn import(&mut self, import: ModuleContent);
@@ -297,4 +305,24 @@ pub struct PausableStocker
 	pub interval: RwSignal<u64>,
 	pub pause: Arc<dyn Fn() + Send + Sync>,
 	pub resume: Arc<dyn Fn() + Send + Sync>,
+}
+
+pub struct API_return_apply
+{
+	pub retrieve: Vec<Box<dyn FnOnce(&mut ModuleHolder)>>, // action on ModuleHolder, after all api call
+	pub update: Vec<Box<dyn FnOnce(&mut ModuleHolder)>>, // action on ModuleHolder, after all api call
+	pub error: Vec<AllFrontErrorEnum>, // error to be showed, after all api call
+	pub moduleId: Vec<ModuleID>, // moduleId updated that need a refresh, after all api call
+}
+
+impl Default for API_return_apply
+{
+	fn default() -> Self {
+		Self {
+			retrieve: vec![],
+			update: vec![],
+			error: vec![],
+			moduleId: vec![],
+		}
+	}
 }

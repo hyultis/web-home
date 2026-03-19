@@ -3,7 +3,7 @@ use std::sync::Arc;
 use leptoaster::{expect_toaster, ToastLevel, ToasterContext};
 use leptos::prelude::{BindAttribute, GetUntracked, Write};
 use leptos::prelude::{use_context, ArcRwSignal, Callback, ClassAttribute, Effect, Get, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update};
-use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleSizeContrainte, RefreshTime};
+use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleName, ModuleSizeContrainte, RefreshTime};
 use leptos::prelude::{AnyView, CollectView, ElementChild, IntoAny, Read, RwSignal};
 use leptos::{view, IntoView};
 use leptos::ev::MouseEvent;
@@ -11,7 +11,7 @@ use leptos::html::{Div, I};
 use leptos_use::{use_draggable_with_options, use_mouse_in_element, UseDraggableOptions, UseDraggableReturn, UseMouseInElementReturn};
 use serde::{Deserialize, Serialize};
 use url::Url;
-use crate::api::modules::components::ModuleContent;
+use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::dialog::{DialogData, DialogManager};
 use crate::front::utils::toaster_helpers::{toastingErr, toastingParams};
@@ -37,6 +37,7 @@ impl Link
 
 pub struct LinksHolder
 {
+	name: ModuleID,
 	content: ArcRwSignal<Vec<Link>>,
 	_update: ArcRwSignal<Cache>,
 	_sended: ArcRwSignal<Cache>,
@@ -47,10 +48,21 @@ impl LinksHolder
 	pub fn new() -> Self
 	{
 		Self {
+			name: Default::default(),
 			content: ArcRwSignal::new(vec![]),
 			_update: ArcRwSignal::new(Default::default()),
 			_sended: Default::default(),
 		}
+	}
+
+	pub fn name_get(&self) -> ModuleID
+	{
+		self.name.clone()
+	}
+
+	pub fn name_set(&mut self, name: ModuleID)
+	{
+		self.name = name;
 	}
 
 	fn draw_link(link: &Link) -> impl IntoView
@@ -249,9 +261,14 @@ impl LinksHolder
 
 impl Cacheable for LinksHolder
 {
+	fn cache_time(&self) -> i64
+	{
+		return self._update.get_untracked().get();
+	}
+
 	fn cache_mustUpdate(&self) -> bool
 	{
-		return self._update.get().isNewer(&self._sended.get());
+		return self._update.get_untracked().isNewer(&self._sended.get());
 	}
 
 	fn cache_getUpdate(&self) -> ArcRwSignal<Cache> {
@@ -263,14 +280,19 @@ impl Cacheable for LinksHolder
 	}
 }
 
+impl ModuleName for LinksHolder
+{
+	const MODULE_NAME: &'static str = "links";
+}
+
 impl Backable for LinksHolder
 {
-	fn typeModule(&self) -> String
-	{
-		"links".to_string()
+
+	fn module_name(&self) -> String {
+		LinksHolder::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>,_: ModuleActionFn,_:String) -> AnyView
+	fn draw(&self, editMode: RwSignal<bool>,_: ModuleActionFn,_:ModuleID) -> AnyView
 	{
 		let Some(dialogManager) = use_context::<DialogManager>() else {
 			HWebTrace!("cannot get dialogManager in link");
@@ -352,15 +374,15 @@ impl Backable for LinksHolder
 		RefreshTime::NONE
 	}
 
-	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String, toaster: ToasterContext) -> Option<BoxFuture> {
+	fn refresh(&self,moduleActions: ModuleActionFn, moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
 		return None
 	}
 
 	fn export(&self) -> ModuleContent
 	{
 		return ModuleContent{
-			name: self.typeModule(),
-			typeModule: self.typeModule(),
+			name: ModuleID::new(),
+			typeModule: self.module_name(),
 			timestamp: self._update.get_untracked().get(),
 			content: serde_json::to_string(&self.content).unwrap_or_default(),
 			..Default::default()

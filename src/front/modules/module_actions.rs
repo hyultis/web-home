@@ -1,21 +1,22 @@
 use leptoaster::ToasterContext;
 use leptos::callback::Callback;
-use leptos::prelude::{ArcRwSignal, Write};
+use leptos::prelude::{ArcRwSignal, With, Write};
 use leptos::reactive::spawn_local;
 use crate::front::modules::ModuleHolder;
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
 use crate::front::utils::users_data::UserData;
 use std::ops::DerefMut;
+use crate::api::modules::components::ModuleID;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 
 #[derive(Clone)]
 pub struct ModuleActionFn
 {
 	/// (moduleName/key, login)
-	pub updateFn: Callback<(String),()>,
-	pub getOrUpdateFn: Callback<(String),()>,
-	pub removeFn: Callback<(String),()>,
-	pub refreshFn: Callback<(String),()>
+	pub updateFn: Callback<(ModuleID),()>,
+	pub getOrUpdateFn: Callback<(ModuleID),()>,
+	pub removeFn: Callback<(ModuleID),()>,
+	pub refreshFn: Callback<(ModuleID),()>
 }
 
 impl ModuleActionFn
@@ -35,9 +36,9 @@ impl ModuleActionFn
 		moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 		toasterInnerValidate: ToasterContext,
 		//dialog: DialogManager
-	) -> impl Fn((String)) -> ()
+	) -> impl Fn((ModuleID)) -> ()
 	{
-		return move |(moduleName)| {
+		return move |(moduleId)| {
 			let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
@@ -49,7 +50,7 @@ impl ModuleActionFn
 					return;
 				};
 				let modules: &mut ModuleHolder = guard.deref_mut();
-				let error = (*modules).module_update(login, moduleName).await;
+				let error = (*modules).module_update(login, moduleId).await;
 
 				if let Some(err) = error
 				{
@@ -67,9 +68,9 @@ impl ModuleActionFn
 		moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 		toasterInnerValidate: ToasterContext,
 		//dialog: DialogManager
-	) -> impl Fn((String)) -> ()
+	) -> impl Fn((ModuleID)) -> ()
 	{
-		return move |(moduleName)| {
+		return move |(moduleId)| {
 			let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
@@ -81,7 +82,7 @@ impl ModuleActionFn
 					return;
 				};
 				let modules: &mut ModuleHolder = guard.deref_mut();
-				let error = (*modules).module_getOrUpdate(login, moduleName).await;
+				let error = (*modules).module_getOrUpdate(login, moduleId).await;
 
 				if let Some(err) = error
 				{
@@ -95,9 +96,9 @@ impl ModuleActionFn
 		moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 		toasterInnerValidate: ToasterContext,
 		//dialog: DialogManager
-	) -> impl Fn((String)) -> ()
+	) -> impl Fn((ModuleID)) -> ()
 	{
-		return move |(moduleName)| {
+		return move |(moduleId)| {
 			let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
@@ -109,7 +110,7 @@ impl ModuleActionFn
 					return;
 				};
 				let modules: &mut ModuleHolder = guard.deref_mut();
-				let error = (*modules).module_remove(login, moduleName).await;
+				let error = (*modules).module_remove(login, moduleId).await;
 
 				if let Some(err) = error
 				{
@@ -127,15 +128,13 @@ impl ModuleActionFn
 		moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 		toaster: ToasterContext,
 		//dialog: DialogManager
-	) -> impl Fn((String)) -> ()
+	) -> impl Fn((ModuleID)) -> ()
 	{
-		return move |(moduleName)| {
+		return move |(moduleId)| {
 			let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 			let toaster = toaster.clone();
-			spawn_local(async move {
-				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked() else {return};
-				let modules: &mut ModuleHolder = guard.deref_mut();
-				(*modules).module_refresh(moduleName, toaster).await;
+			moduleContentInnerValidate.with(|modules|{
+				modules.module_refresh(vec![moduleId], toaster);
 			});
 		};
 	}

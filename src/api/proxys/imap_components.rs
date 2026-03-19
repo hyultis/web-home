@@ -1,5 +1,4 @@
 use base64ct::{Base64, Encoding};
-use leptos::logging::log;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;

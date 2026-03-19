@@ -10,8 +10,8 @@ use simd_json::prelude::ValueAsScalar;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{JsFuture};
 use web_sys::{window, Position, PositionError, Response};
-use crate::api::modules::components::ModuleContent;
-use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, FieldHelper, ModuleSizeContrainte, RefreshTime};
+use crate::api::modules::components::{ModuleContent, ModuleID};
+use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, FieldHelper, ModuleName, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::translate::Translate;
 use crate::HWebTrace;
@@ -92,13 +92,18 @@ impl Weather
 
 }
 
+impl ModuleName for Weather
+{
+	const MODULE_NAME: &'static str = "WEATHER";
+}
+
 impl Backable for Weather
 {
-	fn typeModule(&self) -> String {
-		"WEATHER".to_string()
+	fn module_name(&self) -> String {
+		Weather::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, currentName: String) -> AnyView {
+	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, _: ModuleID) -> AnyView {
 		view!{{
 			if(editMode.get())
 			{
@@ -183,7 +188,7 @@ impl Backable for Weather
 		RefreshTime::HOURS(1)
 	}
 
-	fn refresh(&self, moduleActions: ModuleActionFn, currentName: String, toaster: ToasterContext) -> Option<BoxFuture> {
+	fn refresh(&self, moduleActions: ModuleActionFn, moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
 		let config = self.config.clone();
 		let refreshContent = self.weatherContent.clone();
 
@@ -194,8 +199,8 @@ impl Backable for Weather
 
 	fn export(&self) -> ModuleContent {
 		return ModuleContent{
-			name: self.typeModule(),
-			typeModule: self.typeModule(),
+			name: ModuleID::new(),
+			typeModule: self.module_name(),
 			timestamp: self._update.get_untracked().get(),
 			content: serde_json::to_string(&self.config.get_untracked()).unwrap_or_default(),
 			..Default::default()
@@ -242,9 +247,13 @@ impl Backable for Weather
 
 impl Cacheable for Weather
 {
+	fn cache_time(&self) -> i64 {
+		self._update.get_untracked().get()
+	}
+
 	fn cache_mustUpdate(&self) -> bool
 	{
-		return self._update.get().isNewer(&self._sended.get());
+		return self._update.get_untracked().isNewer(&self._sended.get());
 	}
 
 	fn cache_getUpdate(&self) -> ArcRwSignal<Cache> {

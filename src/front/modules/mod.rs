@@ -1,20 +1,23 @@
-use crate::api::modules::components::ModuleContent;
+use crate::api::modules::components::{ApiModulesID, ModuleContent, ModuleID};
 use crate::api::modules::{
-	API_module_remove, API_module_retrieve, API_module_retrieveMissingModule, API_module_update,
-	ModuleReturnRetrieve, ModuleReturnUpdate,
+	API_module_remove, API_modules_retrieve, API_modules_update,
+	ModuleReturnRetrieve,
 };
-use crate::front::modules::components::{Backable, Cacheable, PausableStocker, RefreshTime};
+use crate::front::modules::components::{API_return_apply, Backable, Cacheable, ModuleName, PausableStocker, RefreshTime};
 use crate::front::modules::link::LinksHolder;
 use crate::front::utils::all_front_enum::AllFrontErrorEnum;
 use crate::front::utils::users_data::UserData;
 use leptoaster::ToasterContext;
 use leptos::logging::log;
-use leptos::prelude::{Callable, GetUntracked, ReadUntracked, RwSignal, Update};
+use leptos::prelude::{ArcRwSignal, Callable, ReadUntracked, RwSignal, Update, With};
 use leptos_use::use_interval_fn;
 use module_positions::ModulePositions;
 use module_type::ModuleType;
 use std::collections::HashMap;
+use std::pin::Pin;
 use std::sync::Arc;
+use leptos::reactive::spawn_local;
+use crate::front::utils::toaster_helpers::toastingErr;
 
 pub mod components;
 pub mod link;
@@ -26,13 +29,15 @@ pub mod rss;
 pub mod todo;
 pub mod weather;
 
-pub trait moduleContent: Backable + Cacheable {}
+pub trait moduleContent: ModuleName + Backable + Cacheable {}
+type ApiCall = Pin<Box<dyn Future<Output = API_return_apply>>>;
+
 
 pub struct ModuleHolder
 {
 	_links: LinksHolder,
-	_blocks: HashMap<String, ModulePositions<ModuleType>>,
-	_crons: HashMap<String, PausableStocker>,
+	_blocks: HashMap<ModuleID, ModulePositions<ModuleType>>,
+	_crons: HashMap<ModuleID, PausableStocker>,
 	_moduleActions: Option<module_actions::ModuleActionFn>,
 	_blockNb: usize,
 }
@@ -62,34 +67,174 @@ impl ModuleHolder
 		self._blockNb = 0;
 	}
 
-	pub async fn editMode_validate(&mut self, login: String) -> Option<AllFrontErrorEnum>
+	fn network_apply(&mut self, mut toApply: API_return_apply,toaster: ToasterContext)
 	{
-		if (self._links.cache_mustUpdate())
-		{
-			let module = self._links.export();
-			if let Some(error) = Self::inner_update(login.clone(), module).await
-			{
-				return Some(error);
-			}
-		}
+		toApply.retrieve.into_iter().for_each(|f| f(self));
+		toApply.update.into_iter().for_each(|f| f(self));
 
-		for (key, oneModule) in self._blocks.iter_mut()
-		{
-			if (oneModule.inner().cache_mustUpdate())
-			{
-				let mut module = oneModule.export();
-				module.name = key.clone();
-				if let Some(error) = Self::inner_update(login.clone(), module).await
-				{
-					return Some(error);
-				}
-			}
-		}
-
-		return None;
+		self.module_refresh(toApply.moduleId.drain(..).collect(), toaster);
 	}
 
-	pub async fn editMode_cancel(
+	pub fn network_editMode_defferedCall(moduleHolder: ArcRwSignal<ModuleHolder>, toaster: ToasterContext, validate: bool) -> impl Future<Output = ()>
+	{
+		async move {
+			let apiCall: Option<ApiCall> = moduleHolder.with(|holder|{
+				let Some((login, _)) = UserData::loginLang_get_from_cookie()
+				else
+				{
+					return None;
+				};
+
+				if(validate)
+				{
+					let preparedVar = holder.network_validate_prepare();
+					return Some(
+						Box::pin(async move {
+							ModuleHolder::network_validate_prepare_async(login, preparedVar).await
+						}) as ApiCall
+					);
+				}
+
+				let preparedVar = holder.network_cancel_prepare(true);
+				return Some(
+					Box::pin(async move {
+						ModuleHolder::network_cancel_prepare_async(login, preparedVar).await
+					}) as ApiCall
+				);
+			});
+
+			let Some(apiCall) = apiCall else {return;};
+			let mut apiResult = apiCall.await;
+
+			// if they are some error
+			for err in apiResult.error.drain(..) {
+				toastingErr(&toaster, err).await;
+			};
+
+			moduleHolder.update(|holder| {
+				holder.network_apply(apiResult,toaster);
+			});
+		}
+	}
+
+	////////////////////////////////////////
+	// START VALID EDITMODE ZONE ---
+	////////////////////////////////////////
+
+	fn network_validate_prepare(
+		&self
+	) -> Vec<ModuleContent>
+	{
+		let mut moduleToRetrieveData = vec![];
+
+		let mut thisModuleContent = self._links.export();
+		Self::export_crypt_content(&mut thisModuleContent);
+		moduleToRetrieveData.push(thisModuleContent);
+
+		for (_, oneModule) in self._blocks.iter()
+		{
+			let mut thisModuleContent =oneModule.export();
+			Self::export_crypt_content(&mut thisModuleContent);
+			moduleToRetrieveData.push(thisModuleContent);
+		}
+
+		return moduleToRetrieveData;
+	}
+
+	async fn network_validate_prepare_async(login: String, moduleToRetrieve: Vec<ModuleContent>) -> API_return_apply
+	{
+		let mut apiReturn = API_return_apply::default();
+
+		let apiReturnModules = match API_modules_update(login.clone(), moduleToRetrieve, true).await
+		{
+			Ok(r) => r,
+			Err(err) => {
+				// TODO use translate key
+				apiReturn.error.push(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+				return apiReturn;
+			}
+		};
+
+		return apiReturn;
+	}
+
+	////////////////////////////////////////
+	// START VALID EDITMODE ZONE ---
+	////////////////////////////////////////
+
+	////////////////////////////////////////
+	// START CANCEL EDITMODE ZONE ---
+	////////////////////////////////////////
+
+	fn network_cancel_prepare(
+		&self,
+		forceUpdate: bool,
+	) -> Vec<ApiModulesID>
+	{
+		let mut moduleToRetrieveData = vec![];
+		if (forceUpdate || self._links.cache_mustUpdate())
+		{
+			moduleToRetrieveData.push(ApiModulesID{ key: self._links.name_get(), timestamp: self._links.cache_time() });
+		}
+
+		for (key, oneModule) in self._blocks.iter()
+		{
+			if (forceUpdate || oneModule.inner().cache_mustUpdate())
+			{
+				moduleToRetrieveData.push(ApiModulesID{ key: key.clone(), timestamp: oneModule.inner().cache_time() });
+			}
+		}
+
+		return moduleToRetrieveData;
+	}
+
+	async fn network_cancel_prepare_async(login: String, moduleToRetrieve: Vec<ApiModulesID>) -> API_return_apply
+	{
+		let mut apiReturn = API_return_apply::default();
+
+		let apiReturnModules = match API_modules_retrieve(login.clone(), moduleToRetrieve).await
+		{
+			Ok(r) => r,
+			Err(err) => {
+				apiReturn.error.push(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+				return apiReturn;
+			}
+		};
+
+		for (moduleId, moduleResult) in apiReturnModules {
+			let ModuleReturnRetrieve::UPDATED(mut content) = moduleResult else {continue;};
+
+			Self::import_decrypt_content(&mut content);
+			apiReturn.moduleId.push(moduleId);
+
+			if (content.typeModule == LinksHolder::MODULE_NAME)
+			{
+				let addReturnWork = move |moduleHolder: &mut ModuleHolder| {
+					moduleHolder._links.name_set(content.name.clone());
+					moduleHolder._links.import(content);
+				};
+				apiReturn.retrieve.push(Box::new(addReturnWork));
+				continue;
+			}
+
+			let addReturnWork = move |moduleHolder: &mut ModuleHolder| {
+				let Some(moduleType) = ModuleType::newFromModuleContent(&content) else {return;};
+
+				moduleHolder._blocks.insert(content.name.clone(), ModulePositions::newFromModuleContent(content, moduleType));
+			};
+			apiReturn.retrieve.push(Box::new(addReturnWork));
+
+		}
+
+		return apiReturn;
+	}
+
+	////////////////////////////////////////
+	// END CANCEL EDITMODE ZONE ---
+	////////////////////////////////////////
+
+	/*
+	pub async fn editMode_cancel_old(
 		&mut self,
 		login: String,
 		forceUpdate: bool,
@@ -97,14 +242,14 @@ impl ModuleHolder
 	{
 		if (forceUpdate || self._links.cache_mustUpdate())
 		{
-			let moduleName = self._links.typeModule();
+			let moduleName = self._links.module_name();
 
 			if let Some(error) = Self::inner_retrieve(
 				login.clone(),
 				moduleName.clone(),
-				&mut self._links,
-				|module, moduleContent| {
-					module.import(moduleContent);
+				self,
+				|moduleHolder, moduleContent| {
+					moduleHolder._links.import(moduleContent);
 				},
 			)
 			.await
@@ -119,7 +264,7 @@ impl ModuleHolder
 		{
 			if (forceUpdate || oneModule.inner().cache_mustUpdate())
 			{
-				let moduleName = format!("{}_{}", key, oneModule.inner().typeModule());
+				let moduleName = format!("{}_{}", key, oneModule.inner().module_name());
 				if let Some(error) = Self::inner_retrieve(
 					login.clone(),
 					moduleName.clone(),
@@ -197,63 +342,28 @@ impl ModuleHolder
 
 		return None;
 	}
-
-	pub async fn module_retrieve(
-		&mut self,
-		login: String,
-		name: String,
-	) -> Option<AllFrontErrorEnum>
-	{
-		let Some(oneModule) = self._blocks.get_mut(&name)
-		else
-		{
-			return None;
-		};
-
-		if (!oneModule.inner().cache_mustUpdate())
-		{
-			return None;
-		}
-
-		let returning = Self::inner_retrieve(
-			login.clone(),
-			name.clone(),
-			oneModule,
-			|module, moduleContent| {
-				module.import(moduleContent);
-			},
-		)
-		.await;
-
-		if returning.is_none()
-			&& let Some(actions) = &self._moduleActions
-		{
-			Self::add_cron(oneModule, name.clone(), &mut self._crons, actions.clone());
-		}
-
-		return returning;
-	}
+	*/
 
 	pub async fn module_remove(
 		&mut self,
 		login: String,
-		moduleName: String,
+		moduleId: ModuleID,
 	) -> Option<AllFrontErrorEnum>
 	{
-		let Some(oneModule) = self._blocks.get_mut(&moduleName)
+		let Some(oneModule) = self._blocks.get_mut(&moduleId)
 		else
 		{
 			return None;
 		};
 
-		if let Err(err) = API_module_remove(login.clone(), moduleName.clone()).await
+		if let Err(err) = API_module_remove(login.clone(), moduleId.clone()).await
 		{
 			return Some(AllFrontErrorEnum::SERVER_ERROR(
 				"Impossible to remove module".to_string(),
 			));
 		}
 
-		if let Some(oneModule) = self._crons.get_mut(&moduleName)
+		if let Some(oneModule) = self._crons.get_mut(&moduleId)
 		{
 			(oneModule.pause)();
 		}
@@ -267,10 +377,11 @@ impl ModuleHolder
 	pub async fn module_getOrUpdate(
 		&mut self,
 		login: String,
-		name: String,
+		moduleId: ModuleID,
 	) -> Option<AllFrontErrorEnum>
 	{
-		let Some(oneModule) = self._blocks.get_mut(&name)
+		return None;
+		/*let Some(oneModule) = self._blocks.get_mut(&moduleId)
 		else
 		{
 			return None;
@@ -279,13 +390,13 @@ impl ModuleHolder
 		if(oneModule.inner().cache_mustUpdate())
 		{
 			let mut exportedModule = oneModule.export();
-			exportedModule.name = name.clone();
+			exportedModule.name = moduleId.clone();
 			return Self::inner_update(login, exportedModule).await;
 		}
 
 		return Self::inner_retrieve(
 			login.clone(),
-			name.clone(),
+			moduleId.clone(),
 			oneModule,
 			|module, moduleContent| {
 
@@ -293,33 +404,42 @@ impl ModuleHolder
 					module.import(moduleContent);
 				}
 			},
-		).await;
+		).await;*/
 	}
 
-	pub async fn module_refresh(&self, moduleName: String, toaster: ToasterContext)
+	pub fn module_refresh(&self, modulesId: Vec<ModuleID>, toaster: ToasterContext)
 	{
-		let Some(oneModule) = self._blocks.get(&moduleName)
-		else
-		{
-			return;
-		};
-
-		if let Some(actions) = &self._moduleActions
-		{
-			let tmp = oneModule
-				.inner()
-				.refresh(actions.clone(), moduleName.clone(), toaster);
-			if let Some(refreshFutur) = tmp
+		let mut allBoxedFutur = vec![];
+		for moduleId in modulesId {
+			let Some(oneModule) = self._blocks.get(&moduleId)
+			else
 			{
-				refreshFutur.await;
+				continue;
+			};
+
+			if let Some(actions) = &self._moduleActions
+			{
+				let tmp = oneModule
+					.inner()
+					.refresh(actions.clone(), moduleId.clone(), toaster.clone());
+				if let Some(refreshFutur) = tmp
+				{
+					allBoxedFutur.push(refreshFutur);
+				}
 			}
 		}
+
+		spawn_local(async move {
+			for oneFutur in allBoxedFutur {
+				oneFutur.await;
+			}
+		});
 	}
 
 	fn add_cron(
 		module: &mut ModulePositions<ModuleType>,
-		moduleName: String,
-		crons: &mut HashMap<String, PausableStocker>,
+		moduleId: ModuleID,
+		crons: &mut HashMap<ModuleID, PausableStocker>,
 		moduleActions: module_actions::ModuleActionFn,
 	)
 	{
@@ -334,7 +454,7 @@ impl ModuleHolder
 		{
 			let timeMillisecond = timeMinute * 60 * 1000;
 
-			if let Some(cronModule) = crons.get_mut(&moduleName)
+			if let Some(cronModule) = crons.get_mut(&moduleId)
 			{
 				cronModule
 					.interval
@@ -344,12 +464,12 @@ impl ModuleHolder
 			else
 			{
 				let intervalS = RwSignal::new(timeMillisecond);
-				let moduleNameInner = moduleName.clone();
+				let moduleNameInner = moduleId.clone();
 				let moduleActionsInner = moduleActions.clone();
 				let pausable = use_interval_fn(
 					move || {
 						log!(
-							"cron module {} refresh to {}",
+							"cron module {:?} refresh to {}",
 							moduleNameInner,
 							timeMillisecond
 						);
@@ -360,7 +480,7 @@ impl ModuleHolder
 				let pause = pausable.pause;
 				let resume = pausable.resume;
 				crons.insert(
-					moduleName.clone(),
+					moduleId.clone(),
 					PausableStocker {
 						interval: intervalS,
 						pause: Arc::new(move || pause()),
@@ -371,34 +491,14 @@ impl ModuleHolder
 		}
 	}
 
-	async fn inner_retrieve<T>(
-		login: String,
-		moduleName: String,
-		sendInner: &mut T,
-		module: impl FnOnce(&mut T, ModuleContent),
-	) -> Option<AllFrontErrorEnum>
-	{
-		match API_module_retrieve(login.clone(), moduleName).await
-		{
-			Ok(ModuleReturnRetrieve::EMPTY) => return Some(AllFrontErrorEnum::MODULE_NOTEXIST),
-			Ok(ModuleReturnRetrieve::UPDATED(mut moduleContent)) =>
-			{
-				Self::import_decrypt_content(&mut moduleContent);
-				module(sendInner, moduleContent);
-			}
-			Err(err) => return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err))),
-		}
-
-		return None;
-	}
-
 	/// This function is used to update the module on the server.
 	/// It will encrypt the content of the module before sending it to the server.
 	/// It will return an error if the module is outdated or if the server returns an error.
-	pub async fn module_update(&mut self, login: String, name: String)
-	-> Option<AllFrontErrorEnum>
+	pub async fn module_update(&mut self, login: String, moduleId: ModuleID)
+	                           -> Option<AllFrontErrorEnum>
 	{
-		let Some(oneModule) = self._blocks.get(&name)
+		return None;
+		/*let Some(oneModule) = self._blocks.get(&moduleId)
 		else
 		{
 			return None;
@@ -410,29 +510,8 @@ impl ModuleHolder
 		}
 
 		let mut module = oneModule.export();
-		module.name = name.clone();
-		return Self::inner_update(login, module).await;
-	}
-
-	async fn inner_update(login: String, mut module: ModuleContent) -> Option<AllFrontErrorEnum>
-	{
-		Self::import_crypt_content(&mut module);
-		match API_module_update(login.clone(), module).await
-		{
-			// TODO : when the module is outdated, we should update instead of returning an error
-			Ok(ModuleReturnUpdate::OUTDATED) =>
-			{
-				return Some(AllFrontErrorEnum::MODULE_OUTDATED);
-			}
-			Err(err) =>
-			{
-				return Some(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
-			}
-			_ =>
-			{}
-		}
-
-		return None;
+		module.name = moduleId.clone();
+		return Self::inner_update(login, module).await;*/
 	}
 
 	pub fn links_get(&self) -> &LinksHolder
@@ -445,7 +524,7 @@ impl ModuleHolder
 		return &mut self._links;
 	}
 
-	pub fn blocks_get(&self) -> &HashMap<String, ModulePositions<ModuleType>>
+	pub fn blocks_get(&self) -> &HashMap<ModuleID, ModulePositions<ModuleType>>
 	{
 		return &self._blocks;
 	}
@@ -453,8 +532,7 @@ impl ModuleHolder
 	pub fn blocks_insert(&mut self, newmodule: ModulePositions<ModuleType>)
 	{
 		newmodule.depth_set(self._blockNb as u32);
-		let name = format!("{}_{}", self._blockNb, newmodule.inner().typeModule());
-		self._blocks.insert(name, newmodule);
+		self._blocks.insert(ModuleID::new(), newmodule);
 		self._blockNb += 1;
 	}
 
@@ -479,7 +557,7 @@ impl ModuleHolder
 
 	/// This function is used to encrypt the content of a moduleContent before sending it to the server
 	/// return if the content have been correctly encrypted
-	fn import_crypt_content(moduleContent: &mut ModuleContent) -> bool
+	fn export_crypt_content(moduleContent: &mut ModuleContent) -> bool
 	{
 		let (userData, _) = UserData::cookie_signalGet();
 		let Some(userData) = &*userData.read_untracked()

@@ -1,10 +1,10 @@
 use leptos::html::I;
-use leptos::prelude::{ArcRwSignal, Callable, Effect, ElementChild, Get, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update};
+use leptos::prelude::{ArcRwSignal, Callable, Effect, ElementChild, Get, GetUntracked, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update};
 use leptos::prelude::{AnyView, ClassAttribute, IntoAny, RwSignal};
 use leptos::{view};
 use leptos_use::core::Position;
 use leptos_use::{use_draggable_with_options, UseDraggableOptions, UseDraggableReturn};
-use crate::api::modules::components::ModuleContent;
+use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::modules::{moduleContent};
 use crate::front::modules::module_actions::ModuleActionFn;
 
@@ -76,10 +76,10 @@ impl<module: moduleContent> ModulePositions<module>
 		self._module.import(import);
 	}
 
-	pub fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn,currentName:String) -> AnyView
+	pub fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> AnyView
 	{
 		let innerModuleActions = moduleActions.clone();
-		let innerCurrentName = currentName.clone();
+		let innerCurrentName = moduleId.clone();
 		let view = move |module: &module,editMode| {
 			return module.draw(editMode,innerModuleActions.clone(),innerCurrentName.clone());
 		};
@@ -92,7 +92,7 @@ impl<module: moduleContent> ModulePositions<module>
 		let elResize = self.resizeFn();
 
 		let innerModuleActions = moduleActions.clone();
-		let innerCurrentName = currentName.clone();
+		let innerCurrentName = moduleId.clone();
 		let removeFn = move |_| {
 			innerModuleActions.clone().removeFn.run(innerCurrentName.clone());
 		};

@@ -5,8 +5,8 @@ use leptos::prelude::{ElementChild, GetUntracked, PropAttribute, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, ClassAttribute, Get, IntoAny, RwSignal};
 use leptos::view;
 use serde::{Deserialize, Serialize};
-use crate::api::modules::components::ModuleContent;
-use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleSizeContrainte, RefreshTime};
+use crate::api::modules::components::{ModuleContent, ModuleID};
+use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleName, ModuleSizeContrainte, RefreshTime};
 use leptos::callback::Callable;
 use crate::front::modules::module_actions::ModuleActionFn;
 
@@ -31,19 +31,23 @@ impl Todo
 		}
 	}
 
-	pub fn updateFn(&self,moduleActions: ModuleActionFn,currentName:String) -> impl Fn(MouseEvent) + Clone + 'static
+	pub fn updateFn(&self,moduleActions: ModuleActionFn, moduleId: ModuleID) -> impl Fn(MouseEvent) + Clone + 'static
 	{
 		return move |_| {
-			moduleActions.clone().updateFn.run((currentName.clone()));
+			moduleActions.clone().updateFn.run((moduleId.clone()));
 		}
 	}
 }
 
 impl Cacheable for Todo
 {
+	fn cache_time(&self) -> i64 {
+		self._update.get_untracked().get()
+	}
+
 	fn cache_mustUpdate(&self) -> bool
 	{
-		return self._update.get().isNewer(&self._sended.get());
+		return self._update.get_untracked().isNewer(&self._sended.get());
 	}
 
 	fn cache_getUpdate(&self) -> ArcRwSignal<Cache> {
@@ -55,15 +59,20 @@ impl Cacheable for Todo
 	}
 }
 
+impl ModuleName for Todo
+{
+	const MODULE_NAME: &'static str = "TODO";
+}
+
 impl Backable for Todo
 {
-	fn typeModule(&self) -> String {
-		"TODO".to_string()
+	fn module_name(&self) -> String {
+		Todo::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, _: RwSignal<bool>,moduleActions: ModuleActionFn,currentName:String) -> AnyView {
+	fn draw(&self, _: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> AnyView {
 
-		let updateFn = self.updateFn(moduleActions,currentName);
+		let updateFn = self.updateFn(moduleActions,moduleId);
 		let content = self.content.clone();
 		let contentd = self.content.clone();
 		let contentWrite = self.content.clone();
@@ -89,18 +98,18 @@ impl Backable for Todo
 		RefreshTime::MINUTES(1)
 	}
 
-	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String, toaster: ToasterContext) -> Option<BoxFuture> {
+	fn refresh(&self,moduleActions: ModuleActionFn, moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
 
 		return Some(Box::pin(async move {
-			moduleActions.clone().getOrUpdateFn.run((currentName.clone()));
+			moduleActions.clone().getOrUpdateFn.run((moduleId.clone()));
 		}));
 	}
 
 	fn export(&self) -> ModuleContent
 	{
 		return ModuleContent{
-			name: self.typeModule(),
-			typeModule: self.typeModule(),
+			name: ModuleID::new(),
+			typeModule: self.module_name(),
 			timestamp: self._update.get_untracked().get(),
 			content: serde_json::to_string(&self.content.get_untracked()).unwrap_or_default(),
 			..Default::default()

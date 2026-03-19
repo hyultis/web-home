@@ -5,9 +5,9 @@ use leptoaster::{ToasterContext};
 use leptos::prelude::{AnyView, ArcRwSignal, Get, GetUntracked, IntoAny, RwSignal, Update};
 use leptos::view;
 use serde::{Deserialize, Serialize};
-use crate::api::modules::components::ModuleContent;
+use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::api::proxys::wget::{API_proxys_wget};
-use crate::front::modules::components::{distant_time_simpler, Backable, BoxFuture, Cache, Cacheable, FieldHelper, ModuleSizeContrainte, RefreshTime};
+use crate::front::modules::components::{distant_time_simpler, Backable, BoxFuture, Cache, Cacheable, FieldHelper, ModuleName, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::toaster_helpers::toaster_api;
 use crate::front::utils::translate::Translate;
@@ -113,9 +113,13 @@ impl Rss
 
 impl Cacheable for Rss
 {
+	fn cache_time(&self) -> i64 {
+		self._update.get_untracked().get()
+	}
+
 	fn cache_mustUpdate(&self) -> bool
 	{
-		return self._update.get().isNewer(&self._sended.get());
+		return self._update.get_untracked().isNewer(&self._sended.get());
 	}
 
 	fn cache_getUpdate(&self) -> ArcRwSignal<Cache> {
@@ -127,13 +131,18 @@ impl Cacheable for Rss
 	}
 }
 
+impl ModuleName for Rss
+{
+	const MODULE_NAME: &'static str = "RSS";
+}
+
 impl Backable for Rss
 {
-	fn typeModule(&self) -> String {
-		"RSS".to_string()
+	fn module_name(&self) -> String {
+		Rss::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, currentName: String) -> AnyView
+	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, _: ModuleID) -> AnyView
 	{
 		view! {{
 			if(editMode.get())
@@ -202,7 +211,7 @@ impl Backable for Rss
 		return RefreshTime::MINUTES(10);
 	}
 
-	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String, toaster: ToasterContext) -> Option<BoxFuture> {
+	fn refresh(&self,moduleActions: ModuleActionFn, moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
 		let config = self.config.clone();
 		let rssContent = self.rssContent.clone();
 		let tmp = Self::sync(toaster,rssContent,config);
@@ -214,8 +223,8 @@ impl Backable for Rss
 	fn export(&self) -> ModuleContent
 	{
 		return ModuleContent{
-			name: self.typeModule(),
-			typeModule: self.typeModule(),
+			name: ModuleID::new(),
+			typeModule: self.module_name(),
 			timestamp: self._update.get_untracked().get(),
 			content: serde_json::to_string(&self.config.get_untracked()).unwrap_or_default(),
 			..Default::default()

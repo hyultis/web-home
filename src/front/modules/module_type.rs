@@ -1,8 +1,8 @@
 use leptoaster::ToasterContext;
 use leptos::prelude::{AnyView, ArcRwSignal, RwSignal};
 use strum_macros::EnumDiscriminants;
-use crate::api::modules::components::ModuleContent;
-use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleSizeContrainte, RefreshTime};
+use crate::api::modules::components::{ModuleContent, ModuleID};
+use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleName, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::{moduleContent};
 use crate::front::modules::todo::Todo;
 use strum_macros::EnumIter;
@@ -55,20 +55,20 @@ impl ModuleType {
 }
 
 impl Backable for ModuleType {
-	fn typeModule(&self) -> String {
-		return self.intoBackable().typeModule();
+	fn module_name(&self) -> String {
+		return self.intoBackable().module_name();
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn,currentName:String) -> AnyView {
-		return self.intoBackable().draw(editMode,moduleActions,currentName);
+	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> AnyView {
+		return self.intoBackable().draw(editMode,moduleActions,moduleId);
 	}
 
 	fn refresh_time(&self) -> RefreshTime {
 		return self.intoBackable().refresh_time();
 	}
 
-	fn refresh(&self,moduleActions: ModuleActionFn,currentName:String, toaster: ToasterContext) -> Option<BoxFuture> {
-		return self.intoBackable().refresh(moduleActions,currentName,toaster);
+	fn refresh(&self,moduleActions: ModuleActionFn, moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
+		return self.intoBackable().refresh(moduleActions,moduleId,toaster);
 	}
 
 	fn export(&self) -> ModuleContent {
@@ -103,6 +103,10 @@ impl Backable for ModuleType {
 }
 
 impl Cacheable for ModuleType {
+	fn cache_time(&self) -> i64 {
+		self.intoCachable().cache_time()
+	}
+
 	fn cache_mustUpdate(&self) -> bool {
 		return self.intoCachable().cache_mustUpdate();
 	}
@@ -115,6 +119,8 @@ impl Cacheable for ModuleType {
 		return self.intoCachable().cache_getSended();
 	}
 }
+
+impl ModuleName for ModuleType { const MODULE_NAME: &'static str = "MODULETYPE"; }
 
 impl moduleContent for ModuleType
 {

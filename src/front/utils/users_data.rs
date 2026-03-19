@@ -1,5 +1,6 @@
-use aes_gcm::{AeadCore, Aes256Gcm, Key, KeyInit, Nonce};
+use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use aes_gcm::aead::Aead;
+use aes_gcm::aead::common::Generate;
 use argon2::Config;
 use leptos::prelude::codee::string::JsonSerdeCodec;
 use leptos::prelude::{GetUntracked, Signal, WriteSignal};
@@ -45,7 +46,7 @@ pub struct UserDataCypher
 ///
 /// the password is like a data, but instead of crypt, client hash it and send it to the server on sign up or login only
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct UserData
 {
 	lang: String,
@@ -133,14 +134,14 @@ impl UserData {
 		let key_bytes = Self::derive_key_from_password(&password, &salt);
 		let Ok(key) = Key::<Aes256Gcm>::try_from(key_bytes);
 		let cipher = Aes256Gcm::new(&key);
-		let Ok(nonce) = Aes256Gcm::generate_nonce() else {return None};
+		let nonce = Nonce::generate();
 
 		// chiffrement
 		let Ok(ciphertext) = cipher.encrypt(&nonce, plaintext.as_bytes()) else {return None};
 
 		Some(UserDataCypher {
 			salt: Base64::encode_string(&salt),
-			nonce: Base64::encode_string(& nonce.as_slice()),
+			nonce: Base64::encode_string(&nonce.as_slice()),
 			content: Base64::encode_string(&ciphertext),
 		})
 	}

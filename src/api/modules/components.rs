@@ -1,5 +1,45 @@
 use serde::{Deserialize, Serialize};
 
+
+#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(transparent)]
+pub struct ModuleID
+{
+	pub id: String,
+}
+
+impl ModuleID
+{
+	#[cfg(feature = "ssr")]
+	pub fn new() -> Self
+	{
+		Self {
+			id: "".to_string(),
+		}
+	}
+	#[cfg(not(feature = "ssr"))]
+	pub fn new() -> Self
+	{
+		Self {
+			id: uuid::Uuid::new_v4().to_string(),
+		}
+	}
+}
+
+impl Default for ModuleID
+{
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ApiModulesID
+{
+	pub key: ModuleID,
+	pub timestamp: i64,
+}
+
 #[cfg(feature = "ssr")]
 #[derive(Debug)]
 pub enum ModuleErrors
@@ -13,7 +53,7 @@ pub enum ModuleErrors
 pub struct ModuleContent
 {
 	// name of the content or child content
-	pub name: String,
+	pub name: ModuleID,
 	// name of the content or child content
 	pub typeModule: String,
 	// timestamp of the last update of the content or child content
@@ -30,7 +70,7 @@ impl Default for ModuleContent
 {
 	fn default() -> Self {
 		Self {
-			name: "".to_string(),
+			name: ModuleID::new(),
 			typeModule: "".to_string(),
 			timestamp: 0,
 			content: "".to_string(),
@@ -43,7 +83,7 @@ impl Default for ModuleContent
 
 impl ModuleContent
 {
-	pub fn new(name: String,typeModule: String) -> Self
+	pub fn new(name: ModuleID,typeModule: String) -> Self
 	{
 		Self {
 			name,
@@ -52,24 +92,22 @@ impl ModuleContent
 		}
 	}
 
-	pub fn newFromName(name: String) -> Self
+	pub fn newFromName(name: &ModuleID) -> Self
 	{
 		Self {
-			name,
+			name: name.clone(),
 			..Default::default()
 		}
 	}
 
 	#[cfg(feature = "ssr")]
-	pub fn update(&self, mut config: Hconfig::HConfig::HConfig) -> Result<(), ModuleErrors>
+	pub fn update(&self, config: &mut Hconfig::HConfig::HConfig,overwrite: bool) -> Result<(), ModuleErrors>
 	{
 		use std::collections::HashMap;
 		use Hconfig::tinyjson::JsonValue;
 		use Htrace::HTrace;
 
-		let configPath = format!("modules/{}", self.name);
-
-		let mut moduleRoot = config.value_get_mut(&configPath);
+		let mut moduleRoot = config.value_get_mut(&self.getModulePath());
 		let mut lasttimestamp = 0;
 		if let Some(JsonValue::Object(content)) = moduleRoot.as_mut()
 		{
@@ -79,13 +117,13 @@ impl ModuleContent
 		}
 		drop(moduleRoot);
 
-		if(lasttimestamp >= self.timestamp)
+		if(!overwrite && lasttimestamp >= self.timestamp)
 		{
 			return Err(ModuleErrors::SavedIsNewer);
 		}
 
 		let mut content = HashMap::new();
-		HTrace!("self.timestamp update for {} : {}",self.name,self.timestamp);
+		HTrace!("self.timestamp update for {:?} : {}",self.name,self.timestamp);
 		content.insert("timestamp".to_string(), JsonValue::String(self.timestamp.to_string()));
 		content.insert("content".to_string(), JsonValue::String(self.content.clone()));
 		content.insert("type".to_string(), JsonValue::String(self.typeModule.clone()));
@@ -95,18 +133,18 @@ impl ModuleContent
 		content.insert("sizeY".to_string(), JsonValue::Number(self.size[1] as f64));
 		content.insert("depth".to_string(), JsonValue::Number(self.depth as f64));
 
-		config.value_set(&configPath,JsonValue::Object(content));
+		config.value_set(&self.getModulePath(),JsonValue::Object(content));
 		config.file_save().map_err(|err| ModuleErrors::ConfigError(err))?;
 
 		return Ok(());
 	}
 
 	#[cfg(feature = "ssr")]
-	pub fn retrieve(&mut self, config: Hconfig::HConfig::HConfig) -> Result<(), ModuleErrors>
+	pub fn retrieve(&mut self, config: &Hconfig::HConfig::HConfig) -> Result<(), ModuleErrors>
 	{
 		use Hconfig::tinyjson::JsonValue;
 
-		let Some(JsonValue::Object(ref content)) = config.value_get(&format!("modules/{}", self.name)) else {return Err(ModuleErrors::Empty)};
+		let Some(JsonValue::Object(ref content)) = config.value_get(&self.getModulePath()) else {return Err(ModuleErrors::Empty)};
 
 		if let Some(JsonValue::String(timestampSaved) ) = content.get("timestamp"){
 			self.timestamp = timestampSaved.parse::<i64>().unwrap_or(0);
@@ -139,19 +177,20 @@ impl ModuleContent
 	}
 
 	#[cfg(feature = "ssr")]
-	pub fn remove(mut config: Hconfig::HConfig::HConfig, name: String) -> bool
+	pub fn remove(mut config: Hconfig::HConfig::HConfig, name: ModuleID) -> bool
 	{
 		use Hconfig::tinyjson::JsonValue;
-		let Some(JsonValue::Object(_)) = config.value_get(&format!("modules/{}", name)) else {return false};
+		let modulePath = Self::getModulePathNamed(&name.id);
+		let Some(JsonValue::Object(_)) = config.value_get(&modulePath) else {return false};
 
-		if config.value_remove(&format!("modules/{}", name)) {
+		if config.value_remove(&modulePath) {
 			return config.file_save().is_ok();
 		}
 		return false;
 	}
 
 	#[cfg(feature = "ssr")]
-	pub fn retrieveMissingModule(config: Hconfig::HConfig::HConfig, modules: Vec<String>) -> Vec<String>
+	pub fn retrieveMissingModule(config: &Hconfig::HConfig::HConfig, modules: Vec<ModuleID>) -> Vec<ModuleID>
 	{
 		use Hconfig::tinyjson::JsonValue;
 
@@ -160,11 +199,24 @@ impl ModuleContent
 		let mut returning = vec![];
 		arrayOfcontent.keys().cloned().for_each( |name|
 		{
-			if (!modules.contains(&name)) {
-				returning.push(name.clone());
+			if (!modules.iter().any(|module| module.id==name)) {
+				returning.push(ModuleID{id:name.clone()});
 			}
 		});
 
 		return returning;
 	}
+
+	#[cfg(feature = "ssr")]
+	fn getModulePath(&self) -> String
+	{
+		return Self::getModulePathNamed(&self.name.id);
+	}
+
+	#[cfg(feature = "ssr")]
+	fn getModulePathNamed(name: &String) -> String
+	{
+		return format!("modules/{}", name);
+	}
+
 }

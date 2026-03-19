@@ -10,10 +10,10 @@ use leptos::view;
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
 use wasm_bindgen_futures::spawn_local;
-use crate::api::modules::components::ModuleContent;
+use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::api::proxys::imap::{API_proxys_imap_getFullUnsee, API_proxys_imap_getMailContent, API_proxys_imap_getUnseeSince, API_proxys_imap_listbox, API_proxys_imap_setMailSee};
 use crate::api::proxys::imap_components::{imap_connector, imap_connector_extra, Attachment, ImapMail};
-use crate::front::modules::components::{distant_time_simpler, Backable, BoxFuture, Cache, Cacheable, FieldHelper, FieldHelperType, ModuleSizeContrainte, RefreshTime};
+use crate::front::modules::components::{distant_time_simpler, Backable, BoxFuture, Cache, Cacheable, FieldHelper, FieldHelperType, ModuleName, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::contentDownloader::download_attachment;
 use crate::front::utils::dialog::{DialogData, DialogManager};
@@ -305,14 +305,18 @@ impl Mail
 	}
 }
 
+impl ModuleName for Mail
+{
+	const MODULE_NAME: &'static str = "MAIL";
+}
 
 impl Backable for Mail
 {
-	fn typeModule(&self) -> String {
-		"MAIL".to_string()
+	fn module_name(&self) -> String {
+		Mail::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, currentName: String) -> AnyView {
+	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, _: ModuleID) -> AnyView {
 
 		let Some(dialogManager) = use_context::<DialogManager>() else {
 			HWebTrace!("cannot get dialogManager in link");
@@ -437,7 +441,7 @@ impl Backable for Mail
 		RefreshTime::HOURS(1)
 	}
 
-	fn refresh(&self, moduleActions: ModuleActionFn, currentName: String, toaster: ToasterContext) -> Option<BoxFuture> {
+	fn refresh(&self, moduleActions: ModuleActionFn, moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
 		let config = self.config.clone();
 		let mailsCache = self.mailsClientCache.clone();
 		let tmp = Self::sync(toaster, mailsCache, config);
@@ -449,8 +453,8 @@ impl Backable for Mail
 
 	fn export(&self) -> ModuleContent {
 		return ModuleContent{
-			name: self.typeModule(),
-			typeModule: self.typeModule(),
+			name: ModuleID::new(),
+			typeModule: self.module_name(),
 			timestamp: self._update.get_untracked().get(),
 			content: serde_json::to_string(&self.config.get_untracked()).unwrap_or_default(),
 			..Default::default()
@@ -494,9 +498,13 @@ impl Backable for Mail
 
 impl Cacheable for Mail
 {
+	fn cache_time(&self) -> i64 {
+		self._update.get_untracked().get()
+	}
+
 	fn cache_mustUpdate(&self) -> bool
 	{
-		return self._update.get().isNewer(&self._sended.get());
+		return self._update.get_untracked().isNewer(&self._sended.get());
 	}
 
 	fn cache_getUpdate(&self) -> ArcRwSignal<Cache> {

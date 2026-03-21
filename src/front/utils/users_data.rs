@@ -40,7 +40,7 @@ pub struct UserDataCypher
 /// * Using the hashed login (generatedId)
 /// * Send it to API_user_salt(generatedId) that combine the generatedId and the server salt, get the result as serverUserSalt
 /// * client hash serverUserSalt and user password into user_salt
-/// * TODO crypt using symmetric stuff
+/// * crypt using symmetric this "client only knows" key
 ///
 /// # password
 ///

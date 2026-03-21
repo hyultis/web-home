@@ -453,7 +453,7 @@ impl Backable for Mail
 
 	fn export(&self) -> ModuleContent {
 		return ModuleContent{
-			name: ModuleID::new(),
+			id: ModuleID::new(),
 			typeModule: self.module_name(),
 			timestamp: self._update.get_untracked().get(),
 			content: serde_json::to_string(&self.config.get_untracked()).unwrap_or_default(),

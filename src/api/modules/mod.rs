@@ -56,7 +56,7 @@ pub async fn API_modules_update(generatedId: String, contents: Vec<ModuleContent
 			Ok(_) => {}
 			Err(ModuleErrors::SavedIsNewer) => { // never send if overwrite is true
 				if content.retrieve(&config).is_ok() {
-					returning.insert(content.name.clone(),ModuleReturnUpdate::OUTDATED(content));
+					returning.insert(content.id.clone(), ModuleReturnUpdate::OUTDATED(content));
 				}
 			},
 			Err(err) => return Err(ServerFnError::new(format!("{:?}",err))),

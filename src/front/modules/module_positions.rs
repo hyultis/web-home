@@ -1,11 +1,11 @@
 use leptos::html::I;
-use leptos::prelude::{ArcRwSignal, Callable, Effect, ElementChild, Get, GetUntracked, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update};
+use leptos::prelude::{ArcRwSignal, Callable, Effect, ElementChild, Get, NodeRef, NodeRefAttribute, OnAttribute, Set, StyleAttribute, Update};
 use leptos::prelude::{AnyView, ClassAttribute, IntoAny, RwSignal};
-use leptos::{view};
+use leptos::view;
 use leptos_use::core::Position;
 use leptos_use::{use_draggable_with_options, UseDraggableOptions, UseDraggableReturn};
 use crate::api::modules::components::{ModuleContent, ModuleID};
-use crate::front::modules::{moduleContent};
+use crate::front::modules::components::moduleContent;
 use crate::front::modules::module_actions::ModuleActionFn;
 
 pub struct ModulePositions<module: moduleContent>

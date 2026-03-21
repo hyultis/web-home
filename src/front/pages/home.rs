@@ -1,7 +1,7 @@
 use leptos::prelude::{GetUntracked, OnTargetAttribute, Signal, With, WriteSignal};
 use leptos::prelude::{CollectView, Get, PropAttribute};
 use crate::front::modules::components::Backable;
-use crate::front::modules::ModuleHolder;
+use crate::front::modules::module_holder::ModuleHolder;
 use crate::front::utils::all_front_enum::{AllFrontLoginEnum, AllFrontUIEnum};
 use crate::front::utils::dialog::{DialogData, DialogManager};
 use crate::front::utils::toaster_helpers::{toastingSuccess};
@@ -15,14 +15,15 @@ use leptos::prelude::{
 	use_context, ArcRwSignal, Callback, ClassAttribute, Effect, IntoAny, OnAttribute, Read,
 	RenderHtml, RwSignal, Set, Update,
 };
-use leptos::{island, view, IntoView};
+use leptos::{component, island, view, IntoView};
 use leptos_router::{hooks, NavigateOptions};
 use leptos::logging::log;
 use leptos_use::use_interval_fn;
 use strum::IntoEnumIterator;
+use crate::api::modules::components::ModuleID;
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::modules::module_positions::ModulePositions;
-use crate::front::modules::module_type::{ModuleTypeDiscriminants, StringToModuleType};
+use crate::front::modules::module_type::{ModuleType, ModuleTypeDiscriminants, StringToModuleType};
 // https://iconoir.com/
 // plus
 
@@ -81,7 +82,7 @@ pub fn Home() -> impl IntoView
 		}
 		is_initialized.set(true);
 
-		spawn_local(ModuleHolder::network_editMode_defferedCall(moduleContentInnerInitialLoad.clone(), toasterInnerInitialLoad.clone(),false));
+		spawn_local(ModuleHolder::network_deferredCall(moduleContentInnerInitialLoad.clone(), toasterInnerInitialLoad.clone(), |holder|ModuleHolder::network_modules_retrieve_caller(holder,true),None));
 	});
 
 	let editModeValidateFn = editMode_validate(
@@ -128,7 +129,7 @@ pub fn Home() -> impl IntoView
 					{move || {
 						return moduleContentInnerView.clone().with(|binding| {
 							let tmp = binding.links_get();
-							tmp.draw(editMode,moduleActionsInnerModuleView.clone(),tmp.name_get())
+							tmp.draw(editMode,moduleActionsInnerModuleView.clone(),tmp.id_get())
 						});
 					}}
 				</div>
@@ -157,14 +158,35 @@ pub fn Home() -> impl IntoView
 			</div>
 			<div class="modules">
 				{move || {
+					let editMode = editMode.clone();
+					let moduleActions = moduleActions.clone();
 					return moduleContentInnerModuleView.clone().with(|binding| {
-						log!("moduleContentInnerModuleView blocks_get len {}",binding.blocks_get().len());
-						return binding.blocks_get().iter().map( |(currentName,d)|d.draw(editMode,moduleActions.clone(),currentName.clone())).collect_view()
+						let editMode = editMode.clone();
+						let moduleActions = moduleActions.clone();
+						return binding.blocks_get().iter().map( |(moduleId,module)| {
+							let editMode = editMode.clone();
+							let moduleActions = moduleActions.clone();
+							view! {
+					           <ModuleView editMode=editMode.clone() module=module.clone() moduleActions=moduleActions.clone() moduleId={moduleId.clone()} />
+					        }
+						}).collect_view();
 					});
 				}}
 			</div>
 		</div>
 	}
+}
+
+#[component]
+fn ModuleView(module: RwSignal<ModulePositions<ModuleType>>, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, moduleId: ModuleID) -> impl IntoView {
+	let moduleActionsInnerModuleView = moduleActions.clone();
+	return view! {
+        {move || {
+            module.with(|module| {
+		        return module.draw(editMode,moduleActionsInnerModuleView.clone(),moduleId.clone());
+	        })
+        }}
+    };
 }
 
 fn editMode_cancel(
@@ -186,7 +208,7 @@ fn editMode_cancel(
 				let editModeInnerValidate = editModeInnerValidate.clone();
 				let toasterInnerValidate = toasterInnerValidate.clone();
 				spawn_local(async move {
-					ModuleHolder::network_editMode_defferedCall(moduleContentInnerValidate.clone(), toasterInnerValidate.clone(), false).await;
+					ModuleHolder::network_deferredCall(moduleContentInnerValidate.clone(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_modules_retrieve_caller(holder,false), Some(AllFrontUIEnum::HOME_CHANGE_CANCEL)).await;
 					editModeInnerValidate.update(|content| {
 						*content = false;
 					});
@@ -217,7 +239,7 @@ fn editMode_validate(
 				let editModeInnerValidate = editModeInnerValidate.clone();
 				let toasterInnerValidate = toasterInnerValidate.clone();
 				spawn_local(async move {
-					ModuleHolder::network_editMode_defferedCall(moduleContentInnerValidate.clone(), toasterInnerValidate.clone(), true).await;
+					ModuleHolder::network_deferredCall(moduleContentInnerValidate.clone(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_modules_update_caller(holder), Some(AllFrontUIEnum::HOME_CHANGE_OK)).await;
 					editModeInnerValidate.update(|content| {
 						*content = false;
 					});

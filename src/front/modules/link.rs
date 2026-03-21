@@ -37,7 +37,7 @@ impl Link
 
 pub struct LinksHolder
 {
-	name: ModuleID,
+	id: ModuleID,
 	content: ArcRwSignal<Vec<Link>>,
 	_update: ArcRwSignal<Cache>,
 	_sended: ArcRwSignal<Cache>,
@@ -48,21 +48,21 @@ impl LinksHolder
 	pub fn new() -> Self
 	{
 		Self {
-			name: Default::default(),
+			id: Default::default(),
 			content: ArcRwSignal::new(vec![]),
 			_update: ArcRwSignal::new(Default::default()),
 			_sended: Default::default(),
 		}
 	}
 
-	pub fn name_get(&self) -> ModuleID
+	pub fn id_get(&self) -> ModuleID
 	{
-		self.name.clone()
+		self.id.clone()
 	}
 
-	pub fn name_set(&mut self, name: ModuleID)
+	pub fn id_set(&mut self, name: ModuleID)
 	{
-		self.name = name;
+		self.id = name;
 	}
 
 	fn draw_link(link: &Link) -> impl IntoView
@@ -381,7 +381,7 @@ impl Backable for LinksHolder
 	fn export(&self) -> ModuleContent
 	{
 		return ModuleContent{
-			name: ModuleID::new(),
+			id: ModuleID::new(),
 			typeModule: self.module_name(),
 			timestamp: self._update.get_untracked().get(),
 			content: serde_json::to_string(&self.content).unwrap_or_default(),

@@ -1,18 +1,21 @@
+use std::fmt::{Debug, Formatter};
 use leptoaster::ToasterContext;
 use leptos::prelude::{OnTargetAttribute, Set};
 use leptos::ev::MouseEvent;
 use leptos::prelude::{ElementChild, GetUntracked, PropAttribute, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, ClassAttribute, Get, IntoAny, RwSignal};
-use leptos::view;
+use leptos::{component, view, IntoView};
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleName, ModuleSizeContrainte, RefreshTime};
 use leptos::callback::Callable;
+use leptos::logging::log;
+use leptos_use::watch_debounced;
 use crate::front::modules::module_actions::ModuleActionFn;
 
 static MAX_LENGTH: usize = 100000;
 
-#[derive(Serialize,Deserialize,Default,Debug)]
+#[derive(Serialize,Deserialize,Default)]
 pub struct Todo
 {
 	content: ArcRwSignal<String>,
@@ -30,12 +33,16 @@ impl Todo
 			_sended: Default::default(),
 		}
 	}
+}
 
-	pub fn updateFn(&self,moduleActions: ModuleActionFn, moduleId: ModuleID) -> impl Fn(MouseEvent) + Clone + 'static
-	{
-		return move |_| {
-			moduleActions.clone().updateFn.run((moduleId.clone()));
-		}
+impl Debug for Todo
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("Todo")
+			.field("content", &self.content.get_untracked())
+			.field("_update", &self._update.get_untracked())
+			.field("_sended", &self._sended.get_untracked())
+			.finish()
 	}
 }
 
@@ -47,7 +54,7 @@ impl Cacheable for Todo
 
 	fn cache_mustUpdate(&self) -> bool
 	{
-		return self._update.get_untracked().isNewer(&self._sended.get());
+		return self._update.get_untracked().isNewer(&self._sended.get_untracked());
 	}
 
 	fn cache_getUpdate(&self) -> ArcRwSignal<Cache> {
@@ -70,27 +77,15 @@ impl Backable for Todo
 		Todo::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, _: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> AnyView {
-
-		let updateFn = self.updateFn(moduleActions,moduleId);
+	fn draw(&self, _: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> AnyView
+	{
 		let content = self.content.clone();
-		let contentd = self.content.clone();
+		let contentLen = self.content.clone();
 		let contentWrite = self.content.clone();
 		let contentCache = self._update.clone();
 
-		// <button class="validate" on:click=updateFn><Translate key={AllFrontUIEnum::UPDATE.to_string()}/></button>
 		view!{
-			<textarea class="module_todo"
-                prop:value=move || content.get()
-				on:input:target=move |ev| {
-					contentCache.update(|cache|{
-						cache.update();
-					});
-					let mut newContent: String = ev.target().value();
-					newContent.truncate(MAX_LENGTH);
-					contentWrite.set(newContent);
-				}>{contentd.get()}</textarea>
-			<span class="module_todo_counter">{contentd.get().len()}/{MAX_LENGTH}c</span>
+			<TodoViewTextArea contentTocheck=self.content.clone() cache=contentCache.clone() moduleActions=moduleActions.clone() moduleId=moduleId.clone()/>
 		}.into_any()
 	}
 
@@ -100,15 +95,22 @@ impl Backable for Todo
 
 	fn refresh(&self,moduleActions: ModuleActionFn, moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
 
+		let cacheSended = self._sended.clone();
+		let cacheUpdate = self._update.clone();
 		return Some(Box::pin(async move {
-			moduleActions.clone().getOrUpdateFn.run((moduleId.clone()));
+
+			if(cacheUpdate.get_untracked().isNewer(&cacheSended.get_untracked()))
+			{
+				return;
+			}
+			moduleActions.clone().getFn.run((moduleId.clone()));
 		}));
 	}
 
 	fn export(&self) -> ModuleContent
 	{
 		return ModuleContent{
-			name: ModuleID::new(),
+			id: ModuleID::new(),
 			typeModule: self.module_name(),
 			timestamp: self._update.get_untracked().get(),
 			content: serde_json::to_string(&self.content.get_untracked()).unwrap_or_default(),
@@ -143,4 +145,39 @@ impl Backable for Todo
 	fn size(&self) -> ModuleSizeContrainte {
 		ModuleSizeContrainte::default()
 	}
+}
+
+
+#[component]
+fn TodoViewTextArea(contentTocheck: ArcRwSignal<String>, cache: ArcRwSignal<Cache>, moduleActions: ModuleActionFn, moduleId: ModuleID) -> impl IntoView
+{
+	let contentWatcher = contentTocheck.clone();
+	let newWatcher = watch_debounced(
+		move || {
+			log!("contentWatcher deps");
+			contentWatcher.get()
+		},
+		move |a, b, _| {
+			log!("changed! {} {:?}",a,b);
+			moduleActions.clone().updateFn.run((moduleId.clone()));
+		},
+		1000.0,
+	);
+	
+	let contentGet = contentTocheck.clone();
+	let contentWrite = contentTocheck.clone();
+	let contentLen = contentTocheck.clone();
+	return view!{
+			<textarea class="module_todo"
+                prop:value=move || contentGet.get()
+				on:input:target=move |ev| {
+					cache.update(|cache|{
+						cache.update();
+					});
+					let mut newContent: String = ev.target().value();
+					newContent.truncate(MAX_LENGTH);
+					contentWrite.set(newContent);
+				}></textarea>
+			<span class="module_todo_counter">{contentLen.get().len()}/{MAX_LENGTH}c</span>
+		}.into_any();
 }

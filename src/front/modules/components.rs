@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use leptoaster::ToasterContext;
 use leptos::ev::Targeted;
-use leptos::prelude::{OnTargetAttribute};
+use leptos::prelude::OnTargetAttribute;
 use leptos::prelude::{ElementChild, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, IntoAny, PropAttribute, RwSignal, StyleAttribute};
 use leptos::view;
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use web_sys::{Event, HtmlInputElement};
 use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::modules::module_actions::ModuleActionFn;
-use crate::front::modules::{ModuleHolder};
+use crate::front::modules::module_holder::ModuleHolder;
 use crate::front::utils::all_front_enum::AllFrontErrorEnum;
 use crate::front::utils::translate::Translate;
 
@@ -326,3 +326,7 @@ impl Default for API_return_apply
 		}
 	}
 }
+
+pub trait moduleContent: ModuleName + Backable + Cacheable {}
+
+pub type ApiCall = Pin<Box<dyn Future<Output = API_return_apply>>>;

@@ -1,11 +1,8 @@
 use leptoaster::ToasterContext;
 use leptos::callback::Callback;
-use leptos::prelude::{ArcRwSignal, With, Write};
+use leptos::prelude::{ArcRwSignal, With};
 use leptos::reactive::spawn_local;
-use crate::front::modules::ModuleHolder;
-use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
-use crate::front::utils::users_data::UserData;
-use std::ops::DerefMut;
+use crate::front::modules::module_holder::ModuleHolder;
 use crate::api::modules::components::ModuleID;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 
@@ -14,7 +11,7 @@ pub struct ModuleActionFn
 {
 	/// (moduleName/key, login)
 	pub updateFn: Callback<(ModuleID),()>,
-	pub getOrUpdateFn: Callback<(ModuleID),()>,
+	pub getFn: Callback<(ModuleID),()>,
 	pub removeFn: Callback<(ModuleID),()>,
 	pub refreshFn: Callback<(ModuleID),()>
 }
@@ -26,7 +23,7 @@ impl ModuleActionFn
 	{
 		Self {
 			updateFn: Callback::new(Self::module_update(moduleContentInnerValidate.clone(), toasterInnerValidate.clone())),
-			getOrUpdateFn: Callback::new(Self::module_getOrUpdate(moduleContentInnerValidate.clone(), toasterInnerValidate.clone())),
+			getFn: Callback::new(Self::module_get(moduleContentInnerValidate.clone(), toasterInnerValidate.clone())),
 			removeFn: Callback::new(Self::module_remove(moduleContentInnerValidate.clone(), toasterInnerValidate.clone())),
 			refreshFn: Callback::new(Self::module_refresh(moduleContentInnerValidate.clone(), toasterInnerValidate.clone())),
 		}
@@ -42,29 +39,13 @@ impl ModuleActionFn
 			let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
-			spawn_local(async move {
-				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked() else {return};
-				let Some((login, _)) = UserData::loginLang_get_from_cookie()
-				else
-				{
-					return;
-				};
-				let modules: &mut ModuleHolder = guard.deref_mut();
-				let error = (*modules).module_update(login, moduleId).await;
-
-				if let Some(err) = error
-				{
-					toastingErr(&toasterInnerValidate, err).await;
-				}
-				else
-				{
-					toastingSuccess(&toasterInnerValidate, AllFrontUIEnum::UPDATE).await;
-				}
-			});
+			spawn_local(
+				ModuleHolder::network_deferredCall(moduleContentInnerValidate.clone(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_module_update_caller(holder,moduleId), Some(AllFrontUIEnum::UPDATE))
+			);
 		};
 	}
 
-	fn module_getOrUpdate(
+	fn module_get(
 		moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 		toasterInnerValidate: ToasterContext,
 		//dialog: DialogManager
@@ -74,21 +55,9 @@ impl ModuleActionFn
 			let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
-			spawn_local(async move {
-				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked() else {return};
-				let Some((login, _)) = UserData::loginLang_get_from_cookie()
-				else
-				{
-					return;
-				};
-				let modules: &mut ModuleHolder = guard.deref_mut();
-				let error = (*modules).module_getOrUpdate(login, moduleId).await;
-
-				if let Some(err) = error
-				{
-					toastingErr(&toasterInnerValidate, err).await;
-				}
-			});
+			spawn_local(
+				ModuleHolder::network_deferredCall(moduleContentInnerValidate.clone(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_module_retrieve_caller(holder,moduleId,false), None)
+			);
 		};
 	}
 
@@ -102,25 +71,9 @@ impl ModuleActionFn
 			let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
-			spawn_local(async move {
-				let Some(mut guard) = moduleContentInnerValidate.try_write_untracked() else {return};
-				let Some((login, _)) = UserData::loginLang_get_from_cookie()
-				else
-				{
-					return;
-				};
-				let modules: &mut ModuleHolder = guard.deref_mut();
-				let error = (*modules).module_remove(login, moduleId).await;
-
-				if let Some(err) = error
-				{
-					toastingErr(&toasterInnerValidate, err).await;
-				}
-				else
-				{
-					toastingSuccess(&toasterInnerValidate, AllFrontUIEnum::REMOVED).await;
-				}
-			});
+			spawn_local(
+				ModuleHolder::network_deferredCall(moduleContentInnerValidate.clone(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_module_remove_caller(holder,moduleId), Some(AllFrontUIEnum::REMOVED))
+			);
 		};
 	}
 

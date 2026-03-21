@@ -53,7 +53,7 @@ pub enum ModuleErrors
 pub struct ModuleContent
 {
 	// name of the content or child content
-	pub name: ModuleID,
+	pub id: ModuleID,
 	// name of the content or child content
 	pub typeModule: String,
 	// timestamp of the last update of the content or child content
@@ -70,7 +70,7 @@ impl Default for ModuleContent
 {
 	fn default() -> Self {
 		Self {
-			name: ModuleID::new(),
+			id: ModuleID::new(),
 			typeModule: "".to_string(),
 			timestamp: 0,
 			content: "".to_string(),
@@ -86,7 +86,7 @@ impl ModuleContent
 	pub fn new(name: ModuleID,typeModule: String) -> Self
 	{
 		Self {
-			name,
+			id: name,
 			typeModule,
 			..Default::default()
 		}
@@ -95,7 +95,7 @@ impl ModuleContent
 	pub fn newFromName(name: &ModuleID) -> Self
 	{
 		Self {
-			name: name.clone(),
+			id: name.clone(),
 			..Default::default()
 		}
 	}
@@ -123,7 +123,7 @@ impl ModuleContent
 		}
 
 		let mut content = HashMap::new();
-		HTrace!("self.timestamp update for {:?} : {}",self.name,self.timestamp);
+		HTrace!("self.timestamp update for {:?} : {}",self.id,self.timestamp);
 		content.insert("timestamp".to_string(), JsonValue::String(self.timestamp.to_string()));
 		content.insert("content".to_string(), JsonValue::String(self.content.clone()));
 		content.insert("type".to_string(), JsonValue::String(self.typeModule.clone()));
@@ -210,7 +210,7 @@ impl ModuleContent
 	#[cfg(feature = "ssr")]
 	fn getModulePath(&self) -> String
 	{
-		return Self::getModulePathNamed(&self.name.id);
+		return Self::getModulePathNamed(&self.id.id);
 	}
 
 	#[cfg(feature = "ssr")]

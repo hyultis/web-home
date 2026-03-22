@@ -15,7 +15,7 @@ use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, F
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::translate::Translate;
 use crate::HWebTrace;
-use time::{Date, UtcDateTime};
+use time::{Date, Duration, OffsetDateTime, UtcDateTime};
 use wasm_bindgen::prelude::Closure;
 use crate::front::utils::draw_title_if_present;
 
@@ -377,9 +377,16 @@ async fn sync_weather_api(config: ArcRwSignal<WeatherConfig>,weatherContent: Arc
 	}
 
 	let config = config.get_untracked();
+
+	let now = OffsetDateTime::now_utc();
+	let startDate = now.date(); // aujourd’hui (UTC)
+	let mut days = config.maxday as i64;
+	if(days < 1) {days = 1};
+	let endDate = startDate + Duration::days(days -1);
+
 	let url = format!(
-		"https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&hourly=weather_code,precipitation_probability,wind_speed_10m,apparent_temperature{}&forecast_days={}&wind_speed_unit=ms&format=json&timeformat=unixtime",
-		config.latitude, config.longitude, timezone, config.maxday
+		"https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&hourly=weather_code,precipitation_probability,wind_speed_10m,apparent_temperature{}&wind_speed_unit=ms&format=json&timeformat=unixtime&start_hour={}T00:00&end_hour={}T23:00",
+		config.latitude, config.longitude, timezone, startDate, endDate
 	);
 
 	let text = if(false)
@@ -451,7 +458,7 @@ fn json_read_hourly(result: &mut WeatherApiResult, json: &Value)
 			"time" => {
 				if let Value::Array(value) = value {
 					times = value.iter()
-						.map(|v| {v.as_u64().unwrap_or(0)+(12*3600)})
+						.map(|v| {v.as_u64().unwrap_or(0)})
 						.collect::<Vec<u64>>();
 				}
 			}

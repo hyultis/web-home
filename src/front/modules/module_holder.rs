@@ -510,6 +510,13 @@ impl ModuleHolder
 		return &self._blocks;
 	}
 
+	pub fn blocks_view(&self) -> Vec<(ModuleID, RwSignal<ModulePositions<ModuleType>>)> {
+		self._blocks
+			.iter()
+			.map(|(id, module)| (id.clone(), module.clone()))
+			.collect()
+	}
+
 	pub fn blocks_insert(&mut self, newmodule: ModulePositions<ModuleType>)
 	{
 		newmodule.depth_set(self._blockNb as u32);

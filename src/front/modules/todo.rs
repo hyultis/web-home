@@ -169,7 +169,7 @@ fn TodoViewTextArea(contentTocheck: ArcRwSignal<String>, cache: ArcRwSignal<Cach
 	let contentLen = contentTocheck.clone();
 	return view!{
 			<textarea class="module_todo"
-                prop:value=move || contentGet.get()
+                prop:value=contentGet.get()
 				on:input:target=move |ev| {
 					cache.update(|cache|{
 						cache.update();

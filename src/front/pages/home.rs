@@ -1,4 +1,4 @@
-use leptos::prelude::{GetUntracked, OnTargetAttribute, Signal, With, WriteSignal};
+use leptos::prelude::{For, GetUntracked, OnTargetAttribute, Signal, With, WriteSignal};
 use leptos::prelude::{CollectView, Get, PropAttribute};
 use crate::front::modules::components::Backable;
 use crate::front::modules::module_holder::ModuleHolder;
@@ -157,21 +157,20 @@ pub fn Home() -> impl IntoView
 				<hr style="clear: both;"/>
 			</div>
 			<div class="modules">
-				{move || {
-					let editMode = editMode.clone();
-					let moduleActions = moduleActions.clone();
-					return moduleContentInnerModuleView.clone().with(|binding| {
-						let editMode = editMode.clone();
-						let moduleActions = moduleActions.clone();
-						return binding.blocks_get().iter().map( |(moduleId,module)| {
-							let editMode = editMode.clone();
-							let moduleActions = moduleActions.clone();
-							view! {
-					           <ModuleView editMode=editMode.clone() module=module.clone() moduleActions=moduleActions.clone() moduleId={moduleId.clone()} />
-					        }
-						}).collect_view();
-					});
-				}}
+				<For
+					each=move || moduleContentInnerModuleView.with(|holder| holder.blocks_view())
+					key=|(id,_)| id.clone()
+					children=move |(moduleId, module)| {
+						        view! {
+						            <ModuleView
+						                editMode=editMode.clone()
+						                module=module.clone()
+						                moduleActions=moduleActions.clone()
+						                moduleId=moduleId.clone()
+						            />
+						        }
+						    }
+						/>
 			</div>
 		</div>
 	}

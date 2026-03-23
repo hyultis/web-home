@@ -56,10 +56,14 @@ pub fn Home() -> impl IntoView
 	});
 
 	// auto refresh cookie every 2 hour
-	use_interval_fn(
+	let (userDataSignal, setUserData) = UserData::cookie_signalGet();
+	let _ = use_interval_fn(
 		move || {
-			let (userDataSignal, setUserData) = UserData::cookie_signalGet();
-			setUserData.set(userDataSignal.get_untracked());
+			if let Some(mut tmp) = userDataSignal.get_untracked()
+			{
+				tmp.valUpdate();
+				setUserData.set(Some(tmp));
+			}
 			log!("auto refresh cookie");
 		},
 		2 * 3600 * 1000,

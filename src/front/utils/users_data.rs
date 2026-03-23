@@ -51,7 +51,8 @@ pub struct UserData
 {
 	lang: String,
 	userSalt: Option<String>,
-	generatedId: Option<String>
+	generatedId: Option<String>,
+	updateVal: u128
 }
 
 impl UserData {
@@ -60,6 +61,11 @@ impl UserData {
 		let mut new = Self::default();
 		new.lang_set(lang);
 		return new;
+	}
+
+	pub fn valUpdate(&mut self)
+	{
+		self.updateVal += 1;
 	}
 
 	pub fn lang_get(&self) -> String
@@ -228,6 +234,7 @@ impl Default for UserData
 			lang: "EN".to_string(),
 			userSalt: None,
 			generatedId: None,
+			updateVal: 0,
 		}
 	}
 }

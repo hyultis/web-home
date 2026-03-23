@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use js_sys::{Array, Intl, Object, Reflect};
 use leptoaster::ToasterContext;
+use leptos::logging::log;
 use leptos::prelude::{ClassAttribute, CollectView, ElementChild, Get, GetUntracked, OnAttribute, StyleAttribute, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, IntoAny, RwSignal};
 use leptos::view;
@@ -15,7 +16,7 @@ use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, F
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::translate::Translate;
 use crate::HWebTrace;
-use time::{Date, Duration, OffsetDateTime, UtcDateTime};
+use time::{Date, Duration, OffsetDateTime, UtcDateTime, UtcOffset};
 use wasm_bindgen::prelude::Closure;
 use crate::front::utils::draw_title_if_present;
 
@@ -385,7 +386,7 @@ async fn sync_weather_api(config: ArcRwSignal<WeatherConfig>,weatherContent: Arc
 	let endDate = startDate + Duration::days(days -1);
 
 	let url = format!(
-		"https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&hourly=weather_code,precipitation_probability,wind_speed_10m,apparent_temperature{}&wind_speed_unit=ms&format=json&timeformat=unixtime&start_hour={}T00:00&end_hour={}T23:00",
+		"https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&hourly=weather_code,precipitation_probability,wind_speed_10m,apparent_temperature{}&wind_speed_unit=ms&format=json&timeformat=unixtime&start_hour={}T00:01&end_hour={}T23:59",
 		config.latitude, config.longitude, timezone, startDate, endDate
 	);
 
@@ -497,7 +498,8 @@ fn json_read_hourly(result: &mut WeatherApiResult, json: &Value)
 	let mut finalResult: HashMap<Date,WeatherApiResultOneDayByHour> = HashMap::new();
 	for (i,time) in times.iter().enumerate() {
 
-		let dateTime = UtcDateTime::from_unix_timestamp(*time as i64).unwrap_or(UtcDateTime::now());
+		let dt = OffsetDateTime::from_unix_timestamp(*time as i64).unwrap();
+		let dateTime = dt.to_offset(UtcOffset::current_local_offset().unwrap());
 		let date = dateTime.date();
 		let hour = dateTime.hour();
 

@@ -1,7 +1,6 @@
 use std::fmt::{Debug, Formatter};
 use leptoaster::ToasterContext;
 use leptos::prelude::{OnTargetAttribute, Set};
-use leptos::ev::MouseEvent;
 use leptos::prelude::{ElementChild, GetUntracked, PropAttribute, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, ClassAttribute, Get, IntoAny, RwSignal};
 use leptos::{component, view, IntoView};

@@ -260,3 +260,10 @@ impl From<&ImapMail> for ImapMailIdentifier
 		}
 	}
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ImapMailUpdate
+{
+	pub flags: Vec<String>,
+	pub boxName: BoxName,
+}

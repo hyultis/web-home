@@ -176,7 +176,8 @@ impl Mail
 				oldMailsContent = mailsDatas.mailsContent.remove(&mailUid);
 			}
 
-			let Some(mailContent) = toaster_api(&toaster, API_proxys_imap_setMailSee(imapConnector, mailId.clone().into()).await, None).await else {
+			if toaster_api(&toaster, API_proxys_imap_setMailSee(imapConnector, mailId.clone().into()).await, None).await.is_none()
+			{
 				mailsContent.update(|mailContent|{
 					if let Some(oldData) = oldMailsData {
 						mailContent.mailsData.insert(mailUid, oldData);
@@ -261,30 +262,46 @@ impl Mail
 
 	}
 
-	async fn sync(toaster: ToasterContext, mailContent: ArcRwSignal<MailsContent>, config: ArcRwSignal<MailConfig>)
+	async fn sync(toaster: ToasterContext, mailContentRaw: ArcRwSignal<MailsContent>, config: ArcRwSignal<MailConfig>)
 	{
-		let mailsToAdd = if(mailContent.get_untracked().mailsData.is_empty())
+		let mailContent = mailContentRaw.get_untracked();
+		let config = config.get_untracked();
+		let (mailsToAdd,mailToUpdate) = if(mailContent.mailsData.is_empty())
 		{
-			let Some(allmails) = toaster_api(&toaster, API_proxys_imap_getFullUnsee(config.get_untracked().imap.clone()).await, None).await else {
+			let Some(allmails) = toaster_api(&toaster, API_proxys_imap_getFullUnsee(config.imap.clone()).await, None).await else {
 				toastingErr(&toaster, "MODULE_MAIL_SYNCERROR".to_string()).await;
 				return;
 			};
-			allmails
+			(allmails,HashMap::new())
 		}
 		else
 		{
-			let Some(newmails) = toaster_api(&toaster, API_proxys_imap_getUnseeSince(config.get_untracked().imap.clone(),mailContent.get_untracked().lastUpdate).await, None).await else {
+			let Some((newmails,mailToUpdate)) = toaster_api(&toaster, API_proxys_imap_getUnseeSince(config.imap.clone(),
+			                                                                         mailContent.lastUpdate,
+			                                                                         mailContent.mailsData.keys()
+				                                                                         .map(|e| *e as u32)
+				                                                                         .collect::<Vec<u32>>()).await,
+			                                                                        None).await
+			else {
 				toastingErr(&toaster, "MODULE_MAIL_SYNCERROR".to_string()).await;
 				return;
 			};
-			newmails
+			(newmails,mailToUpdate)
 		};
-		mailContent.update(|mailContent| {
+		mailContentRaw.update(move |mailContent| {
 		for mailToAdd in mailsToAdd {
 			if(mailContent.lastUpdate<mailToAdd.date as u64) {
 				mailContent.lastUpdate=mailToAdd.date as u64;
 			}
 			mailContent.mailsData.insert(mailToAdd.uid as u64, mailToAdd);
+		}
+
+		for (uid,content) in &mailToUpdate {
+			if(content.flags.contains(&"SEEN".to_string())) {
+				mailContent.mailsData.remove(&(*uid as u64));
+				mailContent.mailsContent.remove(&(*uid as u64));
+			}
+			//let Some(foundMailToUpdate) = mailContent.mailsData.get_mut(&(*uid as u64)) else {continue};
 		}
 	})
 	}
@@ -438,7 +455,7 @@ impl Backable for Mail
 	}
 
 	fn refresh_time(&self) -> RefreshTime {
-		RefreshTime::HOURS(1)
+		RefreshTime::MINUTES(30)
 	}
 
 	fn refresh(&self, moduleActions: ModuleActionFn, moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {

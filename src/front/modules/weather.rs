@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use js_sys::{Array, Intl, Object, Reflect};
 use leptoaster::ToasterContext;
-use leptos::logging::log;
 use leptos::prelude::{ClassAttribute, CollectView, ElementChild, Get, GetUntracked, OnAttribute, StyleAttribute, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, IntoAny, RwSignal};
 use leptos::view;
@@ -16,7 +15,7 @@ use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, F
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::translate::Translate;
 use crate::HWebTrace;
-use time::{Date, Duration, OffsetDateTime, UtcDateTime, UtcOffset};
+use time::{Date, Duration, OffsetDateTime, UtcOffset};
 use wasm_bindgen::prelude::Closure;
 use crate::front::utils::draw_title_if_present;
 

@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use leptos::server;
-use crate::api::proxys::imap_components::{imap_connector, ImapMail, BoxName, ImapMailIdentifier};
+use crate::api::proxys::imap_components::{imap_connector, ImapMail, BoxName, ImapMailIdentifier, ImapMailUpdate};
 use crate::api::proxys::imap_error::ImapError;
 
 #[server]
@@ -26,6 +27,7 @@ pub async fn API_proxys_imap_getFullUnsee(config: imap_connector) -> Result<Vec<
 	for boxName in results
 	{
 		if(boxName.attributes.is_uninteresting()) {continue};
+		if(config.isBoxBlacklisted(&boxName.name)) {continue};
 
 		let Ok(mailbox) = imap_session.select(&boxName.name) else {continue};
 		let Ok(results) = imap_session.uid_search("UNSEEN UNKEYWORD $Junk UNKEYWORD $Spam UNDELETED UNANSWERED UNDRAFT") else {continue};
@@ -40,15 +42,17 @@ pub async fn API_proxys_imap_getFullUnsee(config: imap_connector) -> Result<Vec<
 
 // get all mail from the most recent mail
 #[server]
-pub async fn API_proxys_imap_getUnseeSince(config: imap_connector, date:u64) -> Result<Vec<ImapMail>, ImapError>
+pub async fn API_proxys_imap_getUnseeSince(config: imap_connector, date:u64, toUpdate: Vec<u32>) -> Result<(Vec<ImapMail>,HashMap<u32,ImapMailUpdate>), ImapError>
 {
 	use crate::api::proxys::imap_inner::*;
 	use time::format_description;
 
 	let (mut imap_session,_,isGmail) = connect_imap(&config)?;
 	let results = listbox(&mut imap_session,isGmail)?;
+	let allUid = toUpdate.iter().map(|e| format!("{}",e)).collect::<Vec<String>>().join(",");
 
 	let mut listOfMail = vec![];
+	let mut listOfUpdatedMail = HashMap::new();
 	for boxName in results
 	{
 		if(boxName.attributes.is_uninteresting()) {continue};
@@ -63,11 +67,23 @@ pub async fn API_proxys_imap_getUnseeSince(config: imap_connector, date:u64) -> 
 		let Ok(results) = imap_session.uid_search(format!("UNSEEN UNKEYWORD $Junk UNKEYWORD $Spam UNDELETED UNANSWERED UNDRAFT SINCE {}",dateFormatted)) else {continue};
 
 		listOfMail.append(&mut extract_ImapMail_from_search(&mut imap_session,results,&boxName.name));
+
+		let Ok(results) = imap_session.uid_fetch(allUid.clone(), "(FLAGS)") else {continue};
+		for mail in results.iter()
+		{
+			let Some(uid) = mail.uid else {continue};
+			let flags = mail.flags().iter().map(|flag| flag.to_string().replace("\\","").to_uppercase()).collect::<Vec<String>>();
+			listOfUpdatedMail.insert(uid as u32,ImapMailUpdate{
+				flags,
+				boxName: boxName.clone(),
+			});
+		}
+
 	}
 
 	let _ = imap_session.logout();
 
-	return Ok(listOfMail);
+	return Ok((listOfMail, listOfUpdatedMail));
 }
 
 #[server]

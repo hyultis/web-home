@@ -160,7 +160,7 @@ fn TodoViewTextArea(contentTocheck: ArcRwSignal<String>, cache: ArcRwSignal<Cach
 			log!("changed! {} {:?}",a,b);
 			moduleActions.clone().updateFn.run((moduleId.clone()));
 		},
-		1000.0,
+		10000.0,
 	);
 	
 	let contentGet = contentTocheck.clone();

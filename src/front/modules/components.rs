@@ -156,7 +156,8 @@ pub fn distant_time(timestamp: i64) -> DISTANT_TIME_RESULT
 	for (max,I18lKey) in ORDERED_TIME {
 		key = I18lKey.to_string();
 		if(distance<max as i64)	{break;}
-		if(max==0) {continue;}
+		if(max==0) {break;}
+		distance = distance/max as i64;
 	}
 
 	return match ifpast {

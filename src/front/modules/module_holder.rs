@@ -269,7 +269,6 @@ impl ModuleHolder
 			.filter(|(moduleIdSearch, _)| *moduleIdSearch == &moduleId)
 		{
 			let (cacheMustUpdate,cacheTime) = oneModule.with_untracked(|module| (module.inner().cache_mustUpdate(),module.inner().cache_time()));
-			log!("moduleIdSearch {} forceUpdate {}, cacheMustUpdate {}",key.id, forceUpdate, cacheMustUpdate);
 			if (forceUpdate || cacheMustUpdate)
 			{
 				return Some(ApiModulesID{ key: key.clone(), timestamp: cacheTime });
@@ -316,7 +315,6 @@ impl ModuleHolder
 		}
 
 		let addReturnWork = move |moduleHolder: &mut ModuleHolder| {
-			log!("return of async module {}",content.id.id);
 			if let Some(foundModule) = moduleHolder._blocks.get_mut(&moduleId)
 			{
 				foundModule.update(|module| module.import(content.clone()));

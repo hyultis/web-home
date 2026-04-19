@@ -96,7 +96,6 @@ impl Backable for Todo
 		let cacheSended = self._sended.clone();
 		let cacheUpdate = self._update.clone();
 		return Some(Box::pin(async move {
-			log!("TODO refreshing");
 			(moduleActions.clone().getFn)((moduleId.clone()));
 		}));
 	}
@@ -151,12 +150,8 @@ fn TodoDraw(contentTocheck: ArcRwSignal<String>, cache: ArcRwSignal<Cache>, modu
 {
 	let contentWatcher = contentTocheck.clone();
 	let newWatcher = watch_debounced(
-		move || {
-			log!("contentWatcher deps");
-			contentWatcher.get()
-		},
+		move || contentWatcher.get(),
 		move |a, b, _| {
-			log!("changed! {} {:?}",a,b);
 			(moduleActions.clone().updateFn)((moduleId.clone()));
 		},
 		5000.0,

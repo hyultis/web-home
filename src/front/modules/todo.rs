@@ -2,12 +2,12 @@ use std::fmt::{Debug, Formatter};
 use leptoaster::ToasterContext;
 use leptos::prelude::{OnTargetAttribute, Set};
 use leptos::prelude::{ElementChild, GetUntracked, PropAttribute, Update};
-use leptos::prelude::{AnyView, ArcRwSignal, ClassAttribute, Get, IntoAny, RwSignal};
+use leptos::prelude::{ArcRwSignal, ClassAttribute, Get, IntoAny, RwSignal};
 use leptos::{component, view, IntoView};
+use leptos::children::ViewFn;
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleName, ModuleSizeContrainte, RefreshTime};
-use leptos::callback::Callable;
 use leptos::logging::log;
 use leptos_use::watch_debounced;
 use crate::front::modules::module_actions::ModuleActionFn;
@@ -76,16 +76,15 @@ impl Backable for Todo
 		Todo::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, _: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> AnyView
+	fn draw(&self, _: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> ViewFn
 	{
-		let content = self.content.clone();
-		let contentLen = self.content.clone();
-		let contentWrite = self.content.clone();
-		let contentCache = self._update.clone();
-
-		view!{
-			<TodoViewTextArea contentTocheck=self.content.clone() cache=contentCache.clone() moduleActions=moduleActions.clone() moduleId=moduleId.clone()/>
-		}.into_any()
+		let contentInner = self.content.clone();
+		let updateInner = self._update.clone();
+		ViewFn::from(move || {
+			view!{
+				<TodoDraw contentTocheck=contentInner.clone() cache=updateInner.clone() moduleActions=moduleActions.clone() moduleId=moduleId.clone()/>
+			}.into_any()
+		})
 	}
 
 	fn refresh_time(&self) -> RefreshTime {
@@ -97,12 +96,8 @@ impl Backable for Todo
 		let cacheSended = self._sended.clone();
 		let cacheUpdate = self._update.clone();
 		return Some(Box::pin(async move {
-
-			if(cacheUpdate.get_untracked().isNewer(&cacheSended.get_untracked()))
-			{
-				return;
-			}
-			moduleActions.clone().getFn.run((moduleId.clone()));
+			log!("TODO refreshing");
+			(moduleActions.clone().getFn)((moduleId.clone()));
 		}));
 	}
 
@@ -132,6 +127,11 @@ impl Backable for Todo
 		});
 	}
 
+	fn isOlderThan(&self, other: &ModuleContent) -> bool
+	{
+		return other.timestamp > self._update.get_untracked().get();
+	}
+
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> {
 		let Ok(content) = serde_json::from_str(&from.content) else {return None};
 		Some(Self {
@@ -146,9 +146,8 @@ impl Backable for Todo
 	}
 }
 
-
 #[component]
-fn TodoViewTextArea(contentTocheck: ArcRwSignal<String>, cache: ArcRwSignal<Cache>, moduleActions: ModuleActionFn, moduleId: ModuleID) -> impl IntoView
+fn TodoDraw(contentTocheck: ArcRwSignal<String>, cache: ArcRwSignal<Cache>, moduleActions: ModuleActionFn, moduleId: ModuleID) -> impl IntoView
 {
 	let contentWatcher = contentTocheck.clone();
 	let newWatcher = watch_debounced(
@@ -158,9 +157,9 @@ fn TodoViewTextArea(contentTocheck: ArcRwSignal<String>, cache: ArcRwSignal<Cach
 		},
 		move |a, b, _| {
 			log!("changed! {} {:?}",a,b);
-			moduleActions.clone().updateFn.run((moduleId.clone()));
+			(moduleActions.clone().updateFn)((moduleId.clone()));
 		},
-		10000.0,
+		5000.0,
 	);
 	
 	let contentGet = contentTocheck.clone();
@@ -168,7 +167,7 @@ fn TodoViewTextArea(contentTocheck: ArcRwSignal<String>, cache: ArcRwSignal<Cach
 	let contentLen = contentTocheck.clone();
 	return view!{
 			<textarea class="module_todo"
-                prop:value=contentGet.get()
+                prop:value=move || contentGet.get()
 				on:input:target=move |ev| {
 					cache.update(|cache|{
 						cache.update();
@@ -177,6 +176,6 @@ fn TodoViewTextArea(contentTocheck: ArcRwSignal<String>, cache: ArcRwSignal<Cach
 					newContent.truncate(MAX_LENGTH);
 					contentWrite.set(newContent);
 				}></textarea>
-			<span class="module_todo_counter">{contentLen.get().len()}/{MAX_LENGTH}c</span>
+			<span class="module_todo_counter">{move || contentLen.get().len()}/{MAX_LENGTH}c</span>
 		}.into_any();
 }

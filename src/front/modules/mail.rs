@@ -3,13 +3,14 @@ use std::collections::HashMap;
 use gloo_timers::callback::Timeout;
 use leptoaster::{expect_toaster, ToasterContext};
 use leptos::callback::Callback;
+use leptos::children::ViewFn;
 use leptos::prelude::{use_context, CollectView, StyleAttribute, Write};
 use leptos::prelude::{ClassAttribute, ElementChild, GetUntracked, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, Get, IntoAny, OnAttribute, RwSignal};
-use leptos::view;
+use leptos::reactive::spawn_local_scoped;
+use leptos::{component, view, IntoView};
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
-use wasm_bindgen_futures::spawn_local;
 use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::api::proxys::imap::{API_proxys_imap_getFullUnsee, API_proxys_imap_getMailContent, API_proxys_imap_getUnseeSince, API_proxys_imap_listbox, API_proxys_imap_setMailSee};
 use crate::api::proxys::imap_components::{imap_connector, imap_connector_extra, Attachment, ImapMail};
@@ -62,16 +63,16 @@ pub struct Mail
 
 impl Mail
 {
-	pub fn draw_config(&self) -> AnyView
+	fn draw_config(getBoxsMailConfig: ArcRwSignal<MailConfig>, getBoxsMailsCache: ArcRwSignal<MailsContent>, update: ArcRwSignal<Cache>) -> AnyView
 	{
+		let getBoxsMailConfigInner = getBoxsMailConfig.clone();
+		let getBoxsMailsCacheInner = getBoxsMailsCache.clone();
 		let toaster = expect_toaster();
-		let getBoxsMailConfig = self.config.clone();
-		let getBoxsMailsCache = self.mailsClientCache.clone();
 		let getBoxsFn = move |_| {
 			let toaster = toaster.clone();
-			let getBoxsMailConfig = getBoxsMailConfig.clone();
-			let getBoxsMailContent = getBoxsMailsCache.clone();
-			spawn_local(async move {
+			let getBoxsMailConfig = getBoxsMailConfigInner.clone();
+			let getBoxsMailContent = getBoxsMailsCacheInner.clone();
+			spawn_local_scoped(async move {
 				if let Some(result) = toaster_api(&toaster,API_proxys_imap_listbox(getBoxsMailConfig.get_untracked().imap.clone()).await, None).await
 				{
 					getBoxsMailContent.update(|mailContent|{
@@ -82,22 +83,22 @@ impl Mail
 		};
 
 
-		let mut titleF = FieldHelper::new(&self.config,&self._update,"MODULE_TITLE_CONF",
+		let mut titleF = FieldHelper::new(&getBoxsMailConfig,&update,"MODULE_TITLE_CONF",
 		                                  |d| d.get().title,
 		                                  |ev,inner| inner.title = ev.target().value());
 		titleF.setFullSize(true);
-		let hostF = FieldHelper::new(&self.config,&self._update,"MODULE_MAIL_HOST",
+		let hostF = FieldHelper::new(&getBoxsMailConfig,&update,"MODULE_MAIL_HOST",
 		                                  |d| d.get().imap.host,
 		                                  |ev,inner| inner.imap.host = ev.target().value());
-		let mut portF = FieldHelper::new(&self.config,&self._update,"",
+		let mut portF = FieldHelper::new(&getBoxsMailConfig,&update,"",
 		                              |d| d.get().imap.port.to_string(),
 		                              |ev,inner| inner.imap.port = ev.target().value().parse::<u16>().unwrap_or(993));
 		portF.setInputType(FieldHelperType::NUMBER(1,65535));
 		portF.setStyle("width:90px");
-		let usernameF = FieldHelper::new(&self.config,&self._update,"MODULE_MAIL_USERNAME",
+		let usernameF = FieldHelper::new(&getBoxsMailConfig,&update,"MODULE_MAIL_USERNAME",
 		                              |d| d.get().imap.username,
 		                              |ev,inner| inner.imap.username = ev.target().value());
-		let mut passwordF = FieldHelper::new(&self.config,&self._update,"MODULE_MAIL_PASSWORD",
+		let mut passwordF = FieldHelper::new(&getBoxsMailConfig,&update,"MODULE_MAIL_PASSWORD",
 		                              |d| d.get().imap.password,
 		                              |ev,inner| inner.imap.password = ev.target().value());
 		passwordF.setInputType(FieldHelperType::PASSWORD);
@@ -110,8 +111,8 @@ impl Mail
 				{passwordF.draw()}<br/>
 				<button on:click={getBoxsFn}><Translate key="MODULE_MAIL_GETBOXS"/></button>
 				{
-					let boxConfig = self.config.clone();
-					let boxConfigCache = self._update.clone();
+					let boxConfig = getBoxsMailConfig.clone();
+					let boxConfigCache = update.clone();
 					let switchBoxFn = move |boxName:String,isDisabled:bool| {
 						boxConfig.update(|mailContent|{
 							if(mailContent.imap.extra.is_none()) {mailContent.imap.extra = Some(imap_connector_extra::default())}
@@ -131,8 +132,8 @@ impl Mail
 						});
 					};
 
-					let mailsCache = self.mailsClientCache.clone().get();
-					let configBoxContent = self.config.clone().get();
+					let mailsCache = getBoxsMailsCache.clone().get();
+					let configBoxContent = getBoxsMailConfig.clone().get();
 					if(!mailsCache.boxs.is_empty())
 					{
 						view!{
@@ -160,7 +161,7 @@ impl Mail
 
 	fn mail_mark_see(imapConnector: imap_connector, toaster: ToasterContext, mailId: ImapMail, mailsContent: ArcRwSignal<MailsContent>)
 	{
-		spawn_local(async move {
+		spawn_local_scoped(async move {
 			let mailUid = mailId.uid as u64;
 			// we remove the old data sooner to improve reactivity and re-add them later if something gone wrong
 			let oldMailsData;
@@ -196,7 +197,7 @@ impl Mail
 
 	fn mail_view_content(imapConnector: imap_connector, toaster: ToasterContext, dialogManager: DialogManager, mailIdContent: ImapMail, mailsCache: ArcRwSignal<MailsContent>)
 	{
-		spawn_local(async move {
+		spawn_local_scoped(async move {
 			let Some(mailContent) = toaster_api(&toaster, API_proxys_imap_getMailContent(imapConnector.clone(), mailIdContent.clone().into()).await, None).await else {return};
 
 			let toasterBody = toaster.clone();
@@ -333,125 +334,16 @@ impl Backable for Mail
 		Mail::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, _: ModuleID) -> AnyView {
+	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, _: ModuleID) -> ViewFn {
+		let configInner = self.config.clone();
+		let clientCacheInner = self.mailsClientCache.clone();
+		let updateInner = self._update.clone();
+		ViewFn::from(move || {
+			view! {
+				<MailDraw config=configInner.clone() mailsClientCache=clientCacheInner.clone() update=updateInner.clone() editMode=editMode/>
+			}.into_any()
+		})
 
-		let Some(dialogManager) = use_context::<DialogManager>() else {
-			HWebTrace!("cannot get dialogManager in link");
-			return view!{}.into_any();
-		};
-		let toaster = expect_toaster();
-
-		/*let refreshMail = self.config.clone();
-		let refreshMailContent = self.mailContent.clone();
-		let testFn = move |_| {
-			let refreshMail = refreshMail.clone();
-			let refreshMailContent = refreshMailContent.clone();
-			spawn_local(async move {
-				if let Ok(mail) = API_proxys_imap_getFullUnsee(refreshMail.get_untracked().imap.clone()).await
-				{
-					refreshMailContent.update(|mailcontent|{
-						for x in mail {
-							mailcontent.mails.insert(x.uid as u64, x);
-						}
-					});
-				}
-			});
-		};*/
-
-
-		let imapConnector = self.config.clone();
-		let toasterInner = toaster.clone();
-		let mailsCache = self.mailsClientCache.clone();
-		let viewContentFn = move |mailIdcontent:ImapMail| {
-			Self::mail_view_content(imapConnector.get_untracked().imap.clone(), toasterInner, dialogManager, mailIdcontent, mailsCache);
-		};
-
-		let imapConnector = self.config.clone();
-		let mailsCache = self.mailsClientCache.clone();
-		let markViewFn = move |mailIdcontent:ImapMail| {
-			Self::mail_mark_see(imapConnector.get_untracked().imap.clone(), toaster, mailIdcontent, mailsCache);
-		};
-
-		/*let refreshMail = self.config.clone();
-		let actualContentRefresh = self.mailContent.clone();
-		let testSinceFn = move |_| {
-			let refreshMail = refreshMail.clone();
-			let actualContentRefresh = actualContentRefresh.clone();
-			spawn_local(async move {
-				let _ = API_proxys_imap_getUnseeSince(refreshMail.get_untracked().imap.clone(),actualContentRefresh.get_untracked().lastUpdate).await;
-			});
-		};*/
-
-
-		view!{{
-			if(editMode.get())
-			{
-				self.draw_config()
-			}
-			else
-			{
-				let config = self.config.clone();
-				let mailsCache = self.mailsClientCache.clone();
-				/*
-					<button on:click={testFn}>MAIL</button>
-					<button on:click={testSinceFn}>MAIL SINCE</button>
-				 */
-				view!{
-					{draw_title_if_present(config.get().title.clone())}
-					<div class="module_rss_upper">
-						<table class="module_rss_table">{
-							let markVueCacheInner = mailsCache.clone();
-							let mails = mailsCache.get().mailsData.clone();
-							let mut mailsContent = mails.values().cloned().collect::<Vec<_>>();
-							mailsContent.sort_by(|a,b| a.date.cmp(&b.date).reverse());
-							mailsContent.iter().enumerate()
-								//.filter(|(num,_)| *num <= 10)
-								.map(|(_,mail)|{
-									let id = mail.uid;
-									let mailId = mail.clone();
-									let mailIdMark = mail.clone();
-									let viewContentFn = viewContentFn.clone();
-									let markViewFn = markViewFn.clone();
-									let markVueCacheInner = markVueCacheInner.clone();
-									view!{
-										<tr>
-											<td>{distant_time_simpler(mail.date)}</td>
-											<td class="mail_pointer alttext_upper" on:click={move |_| viewContentFn.clone()(mailId.clone())}>{mail.subject.clone()}{Self::utils_mailOverlay(&mailId)}</td>
-											<td>{
-												if(mail.confirmVue)
-												{
-													view!{<i class="iconoir-mail-out-solid" on:click={move |_| markViewFn.clone()(mailIdMark.clone())}/>}.into_any()
-												}
-												else
-												{
-													view!{<i class="iconoir-mail-open" on:click={move |_| {
-														let markVueCacheInnerInner = markVueCacheInner.clone();
-														markVueCacheInner.update(|mailCache|{
-															if let Some(thismail) = mailCache.mailsData.get_mut(&(id as u64))
-															{
-																thismail.confirmVue = true;
-																Timeout::new(5000, move || {
-																        markVueCacheInnerInner.update(|mailCache|{
-																			if let Some(thismail) = mailCache.mailsData.get_mut(&(id as u64))
-																			{
-																				thismail.confirmVue = false;
-																			}
-																		});
-																    }
-																).forget();
-															}
-														});
-													}}/>}.into_any()
-												}
-											}</td>
-										</tr>
-									}
-								}).collect_view()
-							}
-						</table>
-				</div>}.into_any()
-			}
-		}}.into_any()
 	}
 
 	fn refresh_time(&self) -> RefreshTime {
@@ -493,6 +385,11 @@ impl Backable for Mail
 		});
 	}
 
+	fn isOlderThan(&self, other: &ModuleContent) -> bool
+	{
+		return other.timestamp > self._update.get_untracked().get();
+	}
+
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> {
 		let Ok(content): Result<MailConfig,_> = serde_json::from_str(&from.content) else {return None};
 		Some(Self {
@@ -531,4 +428,112 @@ impl Cacheable for Mail
 	fn cache_getSended(&self) -> ArcRwSignal<Cache> {
 		return self._sended.clone();
 	}
+}
+
+#[component]
+fn MailDraw(config: ArcRwSignal<MailConfig>,
+            mailsClientCache: ArcRwSignal<MailsContent>,
+            update: ArcRwSignal<Cache>,
+            editMode: RwSignal<bool>) -> impl IntoView
+{
+	let Some(dialogManager) = use_context::<DialogManager>() else {
+		HWebTrace!("cannot get dialogManager in link");
+		return view!{}.into_any();
+	};
+	let toaster = expect_toaster();
+
+	let imapConnector = config.clone();
+	let toasterInner = toaster.clone();
+	let mailsCache = mailsClientCache.clone();
+	let viewContentFn = move |mailIdcontent:ImapMail| {
+		Mail::mail_view_content(imapConnector.get_untracked().imap.clone(), toasterInner, dialogManager, mailIdcontent, mailsCache);
+	};
+
+	let imapConnector = config.clone();
+	let mailsCache = mailsClientCache.clone();
+	let markViewFn = move |mailIdcontent:ImapMail| {
+		Mail::mail_mark_see(imapConnector.get_untracked().imap.clone(), toaster, mailIdcontent, mailsCache);
+	};
+
+	/*let refreshMail = self.config.clone();
+	let actualContentRefresh = self.mailContent.clone();
+	let testSinceFn = move |_| {
+		let refreshMail = refreshMail.clone();
+		let actualContentRefresh = actualContentRefresh.clone();
+		spawn_local(async move {
+			let _ = API_proxys_imap_getUnseeSince(refreshMail.get_untracked().imap.clone(),actualContentRefresh.get_untracked().lastUpdate).await;
+		});
+	};*/
+
+
+	view!{{move || {
+			let editMode = editMode.get();
+			if(editMode)
+			{
+				Mail::draw_config(config.clone(), mailsClientCache.clone(), update.clone())
+			}
+			else
+			{
+				let config = config.clone();
+				let mailsCache = mailsClientCache.clone();
+				/*
+					<button on:click={testFn}>MAIL</button>
+					<button on:click={testSinceFn}>MAIL SINCE</button>
+				 */
+				view!{
+					{draw_title_if_present(config.get().title.clone())}
+					<div class="module_rss_upper">
+						<table class="module_rss_table">{
+							let markVueCacheInner = mailsCache.clone();
+							let mails = mailsCache.get().mailsData.clone();
+							let mut mailsContent = mails.values().cloned().collect::<Vec<_>>();
+							mailsContent.sort_by(|a,b| a.date.cmp(&b.date).reverse());
+							mailsContent.iter().enumerate()
+								//.filter(|(num,_)| *num <= 10)
+								.map(|(_,mail)|{
+									let id = mail.uid;
+									let mailId = mail.clone();
+									let mailIdMark = mail.clone();
+									let viewContentFn = viewContentFn.clone();
+									let markViewFn = markViewFn.clone();
+									let markVueCacheInner = markVueCacheInner.clone();
+									view!{
+										<tr>
+											<td>{distant_time_simpler(mail.date)}</td>
+											<td class="mail_pointer alttext_upper" on:click={move |_| viewContentFn.clone()(mailId.clone())}>{mail.subject.clone()}{Mail::utils_mailOverlay(&mailId)}</td>
+											<td>{
+												if(mail.confirmVue)
+												{
+													view!{<i class="iconoir-mail-out-solid" on:click={move |_| markViewFn.clone()(mailIdMark.clone())}/>}.into_any()
+												}
+												else
+												{
+													view!{<i class="iconoir-mail-open" on:click={move |_| {
+														let markVueCacheInnerInner = markVueCacheInner.clone();
+														markVueCacheInner.update(|mailCache|{
+															if let Some(thismail) = mailCache.mailsData.get_mut(&(id as u64))
+															{
+																thismail.confirmVue = true;
+																Timeout::new(5000, move || {
+																        markVueCacheInnerInner.update(|mailCache|{
+																			if let Some(thismail) = mailCache.mailsData.get_mut(&(id as u64))
+																			{
+																				thismail.confirmVue = false;
+																			}
+																		});
+																    }
+																).forget();
+															}
+														});
+													}}/>}.into_any()
+												}
+											}</td>
+										</tr>
+									}
+								}).collect_view()
+							}
+						</table>
+				</div>}.into_any()
+			}
+		}}}.into_any()
 }

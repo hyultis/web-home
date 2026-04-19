@@ -1,12 +1,11 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use leptoaster::ToasterContext;
-use leptos::prelude::{ArcRwSignal, ReadUntracked, RwSignal, Update, WithUntracked};
-use leptos::reactive::spawn_local;
-use leptos_use::use_interval_fn;
+use leptos::prelude::{ArcRwSignal, ReadUntracked, Set, Update, WithUntracked};
+use leptos::reactive::{spawn_local_scoped};
 use leptos::leptos_dom::log;
-use leptos::callback::Callable;
-use crate::api::modules::{API_module_remove, API_modules_retrieve, API_modules_update, ModuleReturnRetrieve};
+use crate::api::modules::{API_module_remove, API_module_retrieve, API_modules_retrieve, API_modules_update, ModuleReturnRetrieve};
 use crate::api::modules::components::{ApiModulesID, ModuleContent, ModuleID};
 use crate::front::modules::components::{API_return_apply, ApiCall, Backable, Cacheable, ModuleName, PausableStocker, RefreshTime};
 use crate::front::modules::link::LinksHolder;
@@ -18,10 +17,15 @@ use crate::front::utils::toaster_helpers;
 use crate::front::utils::toaster_helpers::toastingErr;
 use crate::front::utils::users_data::UserData;
 
+thread_local! {
+    static MODULE_HOLDER_SINGLETON: RefCell<Option<ArcRwSignal<ModuleHolder>>> =
+        const { RefCell::new(None) };
+}
+
 pub struct ModuleHolder
 {
 	_links: LinksHolder,
-	_blocks: HashMap<ModuleID, RwSignal<ModulePositions<ModuleType>>>,
+	_blocks: HashMap<ModuleID, ArcRwSignal<ModulePositions<ModuleType>>>,
 	_crons: HashMap<ModuleID, PausableStocker>,
 	_moduleActions: Option<module_actions::ModuleActionFn>,
 	_blockNb: usize,
@@ -29,7 +33,14 @@ pub struct ModuleHolder
 
 impl ModuleHolder
 {
-	pub fn new() -> Self
+	pub fn getSingleton() -> ArcRwSignal<ModuleHolder> {
+		MODULE_HOLDER_SINGLETON.with(|slot| {
+			let mut slot = slot.borrow_mut();
+			slot.get_or_insert_with(|| ArcRwSignal::new(ModuleHolder::new())).clone()
+		})
+	}
+
+	fn new() -> Self
 	{
 		Self {
 			_links: LinksHolder::new(),
@@ -45,19 +56,12 @@ impl ModuleHolder
 		self._moduleActions = Some(ma);
 	}
 
-	pub fn reset(&mut self)
-	{
-		self._blocks = HashMap::new();
-		self._links = LinksHolder::new();
-		self._blockNb = 0;
-	}
-
 	fn network_apply(&mut self, mut toApply: API_return_apply,toaster: ToasterContext)
 	{
 		toApply.retrieve.into_iter().for_each(|f| f(self));
 		toApply.update.into_iter().for_each(|f| f(self));
 
-		self.module_refresh(toApply.moduleId.drain(..).collect(), toaster);
+		self.module_refresh(toApply.moduleIdToRefresh.drain(..).collect(), toaster);
 	}
 
 	pub fn network_deferredCall(moduleHolder: ArcRwSignal<ModuleHolder>, toaster: ToasterContext, apiCall: impl FnOnce(ArcRwSignal<ModuleHolder>) -> Option<ApiCall>, toastingSuccess: Option<AllFrontUIEnum>) -> impl Future<Output = ()>
@@ -234,47 +238,9 @@ impl ModuleHolder
 		};
 
 		for (moduleId, moduleResult) in apiReturnModules {
-			let ModuleReturnRetrieve::UPDATED(mut content) = moduleResult else {continue;};
-
-			Self::import_decrypt_content(&mut content);
-			apiReturn.moduleId.push(moduleId.clone());
-
-			if (content.typeModule == LinksHolder::MODULE_NAME)
-			{
-				let addReturnWork = move |moduleHolder: &mut ModuleHolder| {
-					moduleHolder._links.id_set(content.id.clone());
-					moduleHolder._links.import(content);
-				};
-				apiReturn.retrieve.push(Box::new(addReturnWork));
-				continue;
-			}
-
-			let addReturnWork = move |moduleHolder: &mut ModuleHolder| {
-				if let Some(foundModule) = moduleHolder._blocks.get_mut(&moduleId)
-				{
-					foundModule.update(|module| module.import(content.clone()));
-				}
-				else
-				{
-					let Some(moduleType) = ModuleType::newFromModuleContent(&content) else {return;};
-					let thisModule = ModulePositions::newFromModuleContent(content, moduleType);
-					moduleHolder._blocks.insert(moduleId.clone(), RwSignal::new(thisModule));
-				}
-
-				let refreshTime = moduleHolder._blocks.get_mut(&moduleId).unwrap().with_untracked(|module| module.inner().refresh_time());
-				if let Some(actions) = &moduleHolder._moduleActions
-				{
-					Self::add_cron(
-						refreshTime,
-						moduleId.clone(),
-						&mut moduleHolder._crons,
-						actions.clone(),
-					);
-				}
-			};
-			apiReturn.retrieve.push(Box::new(addReturnWork));
-
-
+			let ModuleReturnRetrieve::UPDATED(content) = moduleResult else {continue;};
+			apiReturn.moduleIdToRefresh.push(moduleId.clone());
+			Self::module_inner_retrieve(&mut apiReturn,content, moduleId);
 		}
 
 		return apiReturn;
@@ -290,27 +256,95 @@ impl ModuleHolder
 
 	pub fn network_module_retrieve_caller(moduleHolder: ArcRwSignal<ModuleHolder>, module: ModuleID, forceUpdate: bool) -> Option<ApiCall>
 	{
-		return Self::network_deferredCall_inner(moduleHolder, move |holder| holder.network_module_retrieve_prepare(module.clone(),forceUpdate), Self::network_modules_retrieve_async);
+		return Self::network_deferredCall_inner(moduleHolder, move |holder| holder.network_module_retrieve_prepare(module.clone(),forceUpdate), Self::network_module_retrieve_async);
 	}
 
 	fn network_module_retrieve_prepare(
 		&self,
 		moduleId: ModuleID,
 		forceUpdate: bool,
-	) -> Vec<ApiModulesID>
+	) -> Option<ApiModulesID>
 	{
-		let mut moduleToRetrieveData = vec![];
 		for (key, oneModule) in self._blocks.iter()
 			.filter(|(moduleIdSearch, _)| *moduleIdSearch == &moduleId)
 		{
 			let (cacheMustUpdate,cacheTime) = oneModule.with_untracked(|module| (module.inner().cache_mustUpdate(),module.inner().cache_time()));
+			log!("moduleIdSearch {} forceUpdate {}, cacheMustUpdate {}",key.id, forceUpdate, cacheMustUpdate);
 			if (forceUpdate || cacheMustUpdate)
 			{
-				moduleToRetrieveData.push(ApiModulesID{ key: key.clone(), timestamp: cacheTime });
+				return Some(ApiModulesID{ key: key.clone(), timestamp: cacheTime });
 			}
 		}
 
-		return moduleToRetrieveData;
+		return None;
+	}
+
+	// do not apply auto module refresh
+	async fn network_module_retrieve_async(login: String, moduleToRetrieveRaw: Option<ApiModulesID>) -> API_return_apply
+	{
+		let Some(moduleToRetrieve) = moduleToRetrieveRaw else {return API_return_apply::default();};
+
+		let mut apiReturn = API_return_apply::default();
+
+		let moduleId = moduleToRetrieve.key.clone();
+		let moduleResult = match API_module_retrieve(login.clone(), moduleToRetrieve).await
+		{
+			Ok(r) => r,
+			Err(err) => {
+				apiReturn.error.push(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+				return apiReturn;
+			}
+		};
+
+		let ModuleReturnRetrieve::UPDATED(content) = moduleResult else {return apiReturn};
+		Self::module_inner_retrieve(&mut apiReturn,content, moduleId);
+		return apiReturn;
+	}
+
+	fn module_inner_retrieve(apiReturn: &mut API_return_apply, mut content: ModuleContent, moduleId: ModuleID)
+	{
+		Self::import_decrypt_content(&mut content);
+
+		if (content.typeModule == LinksHolder::MODULE_NAME)
+		{
+			let addReturnWork = move |moduleHolder: &mut ModuleHolder| {
+				moduleHolder._links.id_set(content.id.clone());
+				moduleHolder._links.import(content);
+			};
+			apiReturn.retrieve.push(Box::new(addReturnWork));
+			return;
+		}
+
+		let addReturnWork = move |moduleHolder: &mut ModuleHolder| {
+			log!("return of async module {}",content.id.id);
+			if let Some(foundModule) = moduleHolder._blocks.get_mut(&moduleId)
+			{
+				foundModule.update(|module| module.import(content.clone()));
+			}
+			else
+			{
+				let Some(moduleType) = ModuleType::newFromModuleContent(&content) else {return;};
+				let thisModule = ModulePositions::newFromModuleContent(content, moduleType);
+				if let Some(existing) = moduleHolder._blocks.get_mut(&moduleId)
+				{
+					existing.set(thisModule);
+				}
+				else
+				{moduleHolder._blocks.insert(moduleId.clone(), ArcRwSignal::new(thisModule));}
+			}
+
+			let refreshTime = moduleHolder._blocks.get_mut(&moduleId).unwrap().with_untracked(|module| module.inner().refresh_time());
+			if let Some(actions) = &moduleHolder._moduleActions
+			{
+				Self::add_cron(
+					refreshTime,
+					moduleId.clone(),
+					&mut moduleHolder._crons,
+					actions.clone(),
+				);
+			}
+		};
+		apiReturn.retrieve.push(Box::new(addReturnWork));
 	}
 
 	////////////////////////////////////////
@@ -341,6 +375,7 @@ impl ModuleHolder
 		};
 
 		let addReturnWork = move |moduleHolder: &mut ModuleHolder| {
+			 moduleHolder._crons.remove(&moduleToRetrieve);
 			moduleHolder._blocks.remove(&moduleToRetrieve);
 		};
 		apiReturn.retrieve.push(Box::new(addReturnWork));
@@ -410,7 +445,7 @@ impl ModuleHolder
 			}
 		}
 
-		spawn_local(async move {
+		spawn_local_scoped(async move {
 			for oneFutur in allBoxedFutur {
 				oneFutur.await;
 			}
@@ -424,51 +459,32 @@ impl ModuleHolder
 		moduleActions: module_actions::ModuleActionFn,
 	)
 	{
-		let refreshTime = match refreshTimeRaw
+		let timeMinute = match refreshTimeRaw
 		{
-			RefreshTime::NONE => None,
-			RefreshTime::MINUTES(i) => Some(i as u64),
-			RefreshTime::HOURS(h) => Some(h as u64 * 60),
+			RefreshTime::NONE => {
+				crons.remove(&moduleId);
+				return;
+			},
+			RefreshTime::MINUTES(i) => i as u32,
+			RefreshTime::HOURS(h) => h as u32 * 60,
 		};
-
-		let Some(timeMinute) = refreshTime else {return;};
 
 		let timeMillisecond = timeMinute * 60 * 1000;
 
-		if let Some(cronModule) = crons.get_mut(&moduleId)
-		{
-			cronModule
-				.interval
-				.update(|oldInterval| *oldInterval = timeMillisecond);
-			(cronModule.resume)();
+
+
+		if let Some(cron) = crons.get_mut(&moduleId) {
+			cron.set_interval(timeMillisecond);
+			return;
 		}
-		else
-		{
-			let intervalS = RwSignal::new(timeMillisecond);
-			let moduleNameInner = moduleId.clone();
-			let moduleActionsInner = moduleActions.clone();
-			let pausable = use_interval_fn(
-				move || {
-					log!(
-						"cron module {:?} refresh to {}",
-						moduleNameInner,
-						timeMillisecond
-					);
-					moduleActionsInner.refreshFn.run(moduleNameInner.clone());
-				},
-				intervalS.clone(),
-			);
-			let pause = pausable.pause;
-			let resume = pausable.resume;
-			crons.insert(
-				moduleId.clone(),
-				PausableStocker {
-					interval: intervalS,
-					pause: Arc::new(move || pause()),
-					resume: Arc::new(move || resume()),
-				},
-			);
-		}
+
+		let refresh_fn = moduleActions.refreshFn.clone();
+		let tick_module_id = moduleId.clone();
+		let tick = Arc::new(move || {
+			(refresh_fn)(tick_module_id.clone());
+		});
+
+		crons.insert(moduleId, PausableStocker::new(timeMillisecond, tick));
 
 	}
 
@@ -505,12 +521,12 @@ impl ModuleHolder
 		return &mut self._links;
 	}
 
-	pub fn blocks_get(&self) -> &HashMap<ModuleID, RwSignal<ModulePositions<ModuleType>>>
+	pub fn blocks_get(&self) -> &HashMap<ModuleID, ArcRwSignal<ModulePositions<ModuleType>>>
 	{
 		return &self._blocks;
 	}
 
-	pub fn blocks_view(&self) -> Vec<(ModuleID, RwSignal<ModulePositions<ModuleType>>)> {
+	pub fn blocks_view(&self) -> Vec<(ModuleID, ArcRwSignal<ModulePositions<ModuleType>>)> {
 		self._blocks
 			.iter()
 			.map(|(id, module)| (id.clone(), module.clone()))
@@ -520,7 +536,7 @@ impl ModuleHolder
 	pub fn blocks_insert(&mut self, newmodule: ModulePositions<ModuleType>)
 	{
 		newmodule.depth_set(self._blockNb as u32);
-		self._blocks.insert(ModuleID::new(), RwSignal::new(newmodule));
+		self._blocks.insert(ModuleID::new(), ArcRwSignal::new(newmodule));
 		self._blockNb += 1;
 	}
 

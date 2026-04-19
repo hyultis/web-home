@@ -8,16 +8,16 @@ use crate::front::utils::toaster_helpers::{toastingSuccess};
 use crate::front::utils::users_data::UserData;
 use crate::{HWebTrace};
 use leptoaster::{expect_toaster, ToasterContext};
-use leptos::task::spawn_local;
 use leptos::ev::MouseEvent;
 use leptos::prelude::ElementChild;
 use leptos::prelude::{
-	use_context, ArcRwSignal, Callback, ClassAttribute, Effect, IntoAny, OnAttribute, Read,
+	use_context, ArcRwSignal, Callback, ClassAttribute, Effect, IntoAny, OnAttribute,
 	RenderHtml, RwSignal, Set, Update,
 };
 use leptos::{component, island, view, IntoView};
 use leptos_router::{hooks, NavigateOptions};
 use leptos::logging::log;
+use leptos::reactive::spawn_local_scoped;
 use leptos_use::use_interval_fn;
 use strum::IntoEnumIterator;
 use crate::api::modules::components::ModuleID;
@@ -27,11 +27,12 @@ use crate::front::modules::module_type::{ModuleType, ModuleTypeDiscriminants, St
 // https://iconoir.com/
 // plus
 
+
 #[island]
 pub fn Home() -> impl IntoView
 {
 	let editMode = RwSignal::new(false);
-	let moduleContent = ArcRwSignal::new(ModuleHolder::new());
+	let moduleContent = ModuleHolder::getSingleton();
 	let Some(dialogManager) = use_context::<DialogManager>() else {
 		HWebTrace!("cannot get dialogManager in home");
 		panic!("cannot get dialogManager in home");
@@ -70,7 +71,7 @@ pub fn Home() -> impl IntoView
 	);
 
 	// pre init ModuleHolder
-	let moduleActions = ModuleActionFn::new(moduleContent.clone(),toaster.clone());
+	let moduleActions = ModuleActionFn::new(toaster.clone());
 	let innerModuleActions = moduleActions.clone();
 	moduleContent.update(|modules|{
 		modules.moduleActions_set(innerModuleActions);
@@ -86,18 +87,16 @@ pub fn Home() -> impl IntoView
 		}
 		is_initialized.set(true);
 
-		spawn_local(ModuleHolder::network_deferredCall(moduleContentInnerInitialLoad.clone(), toasterInnerInitialLoad.clone(), |holder|ModuleHolder::network_modules_retrieve_caller(holder,true),None));
+		spawn_local_scoped(ModuleHolder::network_deferredCall(moduleContentInnerInitialLoad.clone(), toasterInnerInitialLoad.clone(), |holder|ModuleHolder::network_modules_retrieve_caller(holder,true),None));
 	});
 
 	let editModeValidateFn = editMode_validate(
-		moduleContent.clone(),
 		editMode.clone(),
 		toaster.clone(),
 		dialogManager.clone(),
 	);
 
 	let editModeCancelFn = editMode_cancel(
-		moduleContent.clone(),
 		editMode.clone(),
 		toaster.clone(),
 		dialogManager.clone(),
@@ -111,7 +110,7 @@ pub fn Home() -> impl IntoView
 		});
 	};
 
-	let editModeAddModuleFn = editMode_AddBlock(moduleContent.clone(), dialogManager.clone());
+	let editModeAddModuleFn = editMode_AddBlock(dialogManager.clone());
 
 	// disconnect func
 	let toasterInner = toaster.clone();
@@ -123,17 +122,15 @@ pub fn Home() -> impl IntoView
 		dialogManager.open(dialogContent);
 	};
 
-	let moduleContentInnerView = moduleContent.clone();
-	let moduleContentInnerModuleView = moduleContent.clone();
 	let moduleActionsInnerModuleView = moduleActions.clone();
 	view! {
 		<div class="home_body">
 			<div class="header">
 				<div class="left">
 					{move || {
-						return moduleContentInnerView.clone().with(|binding| {
+						return ModuleHolder::getSingleton().with(|binding| {
 							let tmp = binding.links_get();
-							tmp.draw(editMode,moduleActionsInnerModuleView.clone(),tmp.id_get())
+							tmp.draw(editMode,moduleActionsInnerModuleView.clone(),tmp.id_get()).run()
 						});
 					}}
 				</div>
@@ -144,7 +141,7 @@ pub fn Home() -> impl IntoView
 						let editModeCancelFn = editModeCancelFn.clone();
 						let editModeActivateFn = editModeActivateFn.clone();
 						let editModeAddModuleFn = editModeAddModuleFn.clone();
-						if *editMode.read()
+						if editMode.get()
 						{
 							view!{
 								<i class="iconoir-plus-circle" on:click=editModeAddModuleFn></i>
@@ -162,7 +159,7 @@ pub fn Home() -> impl IntoView
 			</div>
 			<div class="modules">
 				<For
-					each=move || moduleContentInnerModuleView.with(|holder| holder.blocks_view())
+					each=move || ModuleHolder::getSingleton().with(|holder| holder.blocks_view())
 					key=|(id,_)| id.clone()
 					children=move |(moduleId, module)| {
 						        view! {
@@ -181,7 +178,7 @@ pub fn Home() -> impl IntoView
 }
 
 #[component]
-fn ModuleView(module: RwSignal<ModulePositions<ModuleType>>, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, moduleId: ModuleID) -> impl IntoView {
+fn ModuleView(module: ArcRwSignal<ModulePositions<ModuleType>>, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, moduleId: ModuleID) -> impl IntoView {
 	let moduleActionsInnerModuleView = moduleActions.clone();
 	return view! {
         {move || {
@@ -193,25 +190,23 @@ fn ModuleView(module: RwSignal<ModulePositions<ModuleType>>, editMode: RwSignal<
 }
 
 fn editMode_cancel(
-	moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 	editModeInnerValidate: RwSignal<bool>,
 	toasterInnerValidate: ToasterContext,
 	dialogManager: DialogManager,
 ) -> impl Fn(MouseEvent) + Clone
 {
 	return move |_| {
-		let moduleContentInnerValidate = moduleContentInnerValidate.clone();
+		let moduleContentInnerValidate = ModuleHolder::getSingleton();
 		let editModeInnerValidate = editModeInnerValidate.clone();
 		let toasterInnerValidate = toasterInnerValidate.clone();
 
 		let dialogContent = DialogData::new()
 			.setTitle(AllFrontUIEnum::HOME_CHANGE_CANCEL)
 			.setOnValidate(Callback::new(move |_| {
-				let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 				let editModeInnerValidate = editModeInnerValidate.clone();
 				let toasterInnerValidate = toasterInnerValidate.clone();
-				spawn_local(async move {
-					ModuleHolder::network_deferredCall(moduleContentInnerValidate.clone(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_modules_retrieve_caller(holder,false), Some(AllFrontUIEnum::HOME_CHANGE_CANCEL)).await;
+				spawn_local_scoped(async move {
+					ModuleHolder::network_deferredCall(ModuleHolder::getSingleton(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_modules_retrieve_caller(holder,false), Some(AllFrontUIEnum::HOME_CHANGE_CANCEL)).await;
 					editModeInnerValidate.update(|content| {
 						*content = false;
 					});
@@ -224,25 +219,23 @@ fn editMode_cancel(
 }
 
 fn editMode_validate(
-	moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 	editModeInnerValidate: RwSignal<bool>,
 	toasterInnerValidate: ToasterContext,
 	dialogManager: DialogManager,
 ) -> impl Fn(MouseEvent) + Clone
 {
 	return move |_| {
-		let moduleContentInnerValidate = moduleContentInnerValidate.clone();
+		let moduleContentInnerValidate = ModuleHolder::getSingleton();
 		let editModeInnerValidate = editModeInnerValidate.clone();
 		let toasterInnerValidate = toasterInnerValidate.clone();
 
 		let dialogContent = DialogData::new()
 			.setTitle(AllFrontUIEnum::HOME_CHANGE_OK)
 			.setOnValidate(Callback::new(move |_| {
-				let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 				let editModeInnerValidate = editModeInnerValidate.clone();
 				let toasterInnerValidate = toasterInnerValidate.clone();
-				spawn_local(async move {
-					ModuleHolder::network_deferredCall(moduleContentInnerValidate.clone(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_modules_update_caller(holder), Some(AllFrontUIEnum::HOME_CHANGE_OK)).await;
+				spawn_local_scoped(async move {
+					ModuleHolder::network_deferredCall(ModuleHolder::getSingleton(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_modules_update_caller(holder), Some(AllFrontUIEnum::HOME_CHANGE_OK)).await;
 					editModeInnerValidate.update(|content| {
 						*content = false;
 					});
@@ -254,14 +247,13 @@ fn editMode_validate(
 	};
 }
 
-fn editMode_AddBlock(moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
-                     dialogManager: DialogManager) -> impl Fn(MouseEvent) + Clone
+fn editMode_AddBlock(dialogManager: DialogManager) -> impl Fn(MouseEvent) + Clone
 {
 	return move |_| {
 		let selectedType = ArcRwSignal::new("".to_string());
 
 		let selectedTypeInnerView = selectedType.clone();
-		let moduleContentInnerValidate = moduleContentInnerValidate.clone();
+		let moduleContentInnerValidate = ModuleHolder::getSingleton();
 		let dialogContent = DialogData::new()
 			.setTitle(AllFrontUIEnum::HOME_CHANGE_NEW)
 			.setBody(move || {
@@ -291,10 +283,9 @@ fn editMode_AddBlock(moduleContentInnerValidate: ArcRwSignal<ModuleHolder>,
 				}.into_any()
 			})
 			.setOnValidate(Callback::new(move |_| {
-				let moduleContentInnerValidate = moduleContentInnerValidate.clone();
 				let selectedType = selectedType.clone().get();
 
-				moduleContentInnerValidate.update(|modules| {
+				ModuleHolder::getSingleton().update(|modules| {
 
 					let Some(moduleType) = StringToModuleType(selectedType) else {return;};
 					modules.blocks_insert(ModulePositions::new(moduleType));
@@ -312,7 +303,7 @@ fn user_disconnected(navigate: impl Fn(&str, NavigateOptions) + Clone + 'static,
 	return move |_| {
 		let navigate = navigate.clone();
 		let toaster = toaster.clone();
-		spawn_local(async move {
+		spawn_local_scoped(async move {
 			if let Some(mut userData) = userData.get_untracked() {
 				userData.login_disconnect().await;
 				setUserData.set(None);

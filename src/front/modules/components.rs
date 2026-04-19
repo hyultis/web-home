@@ -1,8 +1,9 @@
 use std::pin::Pin;
 use std::sync::Arc;
+use gloo_timers::callback::Interval;
 use leptoaster::ToasterContext;
 use leptos::ev::Targeted;
-use leptos::prelude::OnTargetAttribute;
+use leptos::prelude::{OnTargetAttribute, ViewFn};
 use leptos::prelude::{ElementChild, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, IntoAny, PropAttribute, RwSignal, StyleAttribute};
 use leptos::view;
@@ -93,7 +94,7 @@ pub trait ModuleName
 pub trait Backable
 {
 	fn module_name(&self) -> String;
-	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> AnyView;
+	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> ViewFn;
 
 	fn refresh_time(&self) -> RefreshTime;
 	fn refresh(&self, moduleActions: ModuleActionFn, moduleId:ModuleID, toaster: ToasterContext) -> Option<BoxFuture>;
@@ -101,11 +102,14 @@ pub trait Backable
 	fn export(&self) -> ModuleContent;
 	fn import(&mut self, import: ModuleContent);
 
+	fn isOlderThan(&self, other: &ModuleContent) -> bool;
+
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> where Self: Sized;
 
 	fn size(&self) -> ModuleSizeContrainte;
 }
 
+#[derive(Clone)]
 pub struct ModuleSizeContrainte
 {
 	pub x_min: Option<u32>,
@@ -300,12 +304,44 @@ pub enum RefreshTime
 	HOURS(u8),
 }
 
-#[derive(Clone)]
-pub struct PausableStocker
-{
-	pub interval: RwSignal<u64>,
-	pub pause: Arc<dyn Fn() + Send + Sync>,
-	pub resume: Arc<dyn Fn() + Send + Sync>,
+pub struct PausableStocker {
+	every_ms: u32,
+	on_tick: Arc<dyn Fn() + Send + Sync + 'static>,
+	handle: Option<Interval>,
+}
+
+impl PausableStocker {
+	pub fn new(every_ms: u32, on_tick: Arc<dyn Fn() + Send + Sync + 'static>) -> Self {
+		let mut out = Self {
+			every_ms,
+			on_tick,
+			handle: None,
+		};
+		out.resume();
+		out
+	}
+
+	pub fn pause(&mut self) {
+		self.handle.take();
+	}
+
+	pub fn resume(&mut self) {
+		if self.handle.is_some() {
+			return;
+		}
+
+		let every_ms = self.every_ms;
+		let on_tick = self.on_tick.clone();
+		self.handle = Some(Interval::new(every_ms, move || {
+			(on_tick)();
+		}));
+	}
+
+	pub fn set_interval(&mut self, every_ms: u32) {
+		self.every_ms = every_ms;
+		self.pause();
+		self.resume();
+	}
 }
 
 pub struct API_return_apply
@@ -313,7 +349,7 @@ pub struct API_return_apply
 	pub retrieve: Vec<Box<dyn FnOnce(&mut ModuleHolder)>>, // action on ModuleHolder, after all api call
 	pub update: Vec<Box<dyn FnOnce(&mut ModuleHolder)>>, // action on ModuleHolder, after all api call
 	pub error: Vec<AllFrontErrorEnum>, // error to be showed, after all api call
-	pub moduleId: Vec<ModuleID>, // moduleId updated that need a refresh, after all api call
+	pub moduleIdToRefresh: Vec<ModuleID>, // moduleId updated that need a refresh, after all api call
 }
 
 impl Default for API_return_apply
@@ -323,7 +359,7 @@ impl Default for API_return_apply
 			retrieve: vec![],
 			update: vec![],
 			error: vec![],
-			moduleId: vec![],
+			moduleIdToRefresh: vec![],
 		}
 	}
 }

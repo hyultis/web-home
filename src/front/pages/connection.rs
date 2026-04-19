@@ -3,7 +3,7 @@ use leptos::prelude::{BindAttribute, ClassAttribute, GetUntracked, IntoAny, Set,
 use leptos::prelude::{signal, ElementChild, Get};
 use leptos::prelude::{OnAttribute, RenderHtml};
 use leptos::{island, view, IntoView};
-use leptos::task::spawn_local;
+use leptos::reactive::spawn_local_scoped;
 use leptos_router::components::A;
 use leptos_router::hooks;
 use crate::front::utils::all_front_enum::AllFrontLoginEnum;
@@ -25,7 +25,7 @@ pub fn Connection() -> impl IntoView {
 		let navigate = hooks::use_navigate();
 		let toaster = expect_toaster();
 
-		spawn_local(async move {
+		spawn_local_scoped(async move {
 			let (userData, setUserData) = UserData::cookie_signalGet();
 			let mut userData = userData.get_untracked().unwrap_or(UserData::new(&"EN".to_string()));
 			if let Some(reason) = userData.login_set(login, pwd).await

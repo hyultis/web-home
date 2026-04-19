@@ -1,5 +1,5 @@
 use leptoaster::ToasterContext;
-use leptos::prelude::{AnyView, ArcRwSignal, RwSignal};
+use leptos::prelude::{ArcRwSignal, RwSignal, ViewFn};
 use strum_macros::EnumDiscriminants;
 use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::modules::components::{moduleContent, Backable, BoxFuture, Cache, Cacheable, ModuleName, ModuleSizeContrainte, RefreshTime};
@@ -58,7 +58,7 @@ impl Backable for ModuleType {
 		return self.intoBackable().module_name();
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> AnyView {
+	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> ViewFn {
 		return self.intoBackable().draw(editMode,moduleActions,moduleId);
 	}
 
@@ -76,6 +76,16 @@ impl Backable for ModuleType {
 
 	fn import(&mut self, import: ModuleContent) {
 		return self.intoBackableMut().import(import);
+	}
+
+	fn isOlderThan(&self, other: &ModuleContent) -> bool
+	{
+		return match self {
+			ModuleType::RSS(x) => x.isOlderThan(other),
+			ModuleType::TODO(x) => x.isOlderThan(other),
+			ModuleType::MAIL(x) => x.isOlderThan(other),
+			ModuleType::WEATHER(x) => x.isOlderThan(other),
+		}
 	}
 
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> {

@@ -4,7 +4,7 @@ use leptos::prelude::{ElementChild, GetUntracked, IntoAny, Transition};
 use leptos::prelude::BindAttribute;
 use leptos::prelude::{signal, ClassAttribute, Get, OnAttribute, RenderHtml, Set};
 use leptos::{island, view, IntoView};
-use leptos::task::spawn_local;
+use leptos::reactive::spawn_local_scoped;
 use leptos_router::components::A;
 use leptos_router::*;
 use crate::front::utils::all_front_enum::AllFrontLoginEnum;
@@ -31,7 +31,7 @@ pub fn Inscription() -> impl IntoView {
 		let toaster = expect_toaster();
 
 
-		spawn_local(async move {
+		spawn_local_scoped(async move {
 			let allowRegistration = crate::api::ALLOW_REGISTRATION.get().map(|ab| ab.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false);
 			if(!allowRegistration) {
 				toastingErr(&toaster,AllFrontLoginEnum::SIGN_DISABLED).await;

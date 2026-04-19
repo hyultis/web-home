@@ -3,11 +3,11 @@ use leptoaster::{provide_toaster, Toaster};
 use leptos::view;
 use leptos::IntoView;
 use leptos::prelude::*;
+use leptos::reactive::spawn_local_scoped;
 use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title};
 use leptos_router::components::{Route, Router, Routes, A};
 use leptos_router::{hooks, path};
 use leptos_use::use_locales;
-use leptos::task::spawn_local;
 use crate::api::{ALLOW_REGISTRATION, IS_TRACE_FRONT_LOG};
 use crate::front::pages::home::Home;
 use crate::front::pages::connection::Connection;
@@ -70,7 +70,7 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 
 		// if user is connected, he directly go to is home page
 		let navigate = hooks::use_navigate();
-		spawn_local(async move {
+		spawn_local_scoped(async move {
 			if let Some(userData) = &*userDataSignal.read_untracked()
 			{
 				if(userData.login_isConnected()) {

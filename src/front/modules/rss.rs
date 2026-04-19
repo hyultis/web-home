@@ -2,8 +2,9 @@ use leptos::prelude::{ClassAttribute, CollectView, ElementChild};
 use feed_rs::model::{Feed, Link, Text};
 use feed_rs::parser;
 use leptoaster::{ToasterContext};
+use leptos::children::ViewFn;
 use leptos::prelude::{AnyView, ArcRwSignal, Get, GetUntracked, IntoAny, RwSignal, Update};
-use leptos::view;
+use leptos::{component, view, IntoView};
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::api::proxys::wget::{API_proxys_wget};
@@ -142,69 +143,16 @@ impl Backable for Rss
 		Rss::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, _: ModuleID) -> AnyView
+	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, _: ModuleID) -> ViewFn
 	{
-		view! {{
-			if(editMode.get())
-			{
-				let mut titleF = FieldHelper::new(&self.config,&self._update,"MODULE_TITLE_CONF",
-					|d| d.get().title,
-					|ev,inner| inner.title = ev.target().value());
-				titleF.setFullSize(true);
-				let mut linkF = FieldHelper::new(&self.config,&self._update,"MODULE_RSS_LINK",
-					|d| d.get().link,
-					|ev,inner| inner.link = ev.target().value());
-				linkF.setFullSize(true);
-				let maxLineF = FieldHelper::new(&self.config,&self._update,"MODULE_RSS_MAXLINE",
-					|d| d.get().maxline.to_string(),
-					|ev,inner| inner.maxline = ev.target().value().parse::<u8>().unwrap_or(10));
-				
-				view!{
-					{titleF.draw()}
-					{linkF.draw()}
-					{maxLineF.draw()}
-					<Translate key="MODULE_RSS_DEMO"/><br/>
-					<table class="module_rss_table"><tr>
-						<td>{"0d"}</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse nulla nisi, faucibus ut eros non, porttitor posuere ante. Nunc faucibus sagittis sodales. Ut consectetur erat urna, id posuere nibh accumsan at. Praesent tincidunt eget lorem in elementum. Suspendisse varius neque sed magna efficitur, vitae varius arcu volutpat.</td>
-					</tr></table>
-				}.into_any()
-			}
-			else
-			{
-				view!{{
-					let config = self.config.clone();
-					self.rssContent.get().map(|(_,mut rssContent)|{
-
-					view!{
-						<>
-						<h2>{Rss::utils_title(config.get().title,rssContent.title)}{Self::utils_desc(&rssContent.description)}{Self::utils_link(rssContent.links)}</h2>
-						<div class="module_rss_upper">
-						<table class="module_rss_table">
-						{   rssContent.entries.sort_by(|a,b| a.published.cmp(&b.published).reverse());
-							rssContent.entries.iter().enumerate()
-							.filter(|(num,_)| *num <= config.get().maxline as usize)
-							.map(|(_,entry)|{
-								if let Some(link) = &entry.links.first() && let Some(title) = &entry.title
-								{
-									view!{
-										<tr>
-											<td>{distant_time_simpler(entry.published.clone().unwrap_or_default().timestamp())}</td>
-											<td><a href={link.href.clone()} rel="noopener noreferrer nofollow" target="_blank">{title.content.clone()}</a></td>
-										</tr>
-									}.into_any()
-								}
-								else {view!{}.into_any()}
-							}).collect_view()
-						}
-						</table>
-						</div>
-						</>
-					}.into_any()
-				})
-				}
-				}.into_any()
-			}
-		}}.into_any()
+		let configInner = self.config.clone();
+		let contentInner = self.rssContent.clone();
+		let updateInner = self._update.clone();
+		ViewFn::from(move || {
+			view! {
+				<RssDraw config=configInner.clone() content=contentInner.clone() update=updateInner.clone() editMode=editMode/>
+			}.into_any()
+		})
 	}
 
 	fn refresh_time(&self) -> RefreshTime {
@@ -246,6 +194,11 @@ impl Backable for Rss
 		});
 	}
 
+	fn isOlderThan(&self, other: &ModuleContent) -> bool
+	{
+		return other.timestamp > self._update.get_untracked().get();
+	}
+
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> {
 		let Ok(content): Result<RssConfig,_> = serde_json::from_str(&from.content) else {return None};
 		Some(Self {
@@ -259,4 +212,74 @@ impl Backable for Rss
 	fn size(&self) -> ModuleSizeContrainte {
 		ModuleSizeContrainte::default()
 	}
+}
+
+#[component]
+fn RssDraw(config: ArcRwSignal<RssConfig>,
+           content: ArcRwSignal<Option<(u64,Feed)>>,
+           update: ArcRwSignal<Cache>,
+           editMode: RwSignal<bool>) -> impl IntoView
+{
+	view! {{move || {
+		let editMode = editMode.get();
+			if editMode
+			{
+				let mut titleF = FieldHelper::new(&config,&update,"MODULE_TITLE_CONF",
+					|d| d.get().title,
+					|ev,inner| inner.title = ev.target().value());
+				titleF.setFullSize(true);
+				let mut linkF = FieldHelper::new(&config,&update,"MODULE_RSS_LINK",
+					|d| d.get().link,
+					|ev,inner| inner.link = ev.target().value());
+				linkF.setFullSize(true);
+				let maxLineF = FieldHelper::new(&config,&update,"MODULE_RSS_MAXLINE",
+					|d| d.get().maxline.to_string(),
+					|ev,inner| inner.maxline = ev.target().value().parse::<u8>().unwrap_or(10));
+
+				view!{
+					{titleF.draw()}
+					{linkF.draw()}
+					{maxLineF.draw()}
+					<Translate key="MODULE_RSS_DEMO"/><br/>
+					<table class="module_rss_table"><tr>
+						<td>{"0d"}</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse nulla nisi, faucibus ut eros non, porttitor posuere ante. Nunc faucibus sagittis sodales. Ut consectetur erat urna, id posuere nibh accumsan at. Praesent tincidunt eget lorem in elementum. Suspendisse varius neque sed magna efficitur, vitae varius arcu volutpat.</td>
+					</tr></table>
+				}.into_any()
+			}
+			else
+			{
+				view!{{
+					let config = config.clone();
+					content.get().map(|(_,mut rssContent)|{
+
+					view!{
+						<>
+						<h2>{Rss::utils_title(config.get().title,rssContent.title)}{Rss::utils_desc(&rssContent.description)}{Rss::utils_link(rssContent.links)}</h2>
+						<div class="module_rss_upper">
+						<table class="module_rss_table">
+						{   rssContent.entries.sort_by(|a,b| a.published.cmp(&b.published).reverse());
+							rssContent.entries.iter().enumerate()
+							.filter(|(num,_)| *num <= config.get().maxline as usize)
+							.map(|(_,entry)|{
+								if let Some(link) = &entry.links.first() && let Some(title) = &entry.title
+								{
+									view!{
+										<tr>
+											<td>{distant_time_simpler(entry.published.clone().unwrap_or_default().timestamp())}</td>
+											<td><a href={link.href.clone()} rel="noopener noreferrer nofollow" target="_blank">{title.content.clone()}</a></td>
+										</tr>
+									}.into_any()
+								}
+								else {view!{}.into_any()}
+							}).collect_view()
+						}
+						</table>
+						</div>
+						</>
+					}.into_any()
+				})
+				}
+				}.into_any()
+			}
+		}}}.into_any()
 }

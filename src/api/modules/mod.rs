@@ -79,15 +79,17 @@ pub async fn API_module_retrieve(generatedId: String, moduleData: ApiModulesID) 
 {
 	use crate::api::login::user_back::UserBackHelper;
 	use crate::api::modules::components::ModuleErrors;
+	use Htrace::HTrace;
+
 	let config = UserBackHelper::getUserConfig(generatedId,false).map_err(|err| ServerFnError::new(format!("{:?}",err)))?;
-	let mut returning = HashMap::new();
 
 	let mut content = ModuleContent::newFromName(&moduleData.key);
 	match content.retrieve(&config) {
 		Ok(_) => {
+			HTrace!("API_module_retrieve timestamp {} > {} = {}",content.timestamp,moduleData.timestamp,content.timestamp > moduleData.timestamp);
 			if(content.timestamp > moduleData.timestamp)
 			{
-				returning.insert(moduleData.key, ModuleReturnRetrieve::UPDATED(content));
+				return Ok(ModuleReturnRetrieve::UPDATED(content));
 			}
 		}
 		Err(ModuleErrors::Empty) => {},

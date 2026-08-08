@@ -1,119 +1,55 @@
 # AGENTS.md
 
-## Role
+## Projet
 
-Tu travailles sur un projet de jeu en Rust.
+WebHome est une page d'accueil web personnalisable developpee en Rust.
 
-Ton objectif n'est pas seulement de produire du code qui fonctionne localement, mais de l'integrer proprement dans l'architecture existante.
+Le projet utilise Leptos pour le rendu SSR et l'hydratation WASM, Axum pour le serveur HTTP, et des modules configurables pour afficher notamment des liens, des notes, des flux RSS, la meteo et des mails.
 
-Ne genere pas du code isole qui repond uniquement a la demande immediate. Privilegie les modules de domaine coherents, les `struct`, `enum`, `trait`, blocs `impl`, et les responsabilites explicites.
+Le developpement de WebHome assume explicitement l'utilisation d'agents IA. Ce fichier est volontairement versionne pour fournir un point d'entree public aux agents et aux contributeurs.
 
-## Ordre de lecture obligatoire
+## Objectif
 
-Avant toute session utile, lis les fichiers dans l'ordre defini par `ia_workflows/README.md`.
+Une modification doit s'integrer proprement dans l'architecture existante, pas seulement fonctionner localement.
 
-En l'absence d'indication plus precise, lis au minimum `ia_workflows/README.md` puis applique son ordre de lecture.
+Avant d'ajouter du code, identifie le domaine concerne, le proprietaire logique du comportement et la frontiere d'execution touchee : serveur SSR, navigateur WASM ou code partage.
 
-## Autorite des regles existantes
+Evite le code isole, les abstractions decoratives, les refactos hors perimetre et les architectures temporaires concurrentes.
 
-`ia_workflows/rules_globales.md` fait autorite pour :
+## Workflow local prive
 
-- le mode de travail par plan ;
-- la politique de compilation entre jalons ;
-- le perimetre de modification ;
-- les decisions a tracer ;
-- la gestion des incertitudes ;
-- la cloture de session ;
-- la cloture de plan.
+Si `ia_workflows/README.md` existe dans l'environnement local, lis-le avant toute session utile puis applique son ordre de lecture et ses regles. Ce dossier local contient le workflow detaille utilise par le mainteneur et n'est volontairement pas versionne dans le depot public.
 
-`ia_workflows/conventions_code.md` fait autorite pour :
+Si ce dossier n'est pas disponible dans un clone public, ne tente pas d'en deviner le contenu. Appuie-toi sur ce fichier, sur la documentation versionnee et sur l'architecture reelle du projet.
 
-- le decoupage par domaine ;
-- le nommage des fichiers ;
-- le nommage Rust du projet ;
-- la structure du code ;
-- le scope et la visibilite ;
-- le style de formatage ;
-- les conventions Bevy ;
-- les traces et logs.
+## Cartographie publique
 
-Ne remplace pas ces regles par des conventions Rust academiques, sauf demande explicite de l'utilisateur.
+- `src/front/` : pages, composants, modules et utilitaires executes dans l'interface Leptos ;
+- `src/api/` : fonctions serveur, contrats d'echange et implementations reservees au SSR ;
+- `src/entry.rs` : shell HTML, routeur et racine de l'application ;
+- `src/main.rs` : demarrage Axum, configuration, sessions et middlewares serveur ;
+- `src/global_security.rs` : primitives de hash et de generation de sels partagees ;
+- `static/` : styles, traductions et assets servis au navigateur ;
+- `config/` et `dynamic/` : donnees d'execution locales, non destinees au code source public.
 
-## Structure avant codage
+## Regles publiques de contribution
 
-Avant toute modification non triviale, identifie :
+- Respecte le decoupage par domaine et les responsabilites des types existants.
+- Utilise le scope Rust le plus petit compatible avec les consommateurs reels.
+- Preserve la separation entre code serveur, code navigateur et code partage.
+- Ne contourne pas le chiffrement cote client pour les donnees utilisateur persistantes.
+- Ne journalise jamais de mot de passe, d'identifiant sensible, de contenu mail ou de donnee dechiffree.
+- Respecte le style existant : tabulations, accolades inspirees du style Allman et nommage local du module touche.
+- Ne lance pas de reformatage global et ne reformate pas les fichiers non concernes.
+- Preserve les modifications locales preexistantes qui ne font pas partie de la demande.
+- N'ajoute pas de crate, ne modifie pas le suivi Git et ne publie rien sans que la tache le justifie explicitement.
 
-- le domaine qui possede le changement ;
-- le fichier ou module concerne ;
-- le type principal concerne ;
-- le type qui doit posseder l'operation sous forme de methode ou de fonction associee ;
-- si un nouveau type est necessaire ;
-- quelles methodes doivent etre publiques ;
-- quelles methodes doivent rester privees ;
-- si une fonction libre est reellement justifiee ;
-- si la modification risque de creer une architecture temporaire concurrente.
+## Verification
 
-Si la demande conduit naturellement a ajouter plusieurs fonctions libres dispersees, propose d'abord une structure locale avant de coder.
+Choisis les verifications selon la frontiere touchee : serveur SSR, bibliotheque partagee, cible WASM ou build Leptos complet. Une modification exclusivement documentaire n'impose pas de compilation applicative.
 
-## Politique sur les fonctions libres
-
-Ne cree pas de fonctions libres par defaut.
-
-Si une operation manipule principalement une structure existante, produit une donnee derivee depuis elle, ou porte son nom dans la signature, elle doit preferer une methode sur cette structure ou une fonction associee.
-
-Exemple : une operation du type `build_low_preview_mesh_from_cache(cache: &LowSlabDerivedCache)` ne doit pas rester une fonction libre durable ; elle doit etre rattachee a `LowSlabDerivedCache` ou a un type metier dedie.
-
-Une fonction libre est acceptable uniquement si :
-
-- elle est purement utilitaire ;
-- elle n'a pas de proprietaire metier naturel ;
-- elle reste privee au module ;
-- elle est explicitement justifiee dans le resume de fin de session.
-
-Privilegie les methodes dans des blocs `impl`, les fonctions associees, ou des petits types metier dedies.
-
-Un deplacement dans un sous-module ne suffit pas : si les fonctions restent orphelines, la refacto est incomplete et doit etre marquee comme temporaire dans le plan.
-
-## Discipline de scope
-
-Utilise toujours le scope Rust le plus petit possible.
-
-Par defaut, un element est prive.
-
-N'elargis la visibilite que si un consommateur reel l'exige.
-
-Ordre de preference :
-
-1. prive ;
-2. `pub(super)` ;
-3. `pub(crate)` ;
-4. `pub`.
-
-Ne rends pas un `struct`, une `enum`, un champ, une methode, une fonction ou un module public "au cas ou".
-
-Si un type n'est utilise que par une seule structure, garde-le prive et proche de cette structure, idealement dans le meme fichier.
-
-## Formatage
-
-Respecte le style existant du projet.
-
-Utilise les tabulations pour l'indentation.
-
-Respecte le style inspire Allman du projet.
-
-Ne lance pas de formatage global si cela reecrit du code non concerne ou remplace le style du projet par le style standard `rustfmt`.
-
-Ne reformate pas les fichiers non concernes.
+Indique toujours ce qui a ete verifie et ce qui ne l'a pas ete.
 
 ## Fin de session
 
-A la fin d'une session utile, mets a jour les fichiers de suivi imposes par `ia_workflows/rules_globales.md`.
-
-Resume ensuite :
-
-- ce qui a change ;
-- ou vit maintenant la logique principale ;
-- les decisions prises ;
-- les verifications executees ;
-- ce qui n'a pas ete verifie ;
-- le prochain jalon, la prochaine etape ou la prochaine validation attendue.
+Resume les changements, l'emplacement de la logique principale, les decisions prises, les verifications executees et la prochaine validation attendue.

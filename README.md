@@ -25,6 +25,8 @@ Remember [iGoogle](https://wikipedia.org/wiki/IGoogle)?
 
 After it was closed, I wanted to create a personal alternative. I built the first version of this project in 2013 using PHP. Now, I have rebuilt it from the ground up in Rust, using the [Leptos](https://leptos.dev/) framework.
 
+After the commit "3fb64e1eabdfb20cf4d932ee935690828751d67a", I use a ia assistant to do some stuff. If you want to see the code before that, the branch "before-ia" is for you
+
 ## Security
 
 This project uses client-side encryption, meaning only encrypted data is sent to the server. Anything stored on the server is encrypted and cannot be read by anyone else.

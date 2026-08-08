@@ -11,7 +11,7 @@ use leptoaster::{expect_toaster, ToastLevel, ToasterContext};
 use leptos::ev::MouseEvent;
 use leptos::html::{Div, I};
 use leptos::prelude::{
-	use_context, ArcRwSignal, Callback, ClassAttribute, Effect, Get, NodeRef, NodeRefAttribute,
+	use_context, ArcRwSignal, ClassAttribute, Effect, Get, NodeRef, NodeRefAttribute,
 	OnAttribute, Set, StyleAttribute, Update,
 };
 use leptos::prelude::{BindAttribute, GetUntracked, ViewFn, With, Write};
@@ -165,7 +165,7 @@ impl LinksHolder
 			let dialogContent =
 				DialogData::new()
 					.setTitle("MODULE_RSS_DEL")
-					.setOnValidate(Callback::new(move |_| {
+					.setOnValidate(move |_| {
 						content.update(|links| {
 							links.remove(pos);
 						});
@@ -173,7 +173,7 @@ impl LinksHolder
 							cache.update();
 						});
 						return true;
-					}));
+					});
 			dialogManager.open(dialogContent);
 		};
 	}
@@ -223,7 +223,7 @@ impl LinksHolder
 					}
 					.into_any()
 				})
-				.setOnValidate(Callback::new(move |_| {
+				.setOnValidate(move |_| {
 					let label = label.clone().get();
 					let url = url.clone().get();
 					let toaster = toaster.clone();
@@ -292,7 +292,7 @@ impl LinksHolder
 						cache.update();
 					});
 					return true;
-				}));
+				});
 
 			dialogManager.open(dialogContent);
 		};

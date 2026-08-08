@@ -2,7 +2,7 @@ use leptos::prelude::StyleAttribute;
 use leptos::prelude::{ElementChild, IntoAny};
 use leptos::prelude::OnAttribute;
 use leptos::prelude::{AnyView, ClassAttribute, Signal, Update};
-use leptos::prelude::{Callable, Callback, Get, GetUntracked, RwSignal, Set};
+use leptos::prelude::{Get, GetUntracked, RwSignal, Set};
 use leptos::{component, view, IntoView};
 use leptos_use::{use_css_var, use_timeout_fn, UseTimeoutFnReturn};
 use std::sync::Arc;
@@ -102,8 +102,9 @@ pub struct DialogData
 {
 	title: String,
 	body: Arc<dyn Fn() -> AnyView + Send + Sync + 'static>,
-	on_validate: Option<Callback<(),bool>>,
-	on_close: Option<Callback<()>>,
+	// A dialog can outlive the reactive Owner that created it, so it must own its actions.
+	on_validate: Option<Arc<dyn Fn(()) -> bool + Send + Sync + 'static>>,
+	on_close: Option<Arc<dyn Fn(()) + Send + Sync + 'static>>,
 	is_closing: bool,
 	is_larger: bool,
 	button_validate_title: Option<String>,
@@ -140,17 +141,30 @@ impl DialogData
 	}
 
 	/// Defines an action for the valid button before the popup is closed. If the callback returns false, the popup is not closed.
-	pub fn setOnValidate(mut self, on_validate: Callback<(),bool>) -> Self
+	pub fn setOnValidate(mut self, on_validate: impl Fn(()) -> bool + Send + Sync + 'static) -> Self
 	{
-		self.on_validate = Some(on_validate);
+		self.on_validate = Some(Arc::new(on_validate));
 		self
 	}
 
 	/// Defines an action for the close button before the popup is closed.
-	pub fn setOnClose(mut self, on_close: Callback<()>) -> Self
+	pub fn setOnClose(mut self, on_close: impl Fn(()) + Send + Sync + 'static) -> Self
 	{
-		self.on_close = Some(on_close);
+		self.on_close = Some(Arc::new(on_close));
 		self
+	}
+
+	fn run_validate(&self) -> bool
+	{
+		return self.on_validate.as_ref().map(|callback| callback(())).unwrap_or(true);
+	}
+
+	fn run_close(&self)
+	{
+		if let Some(callback) = &self.on_close
+		{
+			callback(());
+		}
 	}
 
 	/// "Large" tells the popup to use the maximum available screen size instead of the content’s minimum size.
@@ -202,12 +216,9 @@ impl DialogManager
 	/// Ferme la popup courante
 	pub fn close(&self, start: impl Fn(()) + Clone + Send + Sync)
 	{
-		if let Some(d) = self.dialog.get_untracked()
+		if let Some(dialog) = self.dialog.get_untracked()
 		{
-			if let Some(cb) = d.on_close
-			{
-				cb.run(());
-			}
+			dialog.run_close();
 		}
 		self.innerAnimateClose(start);
 	}
@@ -216,12 +227,9 @@ impl DialogManager
 	pub fn validate(&self, start: impl Fn(()) + Clone + Send + Sync)
 	{
 		let mut isValidated = true;
-		if let Some(d) = self.dialog.get_untracked()
+		if let Some(dialog) = self.dialog.get_untracked()
 		{
-			if let Some(cb) = d.on_validate
-			{
-				isValidated = cb.run(());
-			}
+			isValidated = dialog.run_validate();
 		}
 		if(isValidated)
 		{
@@ -244,6 +252,35 @@ impl DialogManager
 	fn innerClose(&self)
 	{
 		self.dialog.set(None);
+	}
+}
+
+#[cfg(test)]
+mod tests
+{
+	use super::DialogData;
+	use leptos::prelude::Owner;
+	use std::sync::Arc;
+	use std::sync::atomic::{AtomicBool, Ordering};
+
+	#[test]
+	fn dialog_validate_action_survives_origin_owner_cleanup()
+	{
+		let originOwner = Owner::new();
+		let wasCalled = Arc::new(AtomicBool::new(false));
+		let wasCalledInner = wasCalled.clone();
+
+		let dialog = originOwner.with(|| {
+			DialogData::new().setOnValidate(move |_| {
+				wasCalledInner.store(true,Ordering::Relaxed);
+				return true;
+			})
+		});
+
+		originOwner.cleanup();
+
+		assert!(dialog.run_validate());
+		assert!(wasCalled.load(Ordering::Relaxed));
 	}
 }
 

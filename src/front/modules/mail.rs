@@ -2,12 +2,12 @@ use std::ops::DerefMut;
 use std::collections::HashMap;
 use gloo_timers::callback::Timeout;
 use leptoaster::{expect_toaster, ToasterContext};
-use leptos::callback::Callback;
 use leptos::children::ViewFn;
 use leptos::prelude::{use_context, CollectView, StyleAttribute, Write};
 use leptos::prelude::{ClassAttribute, ElementChild, GetUntracked, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, Get, IntoAny, OnAttribute, RwSignal};
 use leptos::reactive::spawn_local_scoped;
+use leptos::task::spawn_local;
 use leptos::{component, view, IntoView};
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
@@ -252,7 +252,8 @@ impl Mail
 
 	fn mail_mark_see(imapConnector: imap_connector, toaster: ToasterContext, mailId: ImapMail, mailsContent: ArcRwSignal<MailsContent>)
 	{
-		spawn_local_scoped(async move {
+		// The request must continue after the dialog and its reactive Owner are closed.
+		spawn_local(async move {
 			let mailUid = mailId.uid as u64;
 			// we remove the old data sooner to improve reactivity and re-add them later if something gone wrong
 			let oldMailsData;
@@ -288,7 +289,8 @@ impl Mail
 
 	fn mail_view_content(imapConnector: imap_connector, toaster: ToasterContext, dialogManager: DialogManager, mailIdContent: ImapMail, mailsCache: ArcRwSignal<MailsContent>)
 	{
-		spawn_local_scoped(async move {
+		// The resulting dialog can outlive the reactive Owner of the mail row that opened it.
+		spawn_local(async move {
 			let Some(mailContent) = toaster_api(&toaster, API_proxys_imap_getMailContent(imapConnector.clone(), mailIdContent.clone().into()).await, None).await else {return};
 
 			let toasterBody = toaster.clone();
@@ -343,10 +345,10 @@ impl Mail
 					}.into_any()
 				})
 				.setButtonValidateTitle(Some("MODULE_MAIL_MAILCONTENTSEEN"))
-				.setOnValidate(Callback::new(move |_| {
+				.setOnValidate(move |_| {
 					Self::mail_mark_see(imapConnector.clone(), toaster.clone(), mailIdContent.clone(), mailsCache.clone());
 					return true;
-				}))
+				})
 				.setIsLarger(true);
 
 			dialogManager.open(dialogContent);

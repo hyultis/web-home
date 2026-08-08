@@ -11,13 +11,14 @@ use leptoaster::{expect_toaster, ToasterContext};
 use leptos::ev::MouseEvent;
 use leptos::prelude::ElementChild;
 use leptos::prelude::{
-	use_context, ArcRwSignal, Callback, ClassAttribute, Effect, IntoAny, OnAttribute,
+	use_context, ArcRwSignal, ClassAttribute, Effect, IntoAny, OnAttribute,
 	RenderHtml, RwSignal, Set, Update,
 };
 use leptos::{component, island, view, IntoView};
 use leptos_router::{hooks, NavigateOptions};
 use leptos::logging::log;
 use leptos::reactive::spawn_local_scoped;
+use leptos::task::spawn_local;
 use leptos_use::use_interval_fn;
 use strum::IntoEnumIterator;
 use crate::api::modules::components::ModuleID;
@@ -117,7 +118,7 @@ pub fn Home() -> impl IntoView
 	let disconnectFn = move |_| {
 		let dialogContent = DialogData::new()
 			.setTitle(AllFrontLoginEnum::LOGIN_USER_WANT_DISCONNECTED)
-			.setOnValidate(Callback::new(user_disconnected(hooks::use_navigate(), toasterInner.clone(), userDataSignal.clone(), setUserData.clone(), true)));
+			.setOnValidate(user_disconnected(hooks::use_navigate(), toasterInner.clone(), userDataSignal.clone(), setUserData.clone(), true));
 
 		dialogManager.open(dialogContent);
 	};
@@ -202,17 +203,17 @@ fn editMode_cancel(
 
 		let dialogContent = DialogData::new()
 			.setTitle(AllFrontUIEnum::HOME_CHANGE_CANCEL)
-			.setOnValidate(Callback::new(move |_| {
+			.setOnValidate(move |_| {
 				let editModeInnerValidate = editModeInnerValidate.clone();
 				let toasterInnerValidate = toasterInnerValidate.clone();
-				spawn_local_scoped(async move {
+				spawn_local(async move {
 					ModuleHolder::network_deferredCall(ModuleHolder::getSingleton(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_modules_retrieve_caller(holder,false), Some(AllFrontUIEnum::HOME_CHANGE_CANCEL)).await;
 					editModeInnerValidate.update(|content| {
 						*content = false;
 					});
 				});
 				return true;
-			}));
+			});
 
 		dialogManager.open(dialogContent);
 	};
@@ -231,17 +232,17 @@ fn editMode_validate(
 
 		let dialogContent = DialogData::new()
 			.setTitle(AllFrontUIEnum::HOME_CHANGE_OK)
-			.setOnValidate(Callback::new(move |_| {
+			.setOnValidate(move |_| {
 				let editModeInnerValidate = editModeInnerValidate.clone();
 				let toasterInnerValidate = toasterInnerValidate.clone();
-				spawn_local_scoped(async move {
+				spawn_local(async move {
 					ModuleHolder::network_deferredCall(ModuleHolder::getSingleton(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_modules_update_caller(holder), Some(AllFrontUIEnum::HOME_CHANGE_OK)).await;
 					editModeInnerValidate.update(|content| {
 						*content = false;
 					});
 				});
 				return true;
-			}));
+			});
 
 		dialogManager.open(dialogContent);
 	};
@@ -282,7 +283,7 @@ fn editMode_AddBlock(dialogManager: DialogManager) -> impl Fn(MouseEvent) + Clon
 					</div>
 				}.into_any()
 			})
-			.setOnValidate(Callback::new(move |_| {
+			.setOnValidate(move |_| {
 				let selectedType = selectedType.clone().get();
 
 				ModuleHolder::getSingleton().update(|modules| {
@@ -292,7 +293,7 @@ fn editMode_AddBlock(dialogManager: DialogManager) -> impl Fn(MouseEvent) + Clon
 				});
 
 				return true;
-			}));
+			});
 
 		dialogManager.open(dialogContent);
 	}
@@ -303,7 +304,7 @@ fn user_disconnected(navigate: impl Fn(&str, NavigateOptions) + Clone + 'static,
 	return move |_| {
 		let navigate = navigate.clone();
 		let toaster = toaster.clone();
-		spawn_local_scoped(async move {
+		spawn_local(async move {
 			if let Some(mut userData) = userData.get_untracked() {
 				userData.login_disconnect().await;
 				setUserData.set(None);

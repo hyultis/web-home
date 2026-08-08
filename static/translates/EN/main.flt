@@ -86,6 +86,7 @@ MODULE_WEATHER_LOCATE = Locate
 MODULE_WEATHER_MAXDAY = Max days:
 
 #module mail
+MODULE_MAIL_ASTAG = Mail as tag:
 MODULE_MAIL_HOST = Host/port:
 MODULE_MAIL_USERNAME = Login:
 MODULE_MAIL_PASSWORD = Password:

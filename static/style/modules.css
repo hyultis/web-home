@@ -150,6 +150,62 @@
 	color: var(--urlcolorvisited);
 }
 
+.module_mail_table td.module_mail_date {
+	width: 2em;
+}
+
+.module_mail_table td.module_mail_tag_cell {
+	width: 5em;
+}
+
+.module_mail_table td.module_mail_subject {
+	width: auto;
+	text-wrap: nowrap;
+	text-overflow: ellipsis;
+	overflow: hidden;
+}
+
+.module_mail_table td.module_mail_status {
+	width: 1.5em;
+	text-align: center;
+}
+
+.module_mail_tag {
+	display: block;
+	position: relative;
+	margin-right: 0.75em;
+	padding: 0.15em 0.35em;
+	border: 1px solid var(--mail-tag-color);
+	border-right: 0;
+	border-radius: 0.3em 0 0 0.3em;
+	background: transparent;
+	color: var(--mail-tag-color);
+	font-size: 0.75em;
+	font-weight: bold;
+	line-height: 1em;
+	text-align: center;
+}
+
+.module_mail_tag::after {
+	content: "";
+	box-sizing: border-box;
+	position: absolute;
+	top: 50%;
+	right: -0.5em;
+	width: 1em;
+	height: 1em;
+	border-top: 1px solid var(--mail-tag-color);
+	border-right: 1px solid var(--mail-tag-color);
+	transform: translateY(-50%) rotate(45deg);
+}
+
+.module_mail_tag_label {
+	display: block;
+	text-wrap: nowrap;
+	text-overflow: ellipsis;
+	overflow: hidden;
+}
+
 .module h2 [class^="iconoir-"]::before,
 .module h2 [class*=" iconoir-"]::before {
 	display: inline-block;

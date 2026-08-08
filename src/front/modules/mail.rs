@@ -29,6 +29,8 @@ struct MailConfig
 {
 	#[serde(default)]
 	pub title: String,
+	#[serde(default)]
+	mailAsTag: String,
 	pub imap: imap_connector,
 }
 impl Default for MailConfig
@@ -37,8 +39,92 @@ impl Default for MailConfig
 	{
 		Self {
 			title: "".to_string(),
+			mailAsTag: "".to_string(),
 			imap: imap_connector::default(),
 		}
+	}
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MailTag
+{
+	label: String,
+	color: String,
+}
+
+impl MailTag
+{
+	fn from_address_header(addressHeader: &str, suffix: &str) -> Option<Self>
+	{
+		let suffix = suffix.trim().trim_start_matches('@');
+		if(suffix.is_empty())
+		{
+			return None;
+		}
+
+		return addressHeader.split([',',';']).find_map(|addressCandidate| {
+			let addressCandidate = addressCandidate.trim();
+			let address = if let Some((_,address)) = addressCandidate.rsplit_once('<')
+			{
+				address.split_once('>').map(|(address,_)| address).unwrap_or(address)
+			}
+			else
+			{
+				addressCandidate.split_whitespace()
+					.find(|part| part.contains('@'))
+					.unwrap_or(addressCandidate)
+			};
+
+			let address = address.trim().trim_matches(|character: char| {
+				character.is_whitespace() || matches!(character, '<' | '>' | '"' | '\'')
+			});
+			let (label,domain) = address.rsplit_once('@')?;
+			let label = label.trim().trim_matches(|character: char| matches!(character, '"' | '\''));
+			let domain = domain.trim().trim_matches(|character: char| {
+				character.is_whitespace() || matches!(character, '<' | '>' | '"' | '\'')
+			});
+
+			if(label.is_empty() || !domain.eq_ignore_ascii_case(suffix))
+			{
+				return None;
+			}
+
+			return Some(Self::new(label));
+		});
+	}
+
+	fn new(label: impl ToString) -> Self
+	{
+		let label = label.to_string();
+		let mut hash = 2_166_136_261_u32;
+		for byte in label.to_lowercase().bytes()
+		{
+			hash ^= byte as u32;
+			hash = hash.wrapping_mul(16_777_619);
+		}
+
+		Self {
+			label,
+			color: format!("hsl({}, 70%, 70%)",hash % 360),
+		}
+	}
+
+	fn style(&self) -> String
+	{
+		return format!("--mail-tag-color:{}",self.color);
+	}
+}
+
+impl MailConfig
+{
+	fn mail_tag_is_active(&self) -> bool
+	{
+		return !self.mailAsTag.trim().trim_start_matches('@').is_empty();
+	}
+
+	fn mail_tag(&self, mail: &ImapMail) -> Option<MailTag>
+	{
+		return MailTag::from_address_header(&mail.to,&self.mailAsTag);
 	}
 }
 
@@ -87,6 +173,10 @@ impl Mail
 		                                  |d| d.get().title,
 		                                  |ev,inner| inner.title = ev.target().value());
 		titleF.setFullSize(true);
+		let mut mailAsTagF = FieldHelper::new(&getBoxsMailConfig,&update,"MODULE_MAIL_ASTAG",
+		                                  |d| d.get().mailAsTag,
+		                                  |ev,inner| inner.mailAsTag = ev.target().value());
+		mailAsTagF.setFullSize(true);
 		let hostF = FieldHelper::new(&getBoxsMailConfig,&update,"MODULE_MAIL_HOST",
 		                                  |d| d.get().imap.host,
 		                                  |ev,inner| inner.imap.host = ev.target().value());
@@ -106,6 +196,7 @@ impl Mail
 		view!{
 			<div class="module_mail_config">
 				{titleF.draw()}
+				{mailAsTagF.draw()}
 				{hostF.draw()}:{portF.draw()}<br/>
 				{usernameF.draw()}<br/>
 				{passwordF.draw()}<br/>
@@ -476,14 +567,16 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 			{
 				let config = config.clone();
 				let mailsCache = mailsClientCache.clone();
+				let mailConfig = config.get();
+				let mailTagIsActive = mailConfig.mail_tag_is_active();
 				/*
 					<button on:click={testFn}>MAIL</button>
 					<button on:click={testSinceFn}>MAIL SINCE</button>
 				 */
 				view!{
-					{draw_title_if_present(config.get().title.clone())}
+					{draw_title_if_present(mailConfig.title.clone())}
 					<div class="module_rss_upper">
-						<table class="module_rss_table">{
+						<table class="module_rss_table module_mail_table">{
 							let markVueCacheInner = mailsCache.clone();
 							let mails = mailsCache.get().mailsData.clone();
 							let mut mailsContent = mails.values().cloned().collect::<Vec<_>>();
@@ -497,11 +590,32 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 									let viewContentFn = viewContentFn.clone();
 									let markViewFn = markViewFn.clone();
 									let markVueCacheInner = markVueCacheInner.clone();
+									let mailTag = if(mailTagIsActive) {mailConfig.mail_tag(mail)} else {None};
 									view!{
 										<tr>
-											<td>{distant_time_simpler(mail.date)}</td>
-											<td class="mail_pointer alttext_upper" on:click={move |_| viewContentFn.clone()(mailId.clone())}>{mail.subject.clone()}{Mail::utils_mailOverlay(&mailId)}</td>
-											<td>{
+											<td class="module_mail_date">{distant_time_simpler(mail.date)}</td>
+											{
+												if(mailTagIsActive)
+												{
+													view!{
+														<td class="module_mail_tag_cell">{
+															if let Some(mailTag) = mailTag
+															{
+																let style = mailTag.style();
+																view!{
+																	<span class="module_mail_tag" style={style}>
+																		<span class="module_mail_tag_label">{mailTag.label}</span>
+																	</span>
+																}.into_any()
+															}
+															else {view!{}.into_any()}
+														}</td>
+													}.into_any()
+												}
+												else {view!{}.into_any()}
+											}
+											<td class="module_mail_subject mail_pointer alttext_upper" on:click={move |_| viewContentFn.clone()(mailId.clone())}>{mail.subject.clone()}{Mail::utils_mailOverlay(&mailId)}</td>
+											<td class="module_mail_status">{
 												if(mail.confirmVue)
 												{
 													view!{<i class="iconoir-mail-out-solid" on:click={move |_| markViewFn.clone()(mailIdMark.clone())}/>}.into_any()
@@ -535,5 +649,98 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 						</table>
 				</div>}.into_any()
 			}
-		}}}.into_any()
+	}}}.into_any()
+}
+
+#[cfg(test)]
+mod tests
+{
+	use super::{MailConfig, MailTag};
+	use crate::api::proxys::imap_components::ImapMail;
+
+	fn config_with_suffix(suffix: &str) -> MailConfig
+	{
+		return MailConfig {
+			mailAsTag: suffix.to_string(),
+			..Default::default()
+		};
+	}
+
+	fn mail_with_addresses(from: &str, to: &str) -> ImapMail
+	{
+		return ImapMail {
+			from: from.to_string(),
+			to: to.to_string(),
+			..Default::default()
+		};
+	}
+
+	#[test]
+	fn mail_config_without_mail_as_tag_uses_empty_value()
+	{
+		let mut serializedConfig = serde_json::to_value(MailConfig::default()).unwrap();
+		serializedConfig.as_object_mut().unwrap().remove("mailAsTag");
+
+		let config: MailConfig = serde_json::from_value(serializedConfig).unwrap();
+
+		assert_eq!(config.mailAsTag,"");
+		assert!(!config.mail_tag_is_active());
+	}
+
+	#[test]
+	fn mail_tag_empty_suffix_is_disabled()
+	{
+		let config = config_with_suffix("  ");
+		let mail = mail_with_addresses("sender@site.com","toto@site.com");
+
+		assert!(!config.mail_tag_is_active());
+		assert_eq!(config.mail_tag(&mail),None);
+	}
+
+	#[test]
+	fn mail_tag_uses_matching_to_local_part()
+	{
+		let config = config_with_suffix("site.com");
+		let mail = mail_with_addresses("sender@site.com","toto@site.com");
+
+		assert_eq!(config.mail_tag(&mail).map(|tag| tag.label),Some("toto".to_string()));
+	}
+
+	#[test]
+	fn mail_tag_accepts_display_name_and_domain_case()
+	{
+		let config = config_with_suffix("site.com");
+		let mail = mail_with_addresses("sender@other.com","Toto <toto@SITE.COM>");
+
+		assert_eq!(config.mail_tag(&mail).map(|tag| tag.label),Some("toto".to_string()));
+	}
+
+	#[test]
+	fn mail_tag_selects_first_matching_recipient()
+	{
+		let config = config_with_suffix("@site.com");
+		let mail = mail_with_addresses("sender@other.com","Other <other@else.com>, Toto <toto@site.com>; tata@site.com");
+
+		assert_eq!(config.mail_tag(&mail).map(|tag| tag.label),Some("toto".to_string()));
+	}
+
+	#[test]
+	fn mail_tag_rejects_other_domain_and_ignores_from()
+	{
+		let config = config_with_suffix("site.com");
+		let mail = mail_with_addresses("sender@site.com","toto@other-site.com");
+
+		assert_eq!(config.mail_tag(&mail),None);
+	}
+
+	#[test]
+	fn mail_tag_color_is_stable_for_same_normalized_label()
+	{
+		let lowerTag = MailTag::new("toto");
+		let upperTag = MailTag::new("TOTO");
+
+		assert_eq!(lowerTag.color,upperTag.color);
+		assert_eq!(lowerTag.style(),upperTag.style());
+		assert!(lowerTag.style().starts_with("--mail-tag-color:hsl("));
+	}
 }

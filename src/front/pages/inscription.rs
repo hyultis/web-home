@@ -2,7 +2,7 @@ use std::sync::Arc;
 use leptoaster::{expect_toaster};
 use leptos::prelude::{ElementChild, GetUntracked, IntoAny, Transition};
 use leptos::prelude::BindAttribute;
-use leptos::prelude::{signal, ClassAttribute, Get, OnAttribute, RenderHtml, Set};
+use leptos::prelude::{signal, ClassAttribute, Get, OnAttribute, RenderHtml};
 use leptos::{island, view, IntoView};
 use leptos::reactive::spawn_local_scoped;
 use leptos_router::components::A;
@@ -11,7 +11,7 @@ use crate::front::utils::all_front_enum::AllFrontLoginEnum;
 use crate::front::utils::fluent::FluentManager::FluentManager;
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
 use crate::front::utils::translate::Translate;
-use crate::front::utils::users_data::UserData;
+use crate::front::utils::users_data::ClientCryptoContext;
 use crate::HWebTrace;
 
 #[derive(Clone)]
@@ -38,15 +38,12 @@ pub fn Inscription() -> impl IntoView {
 				return;
 			}
 
-			let (userData, setUserData) = UserData::cookie_signalGet();
-			let mut userData = userData.get_untracked().unwrap_or(UserData::new(&"EN".to_string()));
-			if let Some(reason) = userData.login_signUp(login, pwd).await
+			if let Err(reason) = ClientCryptoContext::signUp(login, pwd).await
 			{
 				HWebTrace!("user NOT logged because {}",&reason);
 				toastingErr(&toaster,reason).await;
 			} else {
 				toastingSuccess(&toaster,AllFrontLoginEnum::LOGIN_USER_SIGNEDUP).await;
-				setUserData.set(Some(userData));
 				navigate("/", Default::default());
 			}
 		});
@@ -60,7 +57,7 @@ pub fn Inscription() -> impl IntoView {
 			<h1><Translate key="pageRoot_title_signup"/></h1>
 			<div class="login_box">
 				<label for="login"><Translate key="pageRoot_form_login"/></label><input type="text" name="login" bind:value=login/>
-				<label for="pwd"><Translate key="pageRoot_form_pwd"/></label><input type="text" name="pwd" bind:value=pwd/>
+				<label for="pwd"><Translate key="pageRoot_form_pwd"/></label><input type="password" name="pwd" autocomplete="new-password" bind:value=pwd/>
 				<Transition fallback=move || view! { <span/> }.into_any()>
 					{move || {
 						let submit = submit.clone();

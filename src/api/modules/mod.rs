@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use leptos::prelude::{FromServerFnError, ServerFnError, ServerFnErrorErr};
+use leptos::prelude::{FromServerFnError, ServerFnErrorErr};
 use leptos::server;
 use leptos::server_fn::codec::JsonEncoding;
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,55 @@ pub mod helper;
 #[cfg(feature = "ssr")]
 use crate::api::modules::helper::helper_retrieveMissingModule;
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum ModuleApiError
+{
+	AUTH_REQUIRED,
+	NOT_FOUND,
+	SERVER_ERROR,
+}
+
+impl ModuleApiError
+{
+	#[cfg(feature = "ssr")]
+	fn fromUserBackError(error: crate::api::login::user_back::UserBackHelperError) -> Self
+	{
+		use crate::api::login::user_back::UserBackHelperError;
+		use Htrace::components::level::Level;
+		use Htrace::HTrace;
+
+		return match error
+		{
+			UserBackHelperError::LoginError(_) => Self::AUTH_REQUIRED,
+			error =>
+			{
+				HTrace!((Level::ERROR) "module API user resolution failed: {:?}", error);
+				Self::SERVER_ERROR
+			},
+		};
+	}
+
+	#[cfg(feature = "ssr")]
+	fn fromModuleError(error: crate::api::modules::components::ModuleErrors) -> Self
+	{
+		use Htrace::components::level::Level;
+		use Htrace::HTrace;
+
+		HTrace!((Level::ERROR) "module API persistence failed: {:?}", error);
+		return Self::SERVER_ERROR;
+	}
+}
+
+impl FromServerFnError for ModuleApiError
+{
+	type Encoder = JsonEncoding;
+
+	fn from_server_fn_error(_value: ServerFnErrorErr) -> Self
+	{
+		return Self::SERVER_ERROR;
+	}
+}
+
 #[derive(Serialize, Deserialize)]
 pub enum ModuleReturnUpdate
 {
@@ -22,11 +71,12 @@ pub enum ModuleReturnUpdate
 
 /// api function that update one module content based on ModuleID and their last fetch
 #[server]
-pub async fn API_module_update(generatedId: String, content: ModuleContent, overwrite:bool) -> Result<ModuleReturnUpdate, ServerFnError>
+pub async fn API_module_update(content: ModuleContent, overwrite:bool) -> Result<ModuleReturnUpdate, ModuleApiError>
 {
-	use crate::api::login::user_back::UserBackHelper;
+	use crate::api::login::user_back::AuthenticatedUser;
 	use crate::api::modules::components::ModuleErrors;
-	let mut config = UserBackHelper::getUserConfig(generatedId,false).map_err(|err| ServerFnError::new(format!("{:?}",err)))?;
+	let authenticatedUser = AuthenticatedUser::current().await.map_err(ModuleApiError::fromUserBackError)?;
+	let mut config = authenticatedUser.userConfig_get().map_err(ModuleApiError::fromUserBackError)?;
 	let mut content = content;
 
 	match content.update(&mut config,overwrite) {
@@ -36,7 +86,7 @@ pub async fn API_module_update(generatedId: String, content: ModuleContent, over
 				return Ok(ModuleReturnUpdate::OUTDATED(content));
 			}
 		},
-		Err(err) => return Err(ServerFnError::new(format!("{:?}",err))),
+		Err(err) => return Err(ModuleApiError::fromModuleError(err)),
 	}
 
 	return Ok(ModuleReturnUpdate::OK);
@@ -44,11 +94,12 @@ pub async fn API_module_update(generatedId: String, content: ModuleContent, over
 
 /// api function that updates module content based on ModuleID and their last fetch
 #[server]
-pub async fn API_modules_update(generatedId: String, contents: Vec<ModuleContent>, overwrite:bool) -> Result<HashMap<ModuleID,ModuleReturnUpdate>, ServerFnError>
+pub async fn API_modules_update(contents: Vec<ModuleContent>, overwrite:bool) -> Result<HashMap<ModuleID,ModuleReturnUpdate>, ModuleApiError>
 {
-	use crate::api::login::user_back::UserBackHelper;
+	use crate::api::login::user_back::AuthenticatedUser;
 	use crate::api::modules::components::ModuleErrors;
-	let mut config = UserBackHelper::getUserConfig(generatedId,false).map_err(|err| ServerFnError::new(format!("{:?}",err)))?;
+	let authenticatedUser = AuthenticatedUser::current().await.map_err(ModuleApiError::fromUserBackError)?;
+	let mut config = authenticatedUser.userConfig_get().map_err(ModuleApiError::fromUserBackError)?;
 	let mut returning = HashMap::new();
 
 	for mut content in contents {
@@ -59,7 +110,7 @@ pub async fn API_modules_update(generatedId: String, contents: Vec<ModuleContent
 					returning.insert(content.id.clone(), ModuleReturnUpdate::OUTDATED(content));
 				}
 			},
-			Err(err) => return Err(ServerFnError::new(format!("{:?}",err))),
+			Err(err) => return Err(ModuleApiError::fromModuleError(err)),
 		}
 	}
 
@@ -75,13 +126,14 @@ pub enum ModuleReturnRetrieve
 
 /// api function that retrieve one module content based on ModuleID and their last fetch
 #[server]
-pub async fn API_module_retrieve(generatedId: String, moduleData: ApiModulesID) -> Result<ModuleReturnRetrieve, ServerFnError>
+pub async fn API_module_retrieve(moduleData: ApiModulesID) -> Result<ModuleReturnRetrieve, ModuleApiError>
 {
-	use crate::api::login::user_back::UserBackHelper;
+	use crate::api::login::user_back::AuthenticatedUser;
 	use crate::api::modules::components::ModuleErrors;
 	use Htrace::HTrace;
 
-	let config = UserBackHelper::getUserConfig(generatedId,false).map_err(|err| ServerFnError::new(format!("{:?}",err)))?;
+	let authenticatedUser = AuthenticatedUser::current().await.map_err(ModuleApiError::fromUserBackError)?;
+	let config = authenticatedUser.userConfig_get().map_err(ModuleApiError::fromUserBackError)?;
 
 	let mut content = ModuleContent::newFromName(&moduleData.key);
 	match content.retrieve(&config) {
@@ -93,7 +145,7 @@ pub async fn API_module_retrieve(generatedId: String, moduleData: ApiModulesID) 
 			}
 		}
 		Err(ModuleErrors::Empty) => {},
-		Err(err) => return Err(ServerFnError::new(format!("{:?}",err))),
+		Err(err) => return Err(ModuleApiError::fromModuleError(err)),
 	}
 
 	return Ok(ModuleReturnRetrieve::SAME);
@@ -101,11 +153,12 @@ pub async fn API_module_retrieve(generatedId: String, moduleData: ApiModulesID) 
 
 /// api function that retrieves module content based on ModuleID and their last fetch
 #[server]
-pub async fn API_modules_retrieve(generatedId: String, modulesData: Vec<ApiModulesID>) -> Result<HashMap<ModuleID,ModuleReturnRetrieve>, ServerFnError>
+pub async fn API_modules_retrieve(modulesData: Vec<ApiModulesID>) -> Result<HashMap<ModuleID,ModuleReturnRetrieve>, ModuleApiError>
 {
-	use crate::api::login::user_back::UserBackHelper;
+	use crate::api::login::user_back::AuthenticatedUser;
 	use crate::api::modules::components::ModuleErrors;
-	let config = UserBackHelper::getUserConfig(generatedId,false).map_err(|err| ServerFnError::new(format!("{:?}",err)))?;
+	let authenticatedUser = AuthenticatedUser::current().await.map_err(ModuleApiError::fromUserBackError)?;
+	let config = authenticatedUser.userConfig_get().map_err(ModuleApiError::fromUserBackError)?;
 	let mut returning = HashMap::new();
 
 	for moduleData in modulesData.iter() {
@@ -118,7 +171,7 @@ pub async fn API_modules_retrieve(generatedId: String, modulesData: Vec<ApiModul
 				}
 			}
 			Err(ModuleErrors::Empty) => {},
-			Err(err) => return Err(ServerFnError::new(format!("{:?}",err))),
+			Err(err) => return Err(ModuleApiError::fromModuleError(err)),
 		}
 	}
 
@@ -129,40 +182,27 @@ pub async fn API_modules_retrieve(generatedId: String, modulesData: Vec<ApiModul
 
 /// api function that retrieves module that a missing from the `modules` var
 #[server]
-pub async fn API_module_retrieveMissingModule(generatedId: String, #[server(default)] modules: Vec<ModuleID>) -> Result<HashMap<ModuleID,ModuleReturnRetrieve>, ServerFnError>
+pub async fn API_module_retrieveMissingModule(#[server(default)] modules: Vec<ModuleID>) -> Result<HashMap<ModuleID,ModuleReturnRetrieve>, ModuleApiError>
 {
-	use crate::api::login::user_back::UserBackHelper;
-	let config = UserBackHelper::getUserConfig(generatedId,false).map_err(|err| ServerFnError::new(format!("{:?}",err)))?;
+	use crate::api::login::user_back::AuthenticatedUser;
+	let authenticatedUser = AuthenticatedUser::current().await.map_err(ModuleApiError::fromUserBackError)?;
+	let config = authenticatedUser.userConfig_get().map_err(ModuleApiError::fromUserBackError)?;
 
 	let missing_module = helper_retrieveMissingModule(&config,modules)?;
 	return Ok(missing_module);
 }
 
 
-#[derive(Serialize, Deserialize, Debug)]
-pub enum ModuleReturnRemove
-{
-	NOTFOUND,
-	SERVER_ERROR
-}
-
-impl FromServerFnError for ModuleReturnRemove {
-	type Encoder = JsonEncoding;
-
-	fn from_server_fn_error(value: ServerFnErrorErr) -> Self {
-		ModuleReturnRemove::SERVER_ERROR
-	}
-}
-
 /// remove a specific module
 #[server]
-pub async fn API_module_remove(generatedId: String, moduleName: ModuleID) -> Result<(), ModuleReturnRemove>
+pub async fn API_module_remove(moduleName: ModuleID) -> Result<(), ModuleApiError>
 {
-	use crate::api::login::user_back::UserBackHelper;
-	let config = UserBackHelper::getUserConfig(generatedId,false).map_err(|err| ModuleReturnRemove::SERVER_ERROR)?;
+	use crate::api::login::user_back::AuthenticatedUser;
+	let authenticatedUser = AuthenticatedUser::current().await.map_err(ModuleApiError::fromUserBackError)?;
+	let config = authenticatedUser.userConfig_get().map_err(ModuleApiError::fromUserBackError)?;
 
 	return match ModuleContent::remove(config, moduleName) {
 		true => Ok(()),
-		false => Err(ModuleReturnRemove::NOTFOUND)
+		false => Err(ModuleApiError::NOT_FOUND)
 	};
 }

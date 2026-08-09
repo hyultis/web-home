@@ -1,6 +1,5 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::OnceLock;
-use std::time::Duration;
 use leptoaster::ToastLevel;
 
 pub mod translateBooks;
@@ -9,19 +8,10 @@ pub mod login;
 pub mod modules;
 pub mod proxys;
 
-// LOGIN and SIGNUP const
-pub const SESSION_LOGIN_NBTRY: &str = "SESSION_LOGIN_NBTRY";
-pub const SESSION_LOGIN_NBTRY_LAST: &str = "SESSION_LOGIN_NBTRY_LAST";
-pub const SESSION_LOGIN_NBTRY_MAX: u8 = 3;
-pub const SESSION_LOGIN_NBTRY_DELAY_RESET: Duration = Duration::from_secs(15*60); // 15 minutes
-pub const SESSION_SIGN_NBTRY: &str = "SESSION_SIGN_NBTRY";
-pub const SESSION_SIGN_NBTRY_LAST: &str = "SESSION_SIGN_NBTRY_LAST";
-pub const SESSION_SIGN_NBTRY_MAX: u8 = 1;
-pub const SESSION_SIGN_NBTRY_DELAY_RESET: Duration = Duration::from_secs(3600*24); // 1 day
-
 pub trait IsToastable: ToString {
 	// None if nothing is toasted, otherwise return the level of the toast
 	fn level(&self) -> Option<ToastLevel>;
+	fn authenticationRequired_get(&self) -> bool;
 }
 
 pub static IS_TRACE_FRONT_LOG: OnceLock<AtomicBool> = OnceLock::new();

@@ -1,11 +1,11 @@
-use leptos::prelude::{For, GetUntracked, OnTargetAttribute, Signal, With, WriteSignal};
+use leptos::prelude::{For, GetUntracked, OnTargetAttribute, With};
 use leptos::prelude::{CollectView, Get, PropAttribute};
 use crate::front::modules::components::Backable;
 use crate::front::modules::module_holder::ModuleHolder;
-use crate::front::utils::all_front_enum::{AllFrontLoginEnum, AllFrontUIEnum};
+use crate::front::utils::all_front_enum::{AllFrontErrorEnum, AllFrontLoginEnum, AllFrontUIEnum};
 use crate::front::utils::dialog::{DialogData, DialogManager};
-use crate::front::utils::toaster_helpers::{toastingSuccess};
-use crate::front::utils::users_data::UserData;
+use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
+use crate::front::utils::users_data::{ClientCryptoContext, ClientState};
 use crate::{HWebTrace};
 use leptoaster::{expect_toaster, ToasterContext};
 use leptos::ev::MouseEvent;
@@ -39,33 +39,24 @@ pub fn Home() -> impl IntoView
 		panic!("cannot get dialogManager in home");
 	};
 	let toaster = expect_toaster();
+	let clientState = ClientState::expect();
 
 	// user data checker to force disconnect
 	let toasterInner = toaster.clone();
-	let (userDataSignal, setUserData) = UserData::cookie_signalGet();
+	let clientStateConnection = clientState.clone();
 	Effect::new(move || {
-		let mut is_connected = false;
-		if let Some(userDataInner) = userDataSignal.get()
+		if (!clientStateConnection.login_isConnected() || !clientStateConnection.crypto_isAvailable())
 		{
-			is_connected = userDataInner.login_isConnected();
-		}
-
-		if userDataSignal.get().is_none() || !is_connected
-		{
-			let callback = user_disconnected(hooks::use_navigate(), toasterInner.clone(), userDataSignal.clone(), setUserData.clone(), false);
+			let callback = user_disconnected(hooks::use_navigate(), toasterInner.clone(), clientStateConnection.clone(), false);
 			callback(());
 		}
 	});
 
 	// auto refresh cookie every 2 hour
-	let (userDataSignal, setUserData) = UserData::cookie_signalGet();
+	let clientStateRefresh = clientState.clone();
 	let _ = use_interval_fn(
 		move || {
-			if let Some(mut tmp) = userDataSignal.get_untracked()
-			{
-				tmp.valUpdate();
-				setUserData.set(Some(tmp));
-			}
+			clientStateRefresh.refresh();
 			log!("auto refresh cookie");
 		},
 		2 * 3600 * 1000,
@@ -115,10 +106,11 @@ pub fn Home() -> impl IntoView
 
 	// disconnect func
 	let toasterInner = toaster.clone();
+	let clientStateDisconnect = clientState.clone();
 	let disconnectFn = move |_| {
 		let dialogContent = DialogData::new()
 			.setTitle(AllFrontLoginEnum::LOGIN_USER_WANT_DISCONNECTED)
-			.setOnValidate(user_disconnected(hooks::use_navigate(), toasterInner.clone(), userDataSignal.clone(), setUserData.clone(), true));
+			.setOnValidate(user_disconnected(hooks::use_navigate(), toasterInner.clone(), clientStateDisconnect.clone(), true));
 
 		dialogManager.open(dialogContent);
 	};
@@ -299,18 +291,26 @@ fn editMode_AddBlock(dialogManager: DialogManager) -> impl Fn(MouseEvent) + Clon
 	}
 }
 
-fn user_disconnected(navigate: impl Fn(&str, NavigateOptions) + Clone + 'static, toaster: ToasterContext, userData: Signal<Option<UserData>>, setUserData: WriteSignal<Option<UserData>>, withToaster: bool) -> impl Fn(()) -> bool + Clone
+fn user_disconnected(navigate: impl Fn(&str, NavigateOptions) + Clone + 'static, toaster: ToasterContext, clientState: ClientState, withToaster: bool) -> impl Fn(()) -> bool + Clone
 {
 	return move |_| {
 		let navigate = navigate.clone();
 		let toaster = toaster.clone();
+		let clientState = clientState.clone();
 		spawn_local(async move {
-			if let Some(mut userData) = userData.get_untracked() {
-				userData.login_disconnect().await;
-				setUserData.set(None);
-			}
+			let disconnectError = ClientCryptoContext::logout().await;
+			let storageClearFailed = clientState.local_clear().is_err();
 
-			if(withToaster) {
+			if let Some(reason) = disconnectError
+			{
+				toastingErr(&toaster, reason).await;
+				HWebTrace!("server session logout failed");
+			}
+			if (storageClearFailed)
+			{
+				toastingErr(&toaster, AllFrontErrorEnum::CRYPTO_STORAGE_FAILED).await;
+			}
+			else if(withToaster) {
 				toastingSuccess(&toaster, AllFrontLoginEnum::LOGIN_USER_DISCONNECTED).await;
 			}
 			HWebTrace!("user disconnected");

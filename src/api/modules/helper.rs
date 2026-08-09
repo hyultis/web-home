@@ -1,9 +1,8 @@
 use std::collections::HashMap;
-use leptos::prelude::ServerFnError;
 use crate::api::modules::components::{ModuleContent, ModuleErrors, ModuleID};
-use crate::api::modules::ModuleReturnRetrieve;
+use crate::api::modules::{ModuleApiError, ModuleReturnRetrieve};
 
-pub fn helper_retrieveMissingModule(config: &Hconfig::HConfig::HConfig, modules: Vec<ModuleID>) -> Result<HashMap<ModuleID,ModuleReturnRetrieve>, ServerFnError>
+pub fn helper_retrieveMissingModule(config: &Hconfig::HConfig::HConfig, modules: Vec<ModuleID>) -> Result<HashMap<ModuleID,ModuleReturnRetrieve>, ModuleApiError>
 {
 	let missing_module = ModuleContent::retrieveMissingModule(&config, modules);
 	let mut returning = HashMap::new();
@@ -16,7 +15,7 @@ pub fn helper_retrieveMissingModule(config: &Hconfig::HConfig::HConfig, modules:
 				returning.insert(moduleId, ModuleReturnRetrieve::UPDATED(content));
 			}
 			Err(ModuleErrors::Empty) => {},
-			Err(err) => return Err(ServerFnError::new(format!("{:?}",err))),
+			Err(err) => return Err(ModuleApiError::fromModuleError(err)),
 		}
 	};
 

@@ -4245,6 +4245,7 @@ dependencies = [
  "leptos_meta",
  "leptos_router",
  "mailparse",
+ "native-tls",
  "regex",
  "reqwest",
  "rust-argon2",

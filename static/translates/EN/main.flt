@@ -23,14 +23,20 @@ FRONTLOGIN_LOGIN_USER_WANT_DISCONNECTED = Do you want to log out?
 FRONTLOGIN_LOGIN_USER_CONNECTED = User connected
 FRONTLOGIN_LOGIN_USER_DISCONNECTED = User disconnected
 FRONTLOGIN_LOGIN_USER_SIGNEDUP = User registered
-FRONTLOGIN_LOGIN_USER_NOT_FOUND = This login does not exist
-FRONTLOGIN_LOGIN_USER_INVALID_PWD = Invalid password
-FRONTLOGIN_LOGIN_USER_ALREADY_EXISTS = This login already exists
-FRONTLOGIN_LOGIN_LOCKED = This login is locked due to too many login attempts
+FRONTLOGIN_LOGIN_CREDENTIALS_INVALID = Invalid login or password
+FRONTLOGIN_LOGIN_LOCKED = Too many login attempts. Please try again later
 FRONTLOGIN_SIGN_DISABLED = Registration disabled
+FRONTLOGIN_SIGN_PASSWORD_TOO_SHORT = The password must contain at least 12 characters
+FRONTLOGIN_SALT_INVALID = Secure login initialization failed. Please try again
+FRONTLOGIN_SERVER_ERROR = Server error. Please try again later
 
 #global errors
-FRONTERROR_SERVER_ERROR = Server error
+FRONTERROR_SERVER_ERROR = Server error. Please try again later
+FRONTERROR_SESSION_EXPIRED = Your session has expired. Please sign in again
+FRONTERROR_CRYPTO_CONTEXT_MISSING = The client encryption key is unavailable. No data was sent
+FRONTERROR_CRYPTO_STORAGE_FAILED = The browser could not securely persist or remove the encryption context
+FRONTERROR_CRYPTO_ENCRYPT_FAILED = Your data could not be encrypted. Nothing was sent
+FRONTERROR_CRYPTO_DECRYPT_FAILED = Stored data could not be decrypted and was not loaded
 FRONTERROR_MODULE_OUTDATED = The module is older than the server version
 FRONTERROR_MODULE_NOTEXIST = The module does not exist
 
@@ -67,7 +73,19 @@ MODULE_RSS_LINK = RSS link:
 MODULE_RSS_MAXLINE = Number of lines:
 MODULE_RSS_DEMO = Example:
 WGET_ERROR_BLANK_URL = The configured URL is empty.
+WGET_ERROR_AUTH_REQUIRED = { FRONTERROR_SESSION_EXPIRED }
+WGET_ERROR_DESTINATION_FORBIDDEN = The configured RSS destination is not allowed.
+WGET_ERROR_RESPONSE_TOO_LARGE = The RSS response is too large.
 WGET_ERROR_SERVER_ERROR = { FRONTERROR_SERVER_ERROR }
+
+IMAP_ERROR_IMAP_SERVER_CONNECTION = Unable to connect to the configured mail server.
+IMAP_ERROR_IMAP_SERVER_CONNECTION_TLS = Unable to establish a secure connection to the configured mail server.
+IMAP_ERROR_MAIL_NOT_FOUND = The requested email could not be found.
+IMAP_ERROR_INVALID_DATE = The configured email date is invalid.
+IMAP_ERROR_AUTH_REQUIRED = { FRONTERROR_SESSION_EXPIRED }
+IMAP_ERROR_DESTINATION_FORBIDDEN = The configured mail server or port is not allowed.
+IMAP_ERROR_RESOURCE_LIMIT = The mail server returned too much data or took too long to respond.
+IMAP_ERROR_SERVER_ERROR = { FRONTERROR_SERVER_ERROR }
 
 #module weather
 MODULE_WEATHER_SUN = Sunny

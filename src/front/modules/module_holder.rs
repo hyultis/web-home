@@ -2,10 +2,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use leptoaster::ToasterContext;
-use leptos::prelude::{ArcRwSignal, ReadUntracked, Set, Update, WithUntracked};
+use leptos::prelude::{ArcRwSignal, Set, Update, WithUntracked};
 use leptos::reactive::{spawn_local_scoped};
-use leptos::leptos_dom::log;
-use crate::api::modules::{API_module_remove, API_module_retrieve, API_modules_retrieve, API_modules_update, ModuleReturnRetrieve};
+use crate::api::modules::{API_module_remove, API_module_retrieve, API_modules_retrieve, API_modules_update, ModuleApiError, ModuleReturnRetrieve};
 use crate::api::modules::components::{ApiModulesID, ModuleContent, ModuleID};
 use crate::front::modules::components::{API_return_apply, ApiCall, Backable, Cacheable, ModuleName, PausableStocker, RefreshTime};
 use crate::front::modules::link::LinksHolder;
@@ -15,11 +14,55 @@ use crate::front::modules::module_type::ModuleType;
 use crate::front::utils::all_front_enum::{AllFrontErrorEnum, AllFrontUIEnum};
 use crate::front::utils::toaster_helpers;
 use crate::front::utils::toaster_helpers::toastingErr;
-use crate::front::utils::users_data::UserData;
+use crate::front::utils::users_data::{ClientCryptoContext, ClientState};
 
 thread_local! {
     static MODULE_HOLDER_SINGLETON: RefCell<Option<ArcRwSignal<ModuleHolder>>> =
         const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+mod tests
+{
+	use crate::api::modules::ModuleApiError;
+	use crate::front::modules::components::API_return_apply;
+	use crate::front::utils::all_front_enum::AllFrontErrorEnum;
+	use crate::front::utils::users_data::ClientCryptoContext;
+
+	use super::ModuleHolder;
+
+	#[test]
+	fn networkError_authRequiredMarksLocalSessionInvalid()
+	{
+		let mut result = API_return_apply::default();
+		ModuleHolder::network_error_apply(&mut result, ModuleApiError::AUTH_REQUIRED);
+
+		assert!(result.authenticationRequired);
+		assert!(matches!(result.error.as_slice(), [AllFrontErrorEnum::SESSION_EXPIRED]));
+	}
+
+	#[test]
+	fn moduleUploadPreparation_containsOnlyEncryptedContent()
+	{
+		let holder = ModuleHolder::new();
+		let crypto = ClientCryptoContext::test_get();
+		let prepared = holder.network_modules_update_prepare(&crypto).unwrap();
+
+		assert!(!prepared.is_empty());
+		assert!(prepared.iter().all(|content| crypto.decrypt(&content.content).is_ok()));
+	}
+
+	#[test]
+	fn localCryptoError_doesNotScheduleModuleMutation()
+	{
+		let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+		let result = runtime.block_on(ModuleHolder::network_localError_get(AllFrontErrorEnum::CRYPTO_CONTEXT_MISSING));
+
+		assert!(matches!(result.error.as_slice(), [AllFrontErrorEnum::CRYPTO_CONTEXT_MISSING]));
+		assert!(result.retrieve.is_empty());
+		assert!(result.update.is_empty());
+		assert!(result.moduleIdToRefresh.is_empty());
+	}
 }
 
 pub struct ModuleHolder
@@ -69,14 +112,39 @@ impl ModuleHolder
 		async move {
 			let Some(apiCall) = apiCall(moduleHolder.clone()) else {return;};
 			let mut apiResult = apiCall.await;
+			let hasErrors = !apiResult.error.is_empty();
+			let authenticationRequired = apiResult.authenticationRequired;
+			let authenticationWasLocal = if (authenticationRequired)
+			{
+				ClientState::expect().login_isConnected_untracked()
+			}
+			else
+			{
+				false
+			};
 
 			// if they are some error
 			for err in apiResult.error.drain(..) {
-				toastingErr(&toaster, err).await;
+				if (!authenticationRequired || authenticationWasLocal)
+				{
+					toastingErr(&toaster, err).await;
+				}
 			};
 
-			if let Some(toastingSuccess) = toastingSuccess {
-				toaster_helpers::toastingSuccess(&toaster, toastingSuccess).await;
+			if (authenticationRequired)
+			{
+				if (ClientState::expect().local_clear().is_err())
+				{
+					toastingErr(&toaster, AllFrontErrorEnum::CRYPTO_STORAGE_FAILED).await;
+				}
+			}
+
+			if (!hasErrors)
+			{
+				if let Some(toastingSuccess) = toastingSuccess
+				{
+					toaster_helpers::toastingSuccess(&toaster, toastingSuccess).await;
+				}
 			}
 
 			moduleHolder.update(|holder| {
@@ -85,26 +153,53 @@ impl ModuleHolder
 		}
 	}
 
+	fn network_error_apply(apiReturn: &mut API_return_apply, error: ModuleApiError)
+	{
+		if (error == ModuleApiError::AUTH_REQUIRED)
+		{
+			apiReturn.authenticationRequired = true;
+		}
+		apiReturn.error.push(error.into());
+	}
+
 	fn network_deferredCall_inner<AsyncCaller, AsyncReturn, DataType, DataPrepare>(moduleHolder: ArcRwSignal<ModuleHolder>, prepare: DataPrepare, async_caller: AsyncCaller) -> Option<ApiCall>
 	where
-		DataPrepare: Fn(&ModuleHolder) -> DataType + 'static,
-		AsyncCaller: Fn(String, DataType) -> AsyncReturn + 'static,
+		DataPrepare: Fn(&ModuleHolder, &ClientCryptoContext) -> Result<DataType, AllFrontErrorEnum> + 'static,
+		AsyncCaller: Fn(DataType) -> AsyncReturn + 'static,
 		AsyncReturn: Future<Output = API_return_apply> + 'static,
 		DataType: 'static,
 	{
-		return moduleHolder.with_untracked(|holder| {
-			let Some((login, _)) = UserData::loginLang_get_from_cookie()
-			else
-			{
-				return None;
-			};
+		let clientState = ClientState::expect();
+		if (!clientState.login_isConnected_untracked())
+		{
+			return None;
+		}
+		let Some(crypto) = clientState.crypto_get()
+		else
+		{
+			return Some(Self::network_localError_get(AllFrontErrorEnum::CRYPTO_CONTEXT_MISSING));
+		};
 
-			let preparedVar = prepare(holder);
+		return moduleHolder.with_untracked(|holder| {
+			let preparedVar = match prepare(holder, &crypto)
+			{
+				Ok(preparedVar) => preparedVar,
+				Err(error) => return Some(Self::network_localError_get(error)),
+			};
 			return Some(
 				Box::pin(async move {
-					return async_caller(login, preparedVar).await;
+					return async_caller(preparedVar).await;
 				}) as ApiCall
 			);
+		});
+	}
+
+	fn network_localError_get(error: AllFrontErrorEnum) -> ApiCall
+	{
+		return Box::pin(async move {
+			let mut result = API_return_apply::default();
+			result.error.push(error);
+			return result;
 		});
 	}
 
@@ -114,42 +209,43 @@ impl ModuleHolder
 
 	pub fn network_modules_update_caller(moduleHolder: ArcRwSignal<ModuleHolder>) -> Option<ApiCall>
 	{
-		return Self::network_deferredCall_inner(moduleHolder, |holder| holder.network_modules_update_prepare(), Self::network_modules_update_async);
+		return Self::network_deferredCall_inner(moduleHolder, |holder, crypto| holder.network_modules_update_prepare(crypto), Self::network_modules_update_async);
 	}
 
 	fn network_modules_update_prepare(
-		&self
-	) -> Vec<ModuleContent>
+		&self,
+		crypto: &ClientCryptoContext,
+	) -> Result<Vec<ModuleContent>, AllFrontErrorEnum>
 	{
 		let mut moduleToUpdateData = vec![];
 
 		let mut thisModuleContent = self._links.export();
-		Self::export_crypt_content(&mut thisModuleContent);
+		Self::export_crypt_content(&mut thisModuleContent, crypto)?;
 		thisModuleContent.id = self._links.id_get();
 		moduleToUpdateData.push(thisModuleContent);
 
 		for (key, oneModule) in self._blocks.iter()
 		{
 			let mut thisModuleContent =oneModule.with_untracked(|module| module.export());
-			Self::export_crypt_content(&mut thisModuleContent);
+			Self::export_crypt_content(&mut thisModuleContent, crypto)?;
 			thisModuleContent.id = key.clone();
 			moduleToUpdateData.push(thisModuleContent);
 		}
 
-		return moduleToUpdateData;
+		return Ok(moduleToUpdateData);
 	}
 
-	async fn network_modules_update_async(login: String, moduleToUpdate: Vec<ModuleContent>) -> API_return_apply
+	async fn network_modules_update_async(moduleToUpdate: Vec<ModuleContent>) -> API_return_apply
 	{
 		if(moduleToUpdate.len()==0) {return API_return_apply::default();}
 
 		let mut apiReturn = API_return_apply::default();
 
-		let apiReturnModules = match API_modules_update(login.clone(), moduleToUpdate, true).await
+		let apiReturnModules = match API_modules_update(moduleToUpdate, true).await
 		{
 			Ok(r) => r,
 			Err(err) => {
-				apiReturn.error.push(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+				Self::network_error_apply(&mut apiReturn, err);
 				return apiReturn;
 			}
 		};
@@ -167,10 +263,10 @@ impl ModuleHolder
 
 	pub fn network_module_update_caller(moduleHolder: ArcRwSignal<ModuleHolder>, module: ModuleID) -> Option<ApiCall>
 	{
-		return Self::network_deferredCall_inner(moduleHolder, move |holder| holder.network_module_update_prepare(module.clone()), Self::network_modules_update_async);
+		return Self::network_deferredCall_inner(moduleHolder, move |holder, crypto| holder.network_module_update_prepare(module.clone(), crypto), Self::network_modules_update_async);
 	}
 
-	fn network_module_update_prepare(&self, moduleId: ModuleID) -> Vec<ModuleContent>
+	fn network_module_update_prepare(&self, moduleId: ModuleID, crypto: &ClientCryptoContext) -> Result<Vec<ModuleContent>, AllFrontErrorEnum>
 	{
 		let mut moduleToRetrieveData = vec![];
 
@@ -178,12 +274,12 @@ impl ModuleHolder
 			.filter(|(moduleIdSearch, _)| *moduleIdSearch == &moduleId)
 		{
 			let mut thisModuleContent =oneModule.with_untracked(|module| module.export());
-			Self::export_crypt_content(&mut thisModuleContent);
+			Self::export_crypt_content(&mut thisModuleContent, crypto)?;
 			thisModuleContent.id = key.clone();
 			moduleToRetrieveData.push(thisModuleContent);
 		}
 
-		return moduleToRetrieveData;
+		return Ok(moduleToRetrieveData);
 	}
 
 	////////////////////////////////////////
@@ -196,7 +292,7 @@ impl ModuleHolder
 
 	pub fn network_modules_retrieve_caller(moduleHolder: ArcRwSignal<ModuleHolder>, forceUpdate: bool) -> Option<ApiCall>
 	{
-		return Self::network_deferredCall_inner(moduleHolder, move |holder| holder.network_modules_retrieve_prepare(forceUpdate), Self::network_modules_retrieve_async);
+		return Self::network_deferredCall_inner(moduleHolder, move |holder, crypto| Ok((holder.network_modules_retrieve_prepare(forceUpdate), crypto.clone())), Self::network_modules_retrieve_async);
 	}
 
 	fn network_modules_retrieve_prepare(
@@ -222,25 +318,27 @@ impl ModuleHolder
 		return moduleToRetrieveData;
 	}
 
-	async fn network_modules_retrieve_async(login: String, moduleToRetrieve: Vec<ApiModulesID>) -> API_return_apply
+	async fn network_modules_retrieve_async((moduleToRetrieve, crypto): (Vec<ApiModulesID>, ClientCryptoContext)) -> API_return_apply
 	{
 		if(moduleToRetrieve.len()==0) {return API_return_apply::default();}
 
 		let mut apiReturn = API_return_apply::default();
 
-		let apiReturnModules = match API_modules_retrieve(login.clone(), moduleToRetrieve).await
+		let apiReturnModules = match API_modules_retrieve(moduleToRetrieve).await
 		{
 			Ok(r) => r,
 			Err(err) => {
-				apiReturn.error.push(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+				Self::network_error_apply(&mut apiReturn, err);
 				return apiReturn;
 			}
 		};
 
 		for (moduleId, moduleResult) in apiReturnModules {
 			let ModuleReturnRetrieve::UPDATED(content) = moduleResult else {continue;};
-			apiReturn.moduleIdToRefresh.push(moduleId.clone());
-			Self::module_inner_retrieve(&mut apiReturn,content, moduleId);
+			if (Self::module_inner_retrieve(&mut apiReturn, content, moduleId.clone(), &crypto))
+			{
+				apiReturn.moduleIdToRefresh.push(moduleId);
+			}
 		}
 
 		return apiReturn;
@@ -256,7 +354,7 @@ impl ModuleHolder
 
 	pub fn network_module_retrieve_caller(moduleHolder: ArcRwSignal<ModuleHolder>, module: ModuleID, forceUpdate: bool) -> Option<ApiCall>
 	{
-		return Self::network_deferredCall_inner(moduleHolder, move |holder| holder.network_module_retrieve_prepare(module.clone(),forceUpdate), Self::network_module_retrieve_async);
+		return Self::network_deferredCall_inner(moduleHolder, move |holder, crypto| Ok((holder.network_module_retrieve_prepare(module.clone(), forceUpdate), crypto.clone())), Self::network_module_retrieve_async);
 	}
 
 	fn network_module_retrieve_prepare(
@@ -279,30 +377,34 @@ impl ModuleHolder
 	}
 
 	// do not apply auto module refresh
-	async fn network_module_retrieve_async(login: String, moduleToRetrieveRaw: Option<ApiModulesID>) -> API_return_apply
+	async fn network_module_retrieve_async((moduleToRetrieveRaw, crypto): (Option<ApiModulesID>, ClientCryptoContext)) -> API_return_apply
 	{
 		let Some(moduleToRetrieve) = moduleToRetrieveRaw else {return API_return_apply::default();};
 
 		let mut apiReturn = API_return_apply::default();
 
 		let moduleId = moduleToRetrieve.key.clone();
-		let moduleResult = match API_module_retrieve(login.clone(), moduleToRetrieve).await
+		let moduleResult = match API_module_retrieve(moduleToRetrieve).await
 		{
 			Ok(r) => r,
 			Err(err) => {
-				apiReturn.error.push(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+				Self::network_error_apply(&mut apiReturn, err);
 				return apiReturn;
 			}
 		};
 
 		let ModuleReturnRetrieve::UPDATED(content) = moduleResult else {return apiReturn};
-		Self::module_inner_retrieve(&mut apiReturn,content, moduleId);
+		Self::module_inner_retrieve(&mut apiReturn, content, moduleId, &crypto);
 		return apiReturn;
 	}
 
-	fn module_inner_retrieve(apiReturn: &mut API_return_apply, mut content: ModuleContent, moduleId: ModuleID)
+	fn module_inner_retrieve(apiReturn: &mut API_return_apply, mut content: ModuleContent, moduleId: ModuleID, crypto: &ClientCryptoContext) -> bool
 	{
-		Self::import_decrypt_content(&mut content);
+		if (Self::import_decrypt_content(&mut content, crypto).is_err())
+		{
+			apiReturn.error.push(AllFrontErrorEnum::CRYPTO_DECRYPT_FAILED);
+			return false;
+		}
 
 		if (content.typeModule == LinksHolder::MODULE_NAME)
 		{
@@ -311,7 +413,7 @@ impl ModuleHolder
 				moduleHolder._links.import(content);
 			};
 			apiReturn.retrieve.push(Box::new(addReturnWork));
-			return;
+			return true;
 		}
 
 		let addReturnWork = move |moduleHolder: &mut ModuleHolder| {
@@ -343,6 +445,7 @@ impl ModuleHolder
 			}
 		};
 		apiReturn.retrieve.push(Box::new(addReturnWork));
+		return true;
 	}
 
 	////////////////////////////////////////
@@ -356,18 +459,18 @@ impl ModuleHolder
 
 	pub fn network_module_remove_caller(moduleHolder: ArcRwSignal<ModuleHolder>, moduleToRemove: ModuleID) -> Option<ApiCall>
 	{
-		return Self::network_deferredCall_inner(moduleHolder, move |holder| moduleToRemove.clone(), Self::network_module_remove_async);
+		return Self::network_deferredCall_inner(moduleHolder, move |_, _| Ok(moduleToRemove.clone()), Self::network_module_remove_async);
 	}
 
-	async fn network_module_remove_async(login: String, moduleToRetrieve: ModuleID) -> API_return_apply
+	async fn network_module_remove_async(moduleToRetrieve: ModuleID) -> API_return_apply
 	{
 		let mut apiReturn = API_return_apply::default();
 
-		match API_module_remove(login.clone(), moduleToRetrieve.clone()).await
+		match API_module_remove(moduleToRetrieve.clone()).await
 		{
 			Ok(_) => {},
 			Err(err) => {
-				apiReturn.error.push(AllFrontErrorEnum::SERVER_ERROR(format!("{:?}", err)));
+				Self::network_error_apply(&mut apiReturn, err);
 				return apiReturn;
 			}
 		};
@@ -540,39 +643,19 @@ impl ModuleHolder
 
 	/// This function is used to decrypt the content of a moduleContent before generating the module
 	/// return if the content have been correctly decrypted
-	fn import_decrypt_content(moduleContent: &mut ModuleContent) -> bool
+	fn import_decrypt_content(moduleContent: &mut ModuleContent, crypto: &ClientCryptoContext) -> Result<(), AllFrontErrorEnum>
 	{
-		let (userData, _) = UserData::cookie_signalGet();
-		let Some(userData) = &*userData.read_untracked()
-		else
-		{
-			return false;
-		};
-		let Some(result) = userData.decrypt_with_password(&moduleContent.content)
-		else
-		{
-			return false;
-		};
-		moduleContent.content = result;
-		return true;
+		moduleContent.content = crypto.decrypt(&moduleContent.content)
+			.map_err(|_| AllFrontErrorEnum::CRYPTO_DECRYPT_FAILED)?;
+		return Ok(());
 	}
 
 	/// This function is used to encrypt the content of a moduleContent before sending it to the server
 	/// return if the content have been correctly encrypted
-	fn export_crypt_content(moduleContent: &mut ModuleContent) -> bool
+	fn export_crypt_content(moduleContent: &mut ModuleContent, crypto: &ClientCryptoContext) -> Result<(), AllFrontErrorEnum>
 	{
-		let (userData, _) = UserData::cookie_signalGet();
-		let Some(userData) = &*userData.read_untracked()
-		else
-		{
-			return false;
-		};
-		let Some(result) = userData.crypt_with_password(&moduleContent.content)
-		else
-		{
-			return false;
-		};
-		moduleContent.content = serde_json::to_string(&result).unwrap_or_default();
-		return true;
+		moduleContent.content = crypto.encrypt(&moduleContent.content)
+			.map_err(|_| AllFrontErrorEnum::CRYPTO_ENCRYPT_FAILED)?;
+		return Ok(());
 	}
 }

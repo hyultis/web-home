@@ -6,14 +6,14 @@ use leptos::prelude::{Get, IntoAny};
 use leptos::suspense::Transition;
 use leptos::prelude::ElementChild;
 use crate::front::utils::fluent::FluentManager::FluentManager;
-use crate::front::utils::users_data::UserData;
+use crate::front::utils::users_data::ClientState;
 
 #[component]
 pub fn TranslateCurrentLang() -> impl IntoView {
-	let (userData, _) = UserData::cookie_signalGet();
+	let clientState = ClientState::expect();
 
 	view! { <TranslateFn key=move || {
-		let lang =  userData.get().map(|userDataContent| userDataContent.lang_get()).unwrap_or("EN".to_string());
+		let lang = clientState.lang_get();
 		return format!("swap_to_{}",lang);
 	}/> }.into_any()
 }

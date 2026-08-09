@@ -12,7 +12,7 @@ pub enum LoginStatusErrors
 	USER_NOT_FOUND,
 	USER_INVALID_PWD,
 	USER_ALREADY_EXISTS,
-	LOCKED(i64), // duration in seconds
+	LOCKED(i64), // Unix timestamp in seconds when another attempt becomes possible
 	SERVER_ERROR,
 }
 

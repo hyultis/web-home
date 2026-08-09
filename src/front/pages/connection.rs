@@ -1,16 +1,16 @@
 use leptoaster::{expect_toaster};
-use leptos::prelude::{BindAttribute, ClassAttribute, GetUntracked, IntoAny, Set, Transition};
+use leptos::prelude::{BindAttribute, ClassAttribute, IntoAny, Transition};
 use leptos::prelude::{signal, ElementChild, Get};
 use leptos::prelude::{OnAttribute, RenderHtml};
 use leptos::{island, view, IntoView};
 use leptos::reactive::spawn_local_scoped;
 use leptos_router::components::A;
 use leptos_router::hooks;
-use crate::front::utils::all_front_enum::AllFrontLoginEnum;
+use crate::front::utils::all_front_enum::{AllFrontErrorEnum, AllFrontLoginEnum};
 use crate::front::utils::fluent::FluentManager::FluentManager;
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
 use crate::front::utils::translate::Translate;
-use crate::front::utils::users_data::UserData;
+use crate::front::utils::users_data::{ClientCryptoContext, ClientState};
 use crate::HWebTrace;
 
 #[island]
@@ -24,22 +24,30 @@ pub fn Connection() -> impl IntoView {
 		let pwd = pwd.0.get().clone();
 		let navigate = hooks::use_navigate();
 		let toaster = expect_toaster();
+		let clientState = ClientState::expect();
 
 		spawn_local_scoped(async move {
-			let (userData, setUserData) = UserData::cookie_signalGet();
-			let mut userData = userData.get_untracked().unwrap_or(UserData::new(&"EN".to_string()));
-			if let Some(reason) = userData.login_set(login, pwd).await
+			let crypto = match ClientCryptoContext::login_get(login, pwd).await
 			{
-				HWebTrace!("user NOT logged because {}",&reason);
-				toastingErr(&toaster,reason).await;
-			}
-			else
+				Ok(crypto) => crypto,
+				Err(reason) => {
+					HWebTrace!("user NOT logged because {}", &reason);
+					toastingErr(&toaster, reason).await;
+					return;
+				},
+			};
+			if (clientState.login_apply(crypto).is_err())
 			{
-				toastingSuccess(&toaster,AllFrontLoginEnum::LOGIN_USER_CONNECTED).await;
-				HWebTrace!("user logged");
-				setUserData.set(Some(userData));
-				navigate("/home", Default::default());
+				if (ClientCryptoContext::logout().await.is_some())
+				{
+					HWebTrace!("server session cleanup failed after local storage error");
+				}
+				toastingErr(&toaster, AllFrontErrorEnum::CRYPTO_STORAGE_FAILED).await;
+				return;
 			}
+			toastingSuccess(&toaster, AllFrontLoginEnum::LOGIN_USER_CONNECTED).await;
+			HWebTrace!("user logged");
+			navigate("/home", Default::default());
 		});
 	};
 

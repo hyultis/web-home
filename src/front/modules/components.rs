@@ -350,6 +350,7 @@ pub struct API_return_apply
 	pub update: Vec<Box<dyn FnOnce(&mut ModuleHolder)>>, // action on ModuleHolder, after all api call
 	pub error: Vec<AllFrontErrorEnum>, // error to be showed, after all api call
 	pub moduleIdToRefresh: Vec<ModuleID>, // moduleId updated that need a refresh, after all api call
+	pub(super) authenticationRequired: bool,
 }
 
 impl Default for API_return_apply
@@ -360,6 +361,7 @@ impl Default for API_return_apply
 			update: vec![],
 			error: vec![],
 			moduleIdToRefresh: vec![],
+			authenticationRequired: false,
 		}
 	}
 }

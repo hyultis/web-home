@@ -23,14 +23,20 @@ FRONTLOGIN_LOGIN_USER_WANT_DISCONNECTED = Voulez-vous vous déconnecté ?
 FRONTLOGIN_LOGIN_USER_CONNECTED = Utilisateur connecté
 FRONTLOGIN_LOGIN_USER_DISCONNECTED = Utilisateur déconnecté
 FRONTLOGIN_LOGIN_USER_SIGNEDUP = Utilisateur inscrit
-FRONTLOGIN_LOGIN_USER_NOT_FOUND = Ce login n'existe pas
-FRONTLOGIN_LOGIN_USER_INVALID_PWD = Password invalide
-FRONTLOGIN_LOGIN_USER_ALREADY_EXISTS = Ce login existe déjà
-FRONTLOGIN_LOGIN_LOCKED = Ce login est verrouillé suite a de nombreuses tentatives de connexion
+FRONTLOGIN_LOGIN_CREDENTIALS_INVALID = Identifiant ou mot de passe invalide
+FRONTLOGIN_LOGIN_LOCKED = Trop de tentatives de connexion. Veuillez réessayer plus tard
 FRONTLOGIN_SIGN_DISABLED = Inscription désactivée
+FRONTLOGIN_SIGN_PASSWORD_TOO_SHORT = Le mot de passe doit contenir au moins 12 caractères
+FRONTLOGIN_SALT_INVALID = L'initialisation de la connexion sécurisée a échoué. Veuillez réessayer
+FRONTLOGIN_SERVER_ERROR = Erreur serveur. Veuillez réessayer plus tard
 
 #global errors
-FRONTERROR_SERVER_ERROR = Erreur serveur
+FRONTERROR_SERVER_ERROR = Erreur serveur. Veuillez réessayer plus tard
+FRONTERROR_SESSION_EXPIRED = Votre session a expiré. Veuillez vous reconnecter
+FRONTERROR_CRYPTO_CONTEXT_MISSING = La clé de chiffrement cliente est indisponible. Aucune donnée n'a été envoyée
+FRONTERROR_CRYPTO_STORAGE_FAILED = Le navigateur n'a pas pu conserver ou supprimer le contexte de chiffrement
+FRONTERROR_CRYPTO_ENCRYPT_FAILED = Vos données n'ont pas pu être chiffrées. Rien n'a été envoyé
+FRONTERROR_CRYPTO_DECRYPT_FAILED = Les données stockées n'ont pas pu être déchiffrées et n'ont pas été chargées
 FRONTERROR_MODULE_OUTDATED = Le module est plus vieux que la version serveur
 FRONTERROR_MODULE_NOTEXIST = Le module n'existe pas
 
@@ -67,7 +73,19 @@ MODULE_RSS_LINK = Lien RSS:
 MODULE_RSS_MAXLINE = Nombre de lignes:
 MODULE_RSS_DEMO = Exemple:
 WGET_ERROR_BLANK_URL = L'url configuré est vide.
+WGET_ERROR_AUTH_REQUIRED = { FRONTERROR_SESSION_EXPIRED }
+WGET_ERROR_DESTINATION_FORBIDDEN = La destination RSS configurée n'est pas autorisée.
+WGET_ERROR_RESPONSE_TOO_LARGE = La réponse RSS est trop volumineuse.
 WGET_ERROR_SERVER_ERROR = { FRONTERROR_SERVER_ERROR }
+
+IMAP_ERROR_IMAP_SERVER_CONNECTION = Impossible de se connecter au serveur mail configuré.
+IMAP_ERROR_IMAP_SERVER_CONNECTION_TLS = Impossible d'établir une connexion sécurisée avec le serveur mail configuré.
+IMAP_ERROR_MAIL_NOT_FOUND = Le mail demandé est introuvable.
+IMAP_ERROR_INVALID_DATE = La date mail configurée est invalide.
+IMAP_ERROR_AUTH_REQUIRED = { FRONTERROR_SESSION_EXPIRED }
+IMAP_ERROR_DESTINATION_FORBIDDEN = Le serveur mail ou le port configuré n'est pas autorisé.
+IMAP_ERROR_RESOURCE_LIMIT = Le serveur mail a renvoyé trop de données ou a mis trop de temps à répondre.
+IMAP_ERROR_SERVER_ERROR = { FRONTERROR_SERVER_ERROR }
 
 #module weather
 MODULE_WEATHER_SUN = Soleil

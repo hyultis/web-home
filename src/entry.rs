@@ -1,5 +1,5 @@
 use std::sync::atomic::AtomicBool;
-use leptoaster::{provide_toaster, Toaster};
+use leptoaster::{expect_toaster, provide_toaster, Toaster};
 use leptos::view;
 use leptos::IntoView;
 use leptos::prelude::*;
@@ -13,8 +13,10 @@ use crate::front::pages::home::Home;
 use crate::front::pages::connection::Connection;
 use crate::front::pages::inscription::Inscription;
 use crate::front::utils::dialog::{DialogHost, DialogManager};
+use crate::front::utils::all_front_enum::AllFrontErrorEnum;
+use crate::front::utils::toaster_helpers::toastingErr;
 use crate::front::utils::translate::Translate;
-use crate::front::utils::users_data::UserData;
+use crate::front::utils::users_data::ClientState;
 
 pub fn shell((options,trace_front_log,allowRegistration): (LeptosOptions, bool, bool)) -> impl IntoView {
 	//	<meta http-equiv="Content-Security-Policy" modules="default-src https: * 'unsafe-inline' 'unsafe-eval' 'strict-dynamic' 'wasm-unsafe-eval'; script-src-elem *"/>
@@ -52,7 +54,9 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 
 	let dialog_manager = DialogManager::new();
 	provide_context(dialog_manager.clone());
-	let (userDataSignal, setUserData) = UserData::cookie_signalGet();
+	let clientState = ClientState::new();
+	provide_context(clientState.clone());
+	let locales = use_locales();
 
 	let is_initialized = RwSignal::new(false);
 	Effect::new(move || {
@@ -61,20 +65,34 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 		}
 		is_initialized.set(true);
 
-		// set default userData
-		if (userDataSignal.read_untracked().is_none())
-		{
-			let locales = use_locales();
-			setUserData.set(Some(UserData::new(locales.get().first().unwrap_or(&"EN".to_string()))));
-		}
+		let defaultLang = locales.get_untracked().first().cloned().unwrap_or_else(|| "EN".to_string());
+		let initializationResult = clientState.initialize(defaultLang);
 
 		// if user is connected, he directly go to is home page
 		let navigate = hooks::use_navigate();
+		let toaster = expect_toaster();
+		let clientState = clientState.clone();
 		spawn_local_scoped(async move {
-			if let Some(userData) = &*userDataSignal.read_untracked()
+			if (initializationResult.is_err())
 			{
-				if(userData.login_isConnected()) {
+				toastingErr(&toaster, AllFrontErrorEnum::CRYPTO_STORAGE_FAILED).await;
+				return;
+			}
+			if (clientState.login_isConnected_untracked())
+			{
+				if (clientState.crypto_get().is_some())
+				{
 					navigate("/home", Default::default());
+				}
+				else if let Some(window) = web_sys::window()
+				{
+					// Temporary migration path for the former /home crypto cookie.
+					// Once loaded there, ClientState moves it into localStorage and deletes it.
+					let location = window.location();
+					if (location.pathname().ok().as_deref() != Some("/home"))
+					{
+						let _ = location.set_href("/home");
+					}
 				}
 			}
 		});

@@ -23,7 +23,7 @@ pub struct Attributs
 impl Attributs
 {
 	#[cfg(feature = "ssr")]
-	pub fn add<'a>(&mut self, attribute: &'a imap_proto::NameAttribute<'a>)
+	pub(super) fn add<'a>(&mut self, attribute: &'a imap_proto::NameAttribute<'a>)
 	{
 		match attribute
 		{

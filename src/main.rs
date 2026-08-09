@@ -9,8 +9,6 @@ use axum::middleware;
 use Hconfig::IO::json::WrapperJson;
 use Hconfig::tinyjson::JsonValue;
 use Htrace::HTraceError;
-use time::Duration;
-use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
 use web_home::entry::AppProps;
 use crate::api::{ALLOW_REGISTRATION, IS_TRACE_FRONT_LOG};
 use crate::api::proxys::proxy_cache::CACHE_DIR;
@@ -46,6 +44,7 @@ async fn main() {
 			conf.leptos_options.env = Env::PROD
 		}
 	}
+	let production = conf.leptos_options.env == Env::PROD;
 
 	let _ = fs::create_dir("./config");
 	let _ = fs::create_dir("./config/users");
@@ -66,10 +65,11 @@ async fn main() {
 		let config = siteConfig.value_mut();
 		helper::preFillConfig(config,"salt",generate_salt().expect("Cannot generate a salt for website (site.json/salt)"));
 		helper::preFillConfig(config,"allow_registration",true);
-		helper::preFillConfig(config,"trace_front_log",conf.leptos_options.env!=Env::PROD);
+		helper::preFillConfig(config,"trace_front_log",!production);
+		helper::preFillConfig(config,"imap_allowed_ports",vec![JsonValue::Number(993.0)]);
 		if let Some(JsonValue::Boolean(raw)) = config.value_get("trace_front_log")
 		{
-			trace_front_log = raw;
+			trace_front_log = crate::api::Htrace::TraceRuntimePolicy::enabled_get(raw, production);
 		}
 		if let Some(JsonValue::Boolean(raw)) = config.value_get("allow_registration")
 		{
@@ -106,10 +106,7 @@ async fn main() {
     let leptos_options = conf.leptos_options.clone();
 
 	//session management
-	let session_store = MemoryStore::default();
-	let session_layer = SessionManagerLayer::new(session_store)
-		.with_secure(true)
-		.with_expiry(Expiry::OnInactivity(Duration::days(1)));
+	let session_layer = crate::api::login::session::SessionCookie::layer_get();
 
 	let leptos_options_inner_app = leptos_options.clone();
     let app = Router::new()

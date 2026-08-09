@@ -1,6 +1,7 @@
 use Hconfig::HConfigManager::HConfigManager;
 use Hconfig::tinyjson::JsonValue;
 use crate::global_security::hash;
+use crate::api::login::user_back::UserBackHelper;
 
 /// Retrieves a site-specific salt for a given user ID.
 ///
@@ -16,6 +17,10 @@ use crate::global_security::hash;
 /// `None` if the site configuration or salt value is missing or could not be retrieved.
 pub fn getSiteSaltForUser(generatedId: String) -> Option<String>
 {
+	if (!UserBackHelper::generatedId_isValid(&generatedId))
+	{
+		return None;
+	}
 	let Some(config) = HConfigManager::singleton().get("site") else {return None};
 	let Some(JsonValue::String(value)) = config.value_get("salt") else {return None};
 

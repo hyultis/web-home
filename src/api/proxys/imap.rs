@@ -1,112 +1,123 @@
 use std::collections::HashMap;
+
 use leptos::server;
-use crate::api::proxys::imap_components::{imap_connector, ImapMail, BoxName, ImapMailIdentifier, ImapMailUpdate};
+
+use crate::api::proxys::imap_components::{BoxName, ImapMail, ImapMailIdentifier, ImapMailUpdate, imap_connector};
 use crate::api::proxys::imap_error::ImapError;
 
 #[server]
 pub async fn API_proxys_imap_listbox(config: imap_connector) -> Result<Vec<BoxName>, ImapError>
 {
-	use crate::api::proxys::imap_inner::*;
+	use crate::api::proxys::imap_inner::ImapProxy;
 
-	let (mut imap_session,_,isGmail) = connect_imap(&config)?;
-	let results = listbox(&mut imap_session,isGmail)?;
-
-	return Ok(results);
+	return inner::ImapRequest::new(config).await?
+		.run(ImapProxy::listbox_get).await;
 }
 
-// get all mail UNSEE
 #[server]
 pub async fn API_proxys_imap_getFullUnsee(config: imap_connector) -> Result<Vec<ImapMail>, ImapError>
 {
-	use crate::api::proxys::imap_inner::*;
+	use crate::api::proxys::imap_inner::ImapProxy;
 
-	let (mut imap_session,_,isGmail) = connect_imap(&config)?;
-	let results = listbox(&mut imap_session,isGmail)?;
-
-	let mut listOfMail = vec![];
-	for boxName in results
-	{
-		if(boxName.attributes.is_uninteresting()) {continue};
-		if(config.isBoxBlacklisted(&boxName.name)) {continue};
-
-		let Ok(mailbox) = imap_session.select(&boxName.name) else {continue};
-		let Ok(results) = imap_session.uid_search("UNSEEN UNKEYWORD $Junk UNKEYWORD $Spam UNDELETED UNANSWERED UNDRAFT") else {continue};
-
-		listOfMail.append(&mut extract_ImapMail_from_search(&mut imap_session,results,&boxName.name));
-	}
-
-	let _ = imap_session.logout();
-
-	return Ok(listOfMail);
+	return inner::ImapRequest::new(config).await?
+		.run(ImapProxy::fullUnseen_get).await;
 }
 
-// get all mail from the most recent mail
 #[server]
-pub async fn API_proxys_imap_getUnseeSince(config: imap_connector, date:u64, toUpdate: Vec<u32>) -> Result<(Vec<ImapMail>,HashMap<u32,ImapMailUpdate>), ImapError>
+pub async fn API_proxys_imap_getUnseeSince(
+	config: imap_connector,
+	date: u64,
+	toUpdate: Vec<u32>,
+) -> Result<(Vec<ImapMail>,HashMap<u32,ImapMailUpdate>), ImapError>
 {
-	use crate::api::proxys::imap_inner::*;
-	use time::format_description;
-
-	let (mut imap_session,_,isGmail) = connect_imap(&config)?;
-	let results = listbox(&mut imap_session,isGmail)?;
-	let allUid = toUpdate.iter().map(|e| format!("{}",e)).collect::<Vec<String>>().join(",");
-
-	let mut listOfMail = vec![];
-	let mut listOfUpdatedMail = HashMap::new();
-	for boxName in results
-	{
-		if(boxName.attributes.is_uninteresting()) {continue};
-		if(config.isBoxBlacklisted(&boxName.name)) {continue};
-
-		let Ok(mailbox) = imap_session.select(&boxName.name) else {continue};
-
-		let Ok(date) = time::UtcDateTime::from_unix_timestamp(date as i64) else {return Err(ImapError::INVALID_DATE)};
-		let format = format_description::parse("[day padding:zero]-[month repr:short]-[year]").unwrap();
-		let Ok(dateFormatted) = date.format(&format) else {return Err(ImapError::INVALID_DATE)};
-
-		let Ok(results) = imap_session.uid_search(format!("UNSEEN UNKEYWORD $Junk UNKEYWORD $Spam UNDELETED UNANSWERED UNDRAFT SINCE {}",dateFormatted)) else {continue};
-
-		listOfMail.append(&mut extract_ImapMail_from_search(&mut imap_session,results,&boxName.name));
-
-		let Ok(results) = imap_session.uid_fetch(allUid.clone(), "(FLAGS)") else {continue};
-		for mail in results.iter()
-		{
-			let Some(uid) = mail.uid else {continue};
-			let flags = mail.flags().iter().map(|flag| flag.to_string().replace("\\","").to_uppercase()).collect::<Vec<String>>();
-			listOfUpdatedMail.insert(uid as u32,ImapMailUpdate{
-				flags,
-				boxName: boxName.clone(),
-			});
-		}
-
-	}
-
-	let _ = imap_session.logout();
-
-	return Ok((listOfMail, listOfUpdatedMail));
+	return inner::ImapRequest::new(config).await?
+		.run(move |proxy| proxy.unseenSince_get(date, toUpdate)).await;
 }
 
 #[server]
 pub async fn API_proxys_imap_getMailContent(config: imap_connector, mail: ImapMailIdentifier) -> Result<ImapMail, ImapError>
 {
-	use crate::api::proxys::imap_inner::*;
-
-	let (mut imap_session,_,_) = connect_imap(&config)?;
-	imap_session.select(&mail.boxName)?;
-	let Ok(results) = imap_session.uid_fetch(&mail.uid.to_string(), "(FLAGS INTERNALDATE BODY.PEEK[])") else {return Err(ImapError::MAIL_NOT_FOUND)};
-	let Some(mail) = extract_ImapMail_from_fetch(&mut imap_session,mail.uid,results,&mail.boxName).into_iter().next() else {return Err(ImapError::MAIL_NOT_FOUND)};
-
-	return Ok(mail);
+	return inner::ImapRequest::new(config).await?
+		.run(move |proxy| proxy.mailContent_get(mail)).await;
 }
 
 #[server]
 pub async fn API_proxys_imap_setMailSee(config: imap_connector, mail: ImapMailIdentifier) -> Result<(), ImapError>
 {
-	use crate::api::proxys::imap_inner::*;
+	return inner::ImapRequest::new(config).await?
+		.run(move |proxy| proxy.mailSeen_set(mail)).await;
+}
 
-	let (mut imap_session,_,_) = connect_imap(&config)?;
-	imap_session.select(&mail.boxName)?;
-	imap_session.uid_store(&mail.uid.to_string(),"+FLAGS (\\Seen)")?;
+#[cfg(feature = "ssr")]
+mod inner
+{
+	use async_lock::SemaphoreGuard;
 
-	return Ok(());
+	use crate::api::proxys::imap_components::imap_connector;
+	use crate::api::proxys::imap_error::ImapError;
+	use crate::api::proxys::imap_inner::ImapProxy;
+	use crate::api::proxys::outbound_policy::OutboundPolicy;
+
+	pub(super) struct ImapRequest
+	{
+		permit: SemaphoreGuard<'static>,
+		proxy: ImapProxy,
+	}
+
+	impl ImapRequest
+	{
+		pub(super) async fn new(config: imap_connector) -> Result<Self, ImapError>
+		{
+			OutboundPolicy::authentication_require().await.map_err(ImapError::from)?;
+			let permit = OutboundPolicy::imapPermit_get().map_err(ImapError::from)?;
+			let destination = OutboundPolicy::imapDestination_get(&config.host, config.port).await
+				.map_err(ImapError::from)?;
+			return Ok(Self { permit, proxy: ImapProxy::new(config, destination)? });
+		}
+
+		pub(super) async fn run<Output, Operation>(self, operation: Operation) -> Result<Output, ImapError>
+		where
+			Output: Send + 'static,
+			Operation: FnOnce(ImapProxy) -> Result<Output, ImapError> + Send + 'static,
+		{
+			let Self { permit, proxy } = self;
+			let result = tokio::task::spawn_blocking(move ||
+			{
+				let _permit = permit;
+				return operation(proxy);
+			}).await
+				.map_err(ImapError::from)?;
+			return result;
+		}
+	}
+
+	#[cfg(test)]
+	mod tests
+	{
+		use std::thread;
+
+		use crate::api::proxys::imap_components::imap_connector;
+		use crate::api::proxys::imap_inner::ImapProxy;
+		use crate::api::proxys::outbound_policy::{OutboundPolicy, ValidatedImapDestination};
+
+		use super::ImapRequest;
+
+		#[test]
+		fn request_runsOperationOnBlockingWorker()
+		{
+			let runtime = tokio::runtime::Runtime::new().unwrap();
+			runtime.block_on(async {
+				let callerThread = thread::current().id();
+				let permit = OutboundPolicy::imapPermit_get().unwrap();
+				let destination = ValidatedImapDestination::test_get(
+					"imap.example.com".to_string(),
+					vec!["8.8.8.8:993".parse().unwrap()],
+				);
+				let proxy = ImapProxy::new(imap_connector::default(), destination).unwrap();
+				let workerThread = ImapRequest { permit, proxy }
+					.run(|_| Ok(thread::current().id())).await.unwrap();
+				assert_ne!(workerThread, callerThread);
+			});
+		}
+	}
 }

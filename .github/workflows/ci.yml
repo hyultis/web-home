@@ -60,9 +60,6 @@ jobs:
     name: RustSec
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
-      checks: write
 
     steps:
       - name: Checkout code
@@ -70,7 +67,8 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install pinned cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
       - name: Audit locked dependencies
-        uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo audit

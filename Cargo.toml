@@ -31,18 +31,18 @@ http = "1"
 leptos-use = { version = "0.18.3", features = ["use_locales","use_cookie","storage","use_draggable","use_mouse_in_element","use_interval_fn","watch_debounced"] }
 fluent = { version = "0.17.0" }
 intl-memoizer = "0.5.2"
-anyhow = "1.0.95"
+anyhow = "1.0.103"
 time = { version = "0.3", features = ["macros", "wasm-bindgen", "local-offset"] }
 sha3 = {  version = "0.11", features = ["default"] }
 base64ct = { version = "1.8.0", features = ["alloc"] }
 getrandom = { version = "=0.4.2", optional = true }
 rust-argon2 = "3.0"
-aes-gcm = "0.11.0-rc.3"
+aes-gcm = "0.11.0"
 serde_json = "1.0.145"
 strum = "0.28.0"
 url = "2.5.7"
 strum_macros = "0.28"
-feed-rs = "2.3.1"
+feed-rs = "2.4.0"
 reqwest = { version = "0.13.2", optional = true }
 simd-json = { version = "0.17.0"}
 imap = {  version = "3.0.0-alpha.15", optional = true }

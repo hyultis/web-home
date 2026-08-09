@@ -20,7 +20,6 @@ jobs:
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
-      checks: write
 
   publish:
     name: Build and deploy

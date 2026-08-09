@@ -677,6 +677,17 @@ mod tests
 	}
 
 	#[test]
+	fn cryptoDecrypt_readsLegacyAesGcmRc3Payload()
+	{
+		let crypto = ClientCryptoContext {
+			userSalt: "client-secret".to_string(),
+		};
+		let legacyPayload = r#"{"salt":"cRzEPuLwOzBQnHkZfrs3vQ==","nonce":"EbbQRVrRkad+Kado","content":"zvRFqW+SHlCY43aPGtXtg62ZsSiK7LESi/vtcGwoPQ=="}"#;
+
+		assert_eq!(crypto.decrypt(legacyPayload).unwrap(), "private content");
+	}
+
+	#[test]
 	fn cryptoLocalStoragePayload_containsOnlyDerivationContext()
 	{
 		let crypto = ClientCryptoContext {

@@ -1,49 +1,61 @@
-# Get started with a build env with Rust nightly
-FROM rust:1.96-slim AS builder
+# Build with the same pinned Rust release as local development and CI.
+FROM rust:1.97.0-slim-bookworm AS builder
 
-ENV BUILDNAME=web-home
+ENV BUILDNAME="web-home" \
+	LEPTOS_SASS_VERSION="1.86.0" \
+	LEPTOS_WASM_OPT_VERSION="version_123" \
+	LEPTOS_WASM_BINDGEN_VERSION="0.2.112"
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-            bash curl npm libc6-dev binaryen perl make \
-            libssl-dev pkg-config
+            ca-certificates libc6-dev libssl-dev make perl pkg-config && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g sass
+RUN rustup target add wasm32-unknown-unknown && \
+    cargo install cargo-leptos --version 0.3.7 --locked
 
-# rust set up
-RUN rustup target add wasm32-unknown-unknown
-RUN cargo install cargo-leptos
-
-# build set up
 WORKDIR /work
-COPY . .
-RUN rm -R target; exit 0
-RUN cargo leptos build --release --precompress
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY .cargo ./.cargo
+COPY src ./src
+COPY static ./static
+RUN cargo leptos build \
+        --release \
+        --precompress \
+        --lib-cargo-args="--locked" \
+        --bin-cargo-args="--locked"
 
-# post build stuff
-RUN mkdir /work/build
-RUN cp /work/target/release/$BUILDNAME /work/build/leptosapp
-RUN cp -R /work/target/site /work/build/site
-RUN rm -R /work/target
+RUN mkdir -p /runtime/static && \
+    install -m 0755 "target/release/${BUILDNAME}" /runtime/leptosapp && \
+    cp -a target/site /runtime/site && \
+    cp -a static/translates /runtime/static/translates
 
-FROM rust:1.92-slim AS runner
+FROM debian:bookworm-20260713-slim AS runner
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+            ca-certificates curl libssl3 libzstd1 zlib1g && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd --gid 1000 webhome && \
+    useradd --uid 1000 --gid webhome --no-create-home --home-dir /app --shell /usr/sbin/nologin webhome && \
+    mkdir -p /app/config /app/dynamic && \
+    chown -R webhome:webhome /app
 
 WORKDIR /app
 
-RUN mkdir dynamic
-RUN mkdir config
-
-COPY --from=builder /work/build /app
-COPY --from=builder /work/Cargo.toml /app/
-COPY --from=builder /work/Cargo.lock /app/
-COPY --from=builder /work/static /app/static
-
-# clean cargo (reduce size)
-RUN ls /app
+COPY --from=builder --chown=webhome:webhome /runtime/ /app/
 
 ENV ENV="PROD"
+ENV LEPTOS_ENV="PROD"
+ENV LEPTOS_OUTPUT_NAME="webhome"
 ENV LEPTOS_SITE_ADDR="0.0.0.0:3002"
 ENV LEPTOS_SITE_ROOT=./site
+
+USER webhome:webhome
+
 EXPOSE 3002
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+	CMD ["curl", "--fail", "--silent", "--show-error", "--max-time", "3", "http://127.0.0.1:3002/health"]
 
 CMD ["/app/leptosapp"]

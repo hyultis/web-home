@@ -1,0 +1,76 @@
+name: ci
+run-name: verify WebHome
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  LEPTOS_SASS_VERSION: "1.86.0"
+  LEPTOS_WASM_OPT_VERSION: version_123
+  LEPTOS_WASM_BINDGEN_VERSION: "0.2.112"
+
+jobs:
+  application:
+    name: SSR, WASM and Leptos
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup show active-toolchain
+          rustup component add clippy
+          rustup target add wasm32-unknown-unknown
+
+      - name: Run SSR tests
+        run: cargo test --locked --no-default-features --features ssr
+
+      - name: Check correctness lints
+        run: cargo clippy --locked --no-default-features --features ssr -- -A warnings -D clippy::correctness
+
+      - name: Check browser WASM target
+        run: cargo check --locked --lib --no-default-features --features hydrate --target wasm32-unknown-unknown
+
+      - name: Install pinned cargo-leptos
+        run: cargo install cargo-leptos --version 0.3.7 --locked
+
+      - name: Build production application
+        run: |
+          cargo leptos build \
+            --release \
+            --precompress \
+            --lib-cargo-args="--locked" \
+            --bin-cargo-args="--locked"
+
+  dependencies:
+    name: RustSec
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Audit locked dependencies
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

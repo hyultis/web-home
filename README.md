@@ -130,6 +130,35 @@ cargo leptos watch --wasm-debug
 
 For production, you can check the docker dir and/or the github action workflows.
 
+### Container build and runtime
+
+The repository pins Rust 1.97.0, cargo-leptos 0.3.7, Dart Sass 1.86.0, Binaryen `version_123`, wasm-bindgen 0.2.112, and a dated Debian Bookworm runtime base. `docker/build.sh` builds `webhome:latest` from a context allowlist: local configuration, user data, traces, Git metadata, build outputs, and the private `ia_workflows` directory are excluded before Docker receives the context.
+
+The runtime image contains only the server binary, generated site, server translation files, and required shared libraries. It runs as the unprivileged `webhome` user with UID/GID 1000. The Compose configuration also uses a read-only root filesystem, drops Linux capabilities, and makes only the existing `config` and `dynamic` bind mounts writable.
+
+Before the first deployment of this non-root image, ensure those host directories are writable by UID/GID 1000:
+
+```bash
+sudo chown -R 1000:1000 config dynamic
+```
+
+The container healthcheck calls `GET /health`. This endpoint returns `204 No Content`, does not create an application session, and is omitted from routine request logs.
+
+### Continuous integration and manual deployment
+
+The CI workflow is started manually, or reused as part of a manually started publication. It runs the locked SSR test suite, checks the browser WASM target, produces a release Leptos build, and audits `Cargo.lock` against the current RustSec database. Dependabot proposes bounded Cargo and GitHub Actions updates without starting CI automatically.
+
+The publish workflow calls those same quality gates before building the Docker image. It then authenticates the production SSH host, streams the image into `docker load`, transfers the Compose file, and recreates the service with `docker compose up --detach --force-recreate --remove-orphans`. It deliberately provides neither automatic rollback nor a zero-downtime orchestration for this personal single-host deployment.
+
+Configure these GitHub Actions secrets:
+
+- `PRIVATE_KEY`: private key for the deployment account;
+- `REMOTE_SERVER_ADDRESS`, `REMOTE_SERVER_PORT`, and `REMOTE_SERVER_USERNAME`: SSH endpoint;
+- `REMOTE_SERVER_PATH`: directory containing the production `config` and `dynamic` directories;
+- `REMOTE_SERVER_PUBKEY`: complete trusted `known_hosts` line for this address and port. For a non-default port, its host field normally starts with `[host]:port`.
+
+Obtain the host key through a trusted administration path and verify its fingerprint before storing it in GitHub. An `ssh-keyscan` result collected over the same untrusted network is not sufficient by itself. If another repository deploys to the exact same SSH address and port, its already verified `known_hosts` line can be reused.
+
 ## Configuration
 
 The configuration file is located at `config/site.json`.

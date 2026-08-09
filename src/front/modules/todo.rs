@@ -8,7 +8,6 @@ use leptos::children::ViewFn;
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleName, ModuleSizeContrainte, RefreshTime};
-use leptos::logging::log;
 use leptos_use::watch_debounced;
 use crate::front::modules::module_actions::ModuleActionFn;
 

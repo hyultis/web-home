@@ -14,11 +14,15 @@ use crate::api::{ALLOW_REGISTRATION, IS_TRACE_FRONT_LOG};
 use crate::api::proxys::proxy_cache::CACHE_DIR;
 #[cfg(feature = "ssr")]
 use crate::browser_content_security::BrowserContentSecurity;
+#[cfg(feature = "ssr")]
+use crate::deployment_health::DeploymentHealth;
 use crate::global_security::generate_salt;
 
 mod api;
 #[cfg(feature = "ssr")]
 mod browser_content_security;
+#[cfg(feature = "ssr")]
+mod deployment_health;
 pub mod global_security;
 
 #[cfg(feature = "ssr")]
@@ -26,7 +30,7 @@ pub mod global_security;
 async fn main() {
 	use std::fs;
 	use axum::extract::DefaultBodyLimit;
-	use axum::routing::post;
+	use axum::routing::{get, post};
 	use axum::Router;
     use leptos::prelude::*;
     use leptos_axum::{generate_route_list, LeptosRoutes};
@@ -125,6 +129,7 @@ async fn main() {
         })
 	    .fallback(leptos_axum::file_and_error_handler(move |lo|shell((lo,trace_front_log,allow_registration))))
 	    .layer(session_layer)
+	    .route(DeploymentHealth::PATH, get(DeploymentHealth::response_get))
 	    .route(
 		    BrowserContentSecurity::REPORT_PATH,
 		    post(BrowserContentSecurity::report_receive)
@@ -169,11 +174,12 @@ mod helper {
 		let method = request.method().to_string();
 		let uri = request.uri().to_string();
 		let isCspReport = super::BrowserContentSecurity::reportPath_is(request.uri().path());
+		let isDeploymentHealth = super::DeploymentHealth::path_is(request.uri().path());
 
 
 		let response = next.run(request).await;
 
-		if(!(uri.contains("API_translate_getBook") || uri.contains("API_Htrace_log") || isCspReport))
+		if(!(uri.contains("API_translate_getBook") || uri.contains("API_Htrace_log") || isCspReport || isDeploymentHealth))
 		{
 			HTrace!("Request {} on {} : {}", method, uri, response.status());
 		}

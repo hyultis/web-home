@@ -1,46 +1,102 @@
 name: publish website
 run-name: publish new version on server
-on: [workflow_dispatch]
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-website
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  quality:
+    name: Required quality gates
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      checks: write
+
   publish:
+    name: Build and deploy
+    needs: quality
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
 
-    steps: # based on : https://github.com/mohammed-bahumaish/github-actions-push-docker-image-via-ssh/blob/main/.github/workflows/deploy.yaml
+    steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
 
-      - name: Build Docker image
-        run: docker build -t webhome:latest -f ./docker/image .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.2.0
 
-      - name: Save Docker image as tar file
-        run: docker save -o webhome.tar webhome:latest
+      - name: Build and export Docker image
+        uses: docker/build-push-action@v7.2.0
+        with:
+          context: .
+          file: ./docker/image
+          tags: webhome:latest
+          outputs: type=docker,dest=/tmp/webhome.tar
+          cache-from: type=gha,scope=webhome
+          cache-to: type=gha,mode=max,scope=webhome,ignore-error=true
 
-      - name: Transfer Docker image to remote server
+      - name: Configure SSH
+        shell: bash
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          install -m 700 -d ~/.ssh
+
+          printf '%s\n' "${{ secrets.PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          scp -o StrictHostKeyChecking=no -P ${{ secrets.REMOTE_SERVER_PORT }} webhome.tar ${{ secrets.REMOTE_SERVER_USERNAME }}@${{ secrets.REMOTE_SERVER_ADDRESS }}:${{ secrets.REMOTE_SERVER_PATH }}
+
+          printf '%s\n' "${{ secrets.REMOTE_SERVER_PUBKEY }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Transfer Docker Compose file
+        run: |
+          scp \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -P "${{ secrets.REMOTE_SERVER_PORT }}" \
+            ./docker/docker-compose.yml \
+            "${{ secrets.REMOTE_SERVER_USERNAME }}@${{ secrets.REMOTE_SERVER_ADDRESS }}:${{ secrets.REMOTE_SERVER_PATH }}/docker-compose.yml"
 
       - name: Load Docker image on remote server
         run: |
-          ssh -q -o StrictHostKeyChecking=no -p ${{ secrets.REMOTE_SERVER_PORT }} ${{ secrets.REMOTE_SERVER_USERNAME }}@${{ secrets.REMOTE_SERVER_ADDRESS }} > /dev/null << 'ENDSSH'
-          sudo docker load -i ${{ secrets.REMOTE_SERVER_PATH }}/webhome.tar
-          ENDSSH
+          ssh \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -T \
+            -p "${{ secrets.REMOTE_SERVER_PORT }}" \
+            "${{ secrets.REMOTE_SERVER_USERNAME }}@${{ secrets.REMOTE_SERVER_ADDRESS }}" \
+            'sudo docker load' \
+            < /tmp/webhome.tar
 
-      - name: Transfer Docker Compose file to remote server
+      - name: Deploy Docker container
         run: |
-          scp -o StrictHostKeyChecking=no -P ${{ secrets.REMOTE_SERVER_PORT }} ./docker/docker-compose.yml ${{ secrets.REMOTE_SERVER_USERNAME }}@${{ secrets.REMOTE_SERVER_ADDRESS }}:${{ secrets.REMOTE_SERVER_PATH }}
+          ssh \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -T \
+            -p "${{ secrets.REMOTE_SERVER_PORT }}" \
+            "${{ secrets.REMOTE_SERVER_USERNAME }}@${{ secrets.REMOTE_SERVER_ADDRESS }}" << 'ENDSSH'
+          set -eu
 
-      - name: Deploy Docker containers using Docker Compose on remote server
-        run: |
-          ssh -q -o StrictHostKeyChecking=no -p ${{ secrets.REMOTE_SERVER_PORT }} ${{ secrets.REMOTE_SERVER_USERNAME }}@${{ secrets.REMOTE_SERVER_ADDRESS }} > /dev/null << 'ENDSSH'
-          cd ${{ secrets.REMOTE_SERVER_PATH }}
-          rm webhome.tar
-          sudo docker compose down
-          sudo docker compose up -d
+          cd "${{ secrets.REMOTE_SERVER_PATH }}"
+
+          sudo docker compose up \
+            --detach \
+            --force-recreate \
+            --remove-orphans
           ENDSSH

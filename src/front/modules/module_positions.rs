@@ -2,7 +2,6 @@ use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::modules::components::{moduleContent, Cache, ModuleSizeContrainte};
 use crate::front::modules::module_actions::ModuleActionFn;
 use leptos::html::I;
-use leptos::logging::log;
 use leptos::prelude::{AnyView, ClassAttribute, IntoAny, RwSignal};
 use leptos::prelude::{
 	ArcRwSignal, Effect, ElementChild, Get, NodeRef, NodeRefAttribute, OnAttribute, Set,

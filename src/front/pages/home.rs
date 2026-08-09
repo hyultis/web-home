@@ -1,7 +1,7 @@
 use leptos::prelude::{For, GetUntracked, OnTargetAttribute, With};
 use leptos::prelude::{CollectView, Get, PropAttribute};
 use crate::front::modules::components::Backable;
-use crate::front::modules::module_holder::ModuleHolder;
+use crate::front::modules::module_holder::{ModuleHolder, ModuleHolderEpoch};
 use crate::front::utils::all_front_enum::{AllFrontErrorEnum, AllFrontLoginEnum, AllFrontUIEnum};
 use crate::front::utils::dialog::{DialogData, DialogManager};
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
@@ -12,12 +12,11 @@ use leptos::ev::MouseEvent;
 use leptos::prelude::ElementChild;
 use leptos::prelude::{
 	use_context, ArcRwSignal, ClassAttribute, Effect, IntoAny, OnAttribute,
-	RenderHtml, RwSignal, Set, Update,
+	on_cleanup, RenderHtml, RwSignal, Set, Update,
 };
 use leptos::{component, island, view, IntoView};
 use leptos_router::{hooks, NavigateOptions};
 use leptos::logging::log;
-use leptos::reactive::spawn_local_scoped;
 use leptos::task::spawn_local;
 use leptos_use::use_interval_fn;
 use strum::IntoEnumIterator;
@@ -40,14 +39,26 @@ pub fn Home() -> impl IntoView
 	};
 	let toaster = expect_toaster();
 	let clientState = ClientState::expect();
+	let lifecycleEpoch = ModuleHolder::lifecycle_open();
+	let dialogManagerCleanup = dialogManager.clone();
+	on_cleanup(move || {
+		let lifecycleWasClosed = ModuleHolder::lifecycle_closeIf(lifecycleEpoch);
+		if (lifecycleWasClosed || !ModuleHolder::lifecycle_isOpen())
+		{
+			dialogManagerCleanup.clear();
+		}
+	});
 
 	// user data checker to force disconnect
 	let toasterInner = toaster.clone();
 	let clientStateConnection = clientState.clone();
+	let dialogManagerConnection = dialogManager.clone();
+	let disconnectRequested = RwSignal::new(false);
 	Effect::new(move || {
-		if (!clientStateConnection.login_isConnected() || !clientStateConnection.crypto_isAvailable())
+		if ((!clientStateConnection.login_isConnected() || !clientStateConnection.crypto_isAvailable()) && !disconnectRequested.get_untracked())
 		{
-			let callback = user_disconnected(hooks::use_navigate(), toasterInner.clone(), clientStateConnection.clone(), false);
+			disconnectRequested.set(true);
+			let callback = user_disconnected(hooks::use_navigate(), toasterInner.clone(), clientStateConnection.clone(), dialogManagerConnection.clone(), false);
 			callback(());
 		}
 	});
@@ -63,10 +74,10 @@ pub fn Home() -> impl IntoView
 	);
 
 	// pre init ModuleHolder
-	let moduleActions = ModuleActionFn::new(toaster.clone());
+	let moduleActions = ModuleActionFn::new(toaster.clone(), lifecycleEpoch);
 	let innerModuleActions = moduleActions.clone();
 	moduleContent.update(|modules|{
-		modules.moduleActions_set(innerModuleActions);
+		modules.moduleActions_set(lifecycleEpoch, innerModuleActions);
 	});
 
 	// initialise ModuleHolder
@@ -79,19 +90,24 @@ pub fn Home() -> impl IntoView
 		}
 		is_initialized.set(true);
 
-		spawn_local_scoped(ModuleHolder::network_deferredCall(moduleContentInnerInitialLoad.clone(), toasterInnerInitialLoad.clone(), |holder|ModuleHolder::network_modules_retrieve_caller(holder,true),None));
+		ModuleHolder::task_spawn(
+			lifecycleEpoch,
+			ModuleHolder::network_deferredCall(moduleContentInnerInitialLoad.clone(), lifecycleEpoch, toasterInnerInitialLoad.clone(), |holder|ModuleHolder::network_modules_retrieve_caller(holder,true),None)
+		);
 	});
 
 	let editModeValidateFn = editMode_validate(
 		editMode.clone(),
 		toaster.clone(),
 		dialogManager.clone(),
+		lifecycleEpoch,
 	);
 
 	let editModeCancelFn = editMode_cancel(
 		editMode.clone(),
 		toaster.clone(),
 		dialogManager.clone(),
+		lifecycleEpoch,
 	);
 
 	let editModeActivateFn = move |_| {
@@ -102,7 +118,7 @@ pub fn Home() -> impl IntoView
 		});
 	};
 
-	let editModeAddModuleFn = editMode_AddBlock(dialogManager.clone());
+	let editModeAddModuleFn = editMode_AddBlock(dialogManager.clone(), lifecycleEpoch);
 
 	// disconnect func
 	let toasterInner = toaster.clone();
@@ -110,7 +126,7 @@ pub fn Home() -> impl IntoView
 	let disconnectFn = move |_| {
 		let dialogContent = DialogData::new()
 			.setTitle(AllFrontLoginEnum::LOGIN_USER_WANT_DISCONNECTED)
-			.setOnValidate(user_disconnected(hooks::use_navigate(), toasterInner.clone(), clientStateDisconnect.clone(), true));
+			.setOnValidate(user_disconnected(hooks::use_navigate(), toasterInner.clone(), clientStateDisconnect.clone(), dialogManager.clone(), true));
 
 		dialogManager.open(dialogContent);
 	};
@@ -186,10 +202,10 @@ fn editMode_cancel(
 	editModeInnerValidate: RwSignal<bool>,
 	toasterInnerValidate: ToasterContext,
 	dialogManager: DialogManager,
+	lifecycleEpoch: ModuleHolderEpoch,
 ) -> impl Fn(MouseEvent) + Clone
 {
 	return move |_| {
-		let moduleContentInnerValidate = ModuleHolder::getSingleton();
 		let editModeInnerValidate = editModeInnerValidate.clone();
 		let toasterInnerValidate = toasterInnerValidate.clone();
 
@@ -198,11 +214,14 @@ fn editMode_cancel(
 			.setOnValidate(move |_| {
 				let editModeInnerValidate = editModeInnerValidate.clone();
 				let toasterInnerValidate = toasterInnerValidate.clone();
-				spawn_local(async move {
-					ModuleHolder::network_deferredCall(ModuleHolder::getSingleton(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_modules_retrieve_caller(holder,false), Some(AllFrontUIEnum::HOME_CHANGE_CANCEL)).await;
-					editModeInnerValidate.update(|content| {
-						*content = false;
-					});
+				ModuleHolder::task_spawn(lifecycleEpoch, async move {
+					ModuleHolder::network_deferredCall(ModuleHolder::getSingleton(), lifecycleEpoch, toasterInnerValidate.clone(), |holder|ModuleHolder::network_modules_retrieve_caller(holder,false), Some(AllFrontUIEnum::HOME_CHANGE_CANCEL)).await;
+					if (ModuleHolder::lifecycle_isActive(lifecycleEpoch))
+					{
+						editModeInnerValidate.update(|content| {
+							*content = false;
+						});
+					}
 				});
 				return true;
 			});
@@ -215,10 +234,10 @@ fn editMode_validate(
 	editModeInnerValidate: RwSignal<bool>,
 	toasterInnerValidate: ToasterContext,
 	dialogManager: DialogManager,
+	lifecycleEpoch: ModuleHolderEpoch,
 ) -> impl Fn(MouseEvent) + Clone
 {
 	return move |_| {
-		let moduleContentInnerValidate = ModuleHolder::getSingleton();
 		let editModeInnerValidate = editModeInnerValidate.clone();
 		let toasterInnerValidate = toasterInnerValidate.clone();
 
@@ -227,11 +246,14 @@ fn editMode_validate(
 			.setOnValidate(move |_| {
 				let editModeInnerValidate = editModeInnerValidate.clone();
 				let toasterInnerValidate = toasterInnerValidate.clone();
-				spawn_local(async move {
-					ModuleHolder::network_deferredCall(ModuleHolder::getSingleton(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_modules_update_caller(holder), Some(AllFrontUIEnum::HOME_CHANGE_OK)).await;
-					editModeInnerValidate.update(|content| {
-						*content = false;
-					});
+				ModuleHolder::task_spawn(lifecycleEpoch, async move {
+					ModuleHolder::network_deferredCall(ModuleHolder::getSingleton(), lifecycleEpoch, toasterInnerValidate.clone(), |holder|ModuleHolder::network_modules_update_caller(holder), Some(AllFrontUIEnum::HOME_CHANGE_OK)).await;
+					if (ModuleHolder::lifecycle_isActive(lifecycleEpoch))
+					{
+						editModeInnerValidate.update(|content| {
+							*content = false;
+						});
+					}
 				});
 				return true;
 			});
@@ -240,13 +262,12 @@ fn editMode_validate(
 	};
 }
 
-fn editMode_AddBlock(dialogManager: DialogManager) -> impl Fn(MouseEvent) + Clone
+fn editMode_AddBlock(dialogManager: DialogManager, lifecycleEpoch: ModuleHolderEpoch) -> impl Fn(MouseEvent) + Clone
 {
 	return move |_| {
 		let selectedType = ArcRwSignal::new("".to_string());
 
 		let selectedTypeInnerView = selectedType.clone();
-		let moduleContentInnerValidate = ModuleHolder::getSingleton();
 		let dialogContent = DialogData::new()
 			.setTitle(AllFrontUIEnum::HOME_CHANGE_NEW)
 			.setBody(move || {
@@ -281,7 +302,7 @@ fn editMode_AddBlock(dialogManager: DialogManager) -> impl Fn(MouseEvent) + Clon
 				ModuleHolder::getSingleton().update(|modules| {
 
 					let Some(moduleType) = StringToModuleType(selectedType) else {return;};
-					modules.blocks_insert(ModulePositions::new(moduleType));
+					modules.blocks_insert(lifecycleEpoch, ModulePositions::new(moduleType));
 				});
 
 				return true;
@@ -291,12 +312,15 @@ fn editMode_AddBlock(dialogManager: DialogManager) -> impl Fn(MouseEvent) + Clon
 	}
 }
 
-fn user_disconnected(navigate: impl Fn(&str, NavigateOptions) + Clone + 'static, toaster: ToasterContext, clientState: ClientState, withToaster: bool) -> impl Fn(()) -> bool + Clone
+fn user_disconnected(navigate: impl Fn(&str, NavigateOptions) + Clone + 'static, toaster: ToasterContext, clientState: ClientState, dialogManager: DialogManager, withToaster: bool) -> impl Fn(()) -> bool + Clone
 {
 	return move |_| {
+		ModuleHolder::lifecycle_close();
+		dialogManager.clear();
 		let navigate = navigate.clone();
 		let toaster = toaster.clone();
 		let clientState = clientState.clone();
+		// Logout owns only App-level contexts and must finish after the ModuleHolder Owner is closed.
 		spawn_local(async move {
 			let disconnectError = ClientCryptoContext::logout().await;
 			let storageClearFailed = clientState.local_clear().is_err();

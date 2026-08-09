@@ -11,6 +11,7 @@ use crate::front::utils::fluent::FluentManager::FluentManager;
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
 use crate::front::utils::translate::Translate;
 use crate::front::utils::users_data::{ClientCryptoContext, ClientState};
+use crate::front::modules::module_holder::ModuleHolder;
 use crate::HWebTrace;
 
 #[island]
@@ -36,6 +37,7 @@ pub fn Connection() -> impl IntoView {
 					return;
 				},
 			};
+			ModuleHolder::lifecycle_close();
 			if (clientState.login_apply(crypto).is_err())
 			{
 				if (ClientCryptoContext::logout().await.is_some())

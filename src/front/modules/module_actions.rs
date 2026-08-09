@@ -1,14 +1,13 @@
 use std::sync::Arc;
 use leptoaster::ToasterContext;
-use leptos::prelude::{WithUntracked};
-use leptos::reactive::{spawn_local_scoped};
-use crate::front::modules::module_holder::ModuleHolder;
+use crate::front::modules::module_holder::{ModuleHolder, ModuleHolderEpoch};
 use crate::api::modules::components::ModuleID;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 
 #[derive(Clone)]
 pub struct ModuleActionFn
 {
+	_epoch: ModuleHolderEpoch,
 	/// (moduleName/key, login)
 	pub updateFn: Arc<dyn Fn(ModuleID) + Send + Sync>,
 	pub getFn: Arc<dyn Fn(ModuleID) + Send + Sync>,
@@ -18,70 +17,99 @@ pub struct ModuleActionFn
 
 impl ModuleActionFn
 {
-	pub fn new(
-	           toasterInnerValidate: ToasterContext) -> Self
+	pub(crate) fn new(
+	           toasterInnerValidate: ToasterContext,
+	           epoch: ModuleHolderEpoch) -> Self
 	{
 		Self {
-			updateFn: Arc::new(Self::module_update(toasterInnerValidate.clone())),
-			getFn: Arc::new(Self::module_get( toasterInnerValidate.clone(), true)),
-			removeFn: Arc::new(Self::module_remove(toasterInnerValidate.clone())),
-			refreshFn: Arc::new(Self::module_refresh(toasterInnerValidate.clone())),
+			_epoch: epoch,
+			updateFn: Arc::new(Self::module_update(toasterInnerValidate.clone(), epoch)),
+			getFn: Arc::new(Self::module_get( toasterInnerValidate.clone(), true, epoch)),
+			removeFn: Arc::new(Self::module_remove(toasterInnerValidate.clone(), epoch)),
+			refreshFn: Arc::new(Self::module_refresh(toasterInnerValidate.clone(), epoch)),
 		}
+	}
+
+	pub(super) fn task_spawn(&self, task: impl Future<Output = ()> + 'static)
+	{
+		ModuleHolder::task_spawn(self._epoch, task);
+	}
+
+	pub(super) fn lifecycle_isActive(&self) -> bool
+	{
+		return ModuleHolder::lifecycle_isActive(self._epoch);
+	}
+
+	#[cfg(test)]
+	pub(super) fn test_get(epoch: ModuleHolderEpoch) -> Self
+	{
+		return Self {
+			_epoch: epoch,
+			updateFn: Arc::new(|_| {}),
+			getFn: Arc::new(|_| {}),
+			removeFn: Arc::new(|_| {}),
+			refreshFn: Arc::new(|_| {}),
+		};
 	}
 
 	fn module_update(
 		toasterInnerValidate: ToasterContext,
+		epoch: ModuleHolderEpoch,
 		//dialog: DialogManager
 	) -> impl Fn((ModuleID)) -> ()
 	{
 		return move |(moduleId)| {
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
-			spawn_local_scoped(
-				ModuleHolder::network_deferredCall(ModuleHolder::getSingleton().clone(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_module_update_caller(holder,moduleId), Some(AllFrontUIEnum::UPDATE))
+			ModuleHolder::task_spawn(
+				epoch,
+				ModuleHolder::network_deferredCall(ModuleHolder::getSingleton().clone(), epoch, toasterInnerValidate.clone(), |holder|ModuleHolder::network_module_update_caller(holder,moduleId), Some(AllFrontUIEnum::UPDATE))
 			);
 		};
 	}
 
 	fn module_get(
 		toasterInnerValidate: ToasterContext,
-		force: bool
+		force: bool,
+		epoch: ModuleHolderEpoch,
 		//dialog: DialogManager
 	) -> impl Fn((ModuleID)) -> ()
 	{
 		return move |(moduleId)| {
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
-			spawn_local_scoped(
-				ModuleHolder::network_deferredCall(ModuleHolder::getSingleton().clone(), toasterInnerValidate.clone(), move |holder|ModuleHolder::network_module_retrieve_caller(holder,moduleId,force), None)
+			ModuleHolder::task_spawn(
+				epoch,
+				ModuleHolder::network_deferredCall(ModuleHolder::getSingleton().clone(), epoch, toasterInnerValidate.clone(), move |holder|ModuleHolder::network_module_retrieve_caller(holder,moduleId,force), None)
 			);
 		};
 	}
 
 	fn module_remove(
 		toasterInnerValidate: ToasterContext,
+		epoch: ModuleHolderEpoch,
 		//dialog: DialogManager
 	) -> impl Fn((ModuleID)) -> ()
 	{
 		return move |(moduleId)| {
 			let toasterInnerValidate = toasterInnerValidate.clone();
 
-			spawn_local_scoped(
-				ModuleHolder::network_deferredCall(ModuleHolder::getSingleton(), toasterInnerValidate.clone(), |holder|ModuleHolder::network_module_remove_caller(holder,moduleId), Some(AllFrontUIEnum::REMOVED))
+			ModuleHolder::task_spawn(
+				epoch,
+				ModuleHolder::network_deferredCall(ModuleHolder::getSingleton(), epoch, toasterInnerValidate.clone(), |holder|ModuleHolder::network_module_remove_caller(holder,moduleId), Some(AllFrontUIEnum::REMOVED))
 			);
 		};
 	}
 
 	fn module_refresh(
 		toaster: ToasterContext,
+		epoch: ModuleHolderEpoch,
 		//dialog: DialogManager
 	) -> impl Fn((ModuleID)) -> ()
 	{
 		return move |(moduleId)| {
 			let toaster = toaster.clone();
-			ModuleHolder::getSingleton().with_untracked(|modules|{
-				modules.module_refresh(vec![moduleId], toaster);
-			});
+			ModuleHolder::module_refresh(epoch, vec![moduleId], toaster);
 		};
 	}
 }

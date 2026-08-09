@@ -2,11 +2,11 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use leptoaster::ToasterContext;
-use leptos::prelude::{ArcRwSignal, Set, Update, WithUntracked};
-use leptos::reactive::{spawn_local_scoped};
+use leptos::prelude::{ArcRwSignal, Owner, Set, Update, WithUntracked};
+use leptos::reactive::spawn_local_scoped_with_cancellation;
 use crate::api::modules::{API_module_remove, API_module_retrieve, API_modules_retrieve, API_modules_update, ModuleApiError, ModuleReturnRetrieve};
 use crate::api::modules::components::{ApiModulesID, ModuleContent, ModuleID};
-use crate::front::modules::components::{API_return_apply, ApiCall, Backable, Cacheable, ModuleName, PausableStocker, RefreshTime};
+use crate::front::modules::components::{API_return_apply, ApiCall, Backable, BoxFuture, Cacheable, ModuleName, PausableStocker, RefreshTime};
 use crate::front::modules::link::LinksHolder;
 use crate::front::modules::module_actions;
 use crate::front::modules::module_positions::ModulePositions;
@@ -21,13 +21,47 @@ thread_local! {
         const { RefCell::new(None) };
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ModuleHolderEpoch(u64);
+
+struct ModuleRefreshTask
+{
+	owner: Owner,
+	futures: Vec<BoxFuture>,
+}
+
+impl ModuleRefreshTask
+{
+	fn spawn(self)
+	{
+		self.owner.with(|| {
+			spawn_local_scoped_with_cancellation(async move {
+				for oneFuture in self.futures
+				{
+					oneFuture.await;
+				}
+			});
+		});
+	}
+}
+
 #[cfg(test)]
 mod tests
 {
+	use std::sync::Arc;
+	use std::sync::atomic::{AtomicBool, Ordering};
+
 	use crate::api::modules::ModuleApiError;
-	use crate::front::modules::components::API_return_apply;
+	use crate::api::modules::components::ModuleID;
+	use crate::front::modules::components::{API_return_apply, PausableStocker};
+	use crate::front::modules::module_actions::ModuleActionFn;
+	use crate::front::modules::module_positions::ModulePositions;
+	use crate::front::modules::module_type::ModuleType;
+	use crate::front::modules::todo::Todo;
 	use crate::front::utils::all_front_enum::AllFrontErrorEnum;
 	use crate::front::utils::users_data::ClientCryptoContext;
+	use leptoaster::ToasterContext;
+	use leptos::prelude::{ArcRwSignal, Owner};
 
 	use super::ModuleHolder;
 
@@ -63,6 +97,80 @@ mod tests
 		assert!(result.update.is_empty());
 		assert!(result.moduleIdToRefresh.is_empty());
 	}
+
+	#[test]
+	fn lifecycleClose_resetsDecryptedStateAndOwnedResources()
+	{
+		let parentOwner = Owner::new();
+		parentOwner.with(|| {
+			let mut holder = ModuleHolder::new();
+			let (epoch, previousOwner) = holder.lifecycle_open_inner();
+			assert!(previousOwner.is_none());
+
+			let moduleId = ModuleID {id: "account-a-module".to_string()};
+			holder._links.id_set(ModuleID {id: "account-a-links".to_string()});
+			holder._blocks.insert(
+				moduleId.clone(),
+				ArcRwSignal::new(ModulePositions::new(ModuleType::TODO(Todo::new()))),
+			);
+			holder._crons.insert(moduleId, PausableStocker::test_paused());
+			holder._moduleActions = Some(ModuleActionFn::test_get(epoch));
+			holder._blockNb = 7;
+
+			let ownerWasCleaned = Arc::new(AtomicBool::new(false));
+			let ownerWasCleanedInner = ownerWasCleaned.clone();
+			holder._taskOwner.as_ref().unwrap().with(|| {
+				Owner::on_cleanup(move || ownerWasCleanedInner.store(true, Ordering::Relaxed));
+			});
+
+			let taskOwner = holder.lifecycle_close_inner().unwrap();
+			assert!(!holder.lifecycle_epoch_isActive(epoch));
+			assert!(holder._blocks.is_empty());
+			assert!(holder._crons.is_empty());
+			assert!(holder._moduleActions.is_none());
+			assert_eq!(holder._blockNb, 0);
+			assert_ne!(holder._links.id_get().id, "account-a-links");
+
+			taskOwner.cleanup();
+			assert!(ownerWasCleaned.load(Ordering::Relaxed));
+		});
+		parentOwner.cleanup();
+	}
+
+	#[test]
+	fn accountTransition_rejectsOldCloseAndLateNetworkResult()
+	{
+		let parentOwner = Owner::new();
+		parentOwner.with(|| {
+			let mut holder = ModuleHolder::new();
+			let (accountAEpoch, _) = holder.lifecycle_open_inner();
+			holder._blockNb = 8;
+
+			let (accountBEpoch, accountAOwner) = holder.lifecycle_open_inner();
+			accountAOwner.unwrap().cleanup();
+			assert!(!holder.lifecycle_epoch_isActive(accountAEpoch));
+			assert!(holder.lifecycle_epoch_isActive(accountBEpoch));
+			assert_eq!(holder._blockNb, 0);
+
+			let (oldCloseApplied, oldOwner) = holder.lifecycle_closeIf_inner(accountAEpoch);
+			assert!(!oldCloseApplied);
+			assert!(oldOwner.is_none());
+			assert!(holder.lifecycle_epoch_isActive(accountBEpoch));
+
+			let mut staleResult = API_return_apply::default();
+			staleResult.retrieve.push(Box::new(|holder| holder._blockNb = 13));
+			holder.network_apply(accountAEpoch, staleResult, ToasterContext::default());
+			assert_eq!(holder._blockNb, 0);
+
+			let mut currentResult = API_return_apply::default();
+			currentResult.retrieve.push(Box::new(|holder| holder._blockNb = 21));
+			holder.network_apply(accountBEpoch, currentResult, ToasterContext::default());
+			assert_eq!(holder._blockNb, 21);
+
+			holder.lifecycle_close_inner().unwrap().cleanup();
+		});
+		parentOwner.cleanup();
+	}
 }
 
 pub struct ModuleHolder
@@ -72,6 +180,9 @@ pub struct ModuleHolder
 	_crons: HashMap<ModuleID, PausableStocker>,
 	_moduleActions: Option<module_actions::ModuleActionFn>,
 	_blockNb: usize,
+	_epochCounter: u64,
+	_activeEpoch: Option<ModuleHolderEpoch>,
+	_taskOwner: Option<Owner>,
 }
 
 impl ModuleHolder
@@ -91,27 +202,148 @@ impl ModuleHolder
 			_crons: Default::default(),
 			_moduleActions: None,
 			_blockNb: 0,
+			_epochCounter: 0,
+			_activeEpoch: None,
+			_taskOwner: None,
 		}
 	}
 
-	pub fn moduleActions_set(&mut self, ma: module_actions::ModuleActionFn)
+	pub(crate) fn lifecycle_open() -> ModuleHolderEpoch
 	{
-		self._moduleActions = Some(ma);
+		let (epoch, previousOwner) = Self::getSingleton()
+			.try_update(|holder| holder.lifecycle_open_inner())
+			.expect("the permanent ModuleHolder singleton must remain writable while Home opens");
+		if let Some(previousOwner) = previousOwner
+		{
+			previousOwner.cleanup();
+		}
+		return epoch;
 	}
 
-	fn network_apply(&mut self, mut toApply: API_return_apply,toaster: ToasterContext)
+	pub(crate) fn lifecycle_close()
 	{
+		let owner = Self::getSingleton()
+			.try_update(|holder| holder.lifecycle_close_inner())
+			.flatten();
+		if let Some(owner) = owner
+		{
+			owner.cleanup();
+		}
+	}
+
+	pub(crate) fn lifecycle_closeIf(epoch: ModuleHolderEpoch) -> bool
+	{
+		let Some((wasClosed, owner)) = Self::getSingleton()
+			.try_update(|holder| holder.lifecycle_closeIf_inner(epoch))
+		else
+		{
+			return false;
+		};
+		if let Some(owner) = owner
+		{
+			owner.cleanup();
+		}
+		return wasClosed;
+	}
+
+	pub(crate) fn task_spawn(epoch: ModuleHolderEpoch, task: impl Future<Output = ()> + 'static)
+	{
+		let owner = Self::getSingleton().with_untracked(|holder| holder.lifecycle_owner_get(epoch));
+		if let Some(owner) = owner
+		{
+			owner.with(|| spawn_local_scoped_with_cancellation(task));
+		}
+	}
+
+	pub(crate) fn lifecycle_isActive(epoch: ModuleHolderEpoch) -> bool
+	{
+		return Self::getSingleton().with_untracked(|holder| holder.lifecycle_epoch_isActive(epoch));
+	}
+
+	pub(crate) fn lifecycle_isOpen() -> bool
+	{
+		return Self::getSingleton().with_untracked(|holder| holder._activeEpoch.is_some());
+	}
+
+	fn lifecycle_open_inner(&mut self) -> (ModuleHolderEpoch, Option<Owner>)
+	{
+		let previousOwner = self.lifecycle_close_inner();
+		self._epochCounter = self._epochCounter.checked_add(1)
+			.expect("ModuleHolder lifecycle epoch exhausted");
+		let epoch = ModuleHolderEpoch(self._epochCounter);
+		self._activeEpoch = Some(epoch);
+		self._taskOwner = Some(Owner::new());
+		return (epoch, previousOwner);
+	}
+
+	fn lifecycle_close_inner(&mut self) -> Option<Owner>
+	{
+		self._activeEpoch = None;
+		let owner = self._taskOwner.take();
+		self._crons.clear();
+		self._moduleActions = None;
+		self._blocks.clear();
+		self._links = LinksHolder::new();
+		self._blockNb = 0;
+		return owner;
+	}
+
+	fn lifecycle_closeIf_inner(&mut self, epoch: ModuleHolderEpoch) -> (bool, Option<Owner>)
+	{
+		if (!self.lifecycle_epoch_isActive(epoch))
+		{
+			return (false, None);
+		}
+		return (true, self.lifecycle_close_inner());
+	}
+
+	fn lifecycle_epoch_isActive(&self, epoch: ModuleHolderEpoch) -> bool
+	{
+		return self._activeEpoch == Some(epoch);
+	}
+
+	fn lifecycle_owner_get(&self, epoch: ModuleHolderEpoch) -> Option<Owner>
+	{
+		if (!self.lifecycle_epoch_isActive(epoch))
+		{
+			return None;
+		}
+		return self._taskOwner.clone();
+	}
+
+	pub(crate) fn moduleActions_set(&mut self, epoch: ModuleHolderEpoch, ma: module_actions::ModuleActionFn)
+	{
+		if (self.lifecycle_epoch_isActive(epoch))
+		{
+			self._moduleActions = Some(ma);
+		}
+	}
+
+	fn network_apply(&mut self, epoch: ModuleHolderEpoch, mut toApply: API_return_apply,toaster: ToasterContext) -> Option<ModuleRefreshTask>
+	{
+		if (!self.lifecycle_epoch_isActive(epoch))
+		{
+			return None;
+		}
 		toApply.retrieve.into_iter().for_each(|f| f(self));
 		toApply.update.into_iter().for_each(|f| f(self));
 
-		self.module_refresh(toApply.moduleIdToRefresh.drain(..).collect(), toaster);
+		return self.module_refresh_prepare(epoch, toApply.moduleIdToRefresh.drain(..).collect(), toaster);
 	}
 
-	pub fn network_deferredCall(moduleHolder: ArcRwSignal<ModuleHolder>, toaster: ToasterContext, apiCall: impl FnOnce(ArcRwSignal<ModuleHolder>) -> Option<ApiCall>, toastingSuccess: Option<AllFrontUIEnum>) -> impl Future<Output = ()>
+	pub(crate) fn network_deferredCall(moduleHolder: ArcRwSignal<ModuleHolder>, epoch: ModuleHolderEpoch, toaster: ToasterContext, apiCall: impl FnOnce(ArcRwSignal<ModuleHolder>) -> Option<ApiCall>, toastingSuccess: Option<AllFrontUIEnum>) -> impl Future<Output = ()>
 	{
 		async move {
+			if (!moduleHolder.with_untracked(|holder| holder.lifecycle_epoch_isActive(epoch)))
+			{
+				return;
+			}
 			let Some(apiCall) = apiCall(moduleHolder.clone()) else {return;};
 			let mut apiResult = apiCall.await;
+			if (!moduleHolder.with_untracked(|holder| holder.lifecycle_epoch_isActive(epoch)))
+			{
+				return;
+			}
 			let hasErrors = !apiResult.error.is_empty();
 			let authenticationRequired = apiResult.authenticationRequired;
 			let authenticationWasLocal = if (authenticationRequired)
@@ -128,6 +360,10 @@ impl ModuleHolder
 				if (!authenticationRequired || authenticationWasLocal)
 				{
 					toastingErr(&toaster, err).await;
+					if (!moduleHolder.with_untracked(|holder| holder.lifecycle_epoch_isActive(epoch)))
+					{
+						return;
+					}
 				}
 			};
 
@@ -137,6 +373,8 @@ impl ModuleHolder
 				{
 					toastingErr(&toaster, AllFrontErrorEnum::CRYPTO_STORAGE_FAILED).await;
 				}
+				Self::lifecycle_closeIf(epoch);
+				return;
 			}
 
 			if (!hasErrors)
@@ -144,12 +382,20 @@ impl ModuleHolder
 				if let Some(toastingSuccess) = toastingSuccess
 				{
 					toaster_helpers::toastingSuccess(&toaster, toastingSuccess).await;
+					if (!moduleHolder.with_untracked(|holder| holder.lifecycle_epoch_isActive(epoch)))
+					{
+						return;
+					}
 				}
 			}
 
-			moduleHolder.update(|holder| {
-				holder.network_apply(apiResult,toaster);
-			});
+			let refreshTask = moduleHolder
+				.try_update(|holder| holder.network_apply(epoch, apiResult,toaster))
+				.flatten();
+			if let Some(refreshTask) = refreshTask
+			{
+				refreshTask.spawn();
+			}
 		}
 	}
 
@@ -525,10 +771,23 @@ impl ModuleHolder
 		).await;*/
 	}
 
-	pub fn module_refresh(&self, modulesId: Vec<ModuleID>, toaster: ToasterContext)
+	pub(super) fn module_refresh(epoch: ModuleHolderEpoch, modulesId: Vec<ModuleID>, toaster: ToasterContext)
 	{
-		let mut allBoxedFutur = vec![];
-		for moduleId in modulesId {
+		let refreshTask = Self::getSingleton().with_untracked(|holder| {
+			holder.module_refresh_prepare(epoch, modulesId, toaster)
+		});
+		if let Some(refreshTask) = refreshTask
+		{
+			refreshTask.spawn();
+		}
+	}
+
+	fn module_refresh_prepare(&self, epoch: ModuleHolderEpoch, modulesId: Vec<ModuleID>, toaster: ToasterContext) -> Option<ModuleRefreshTask>
+	{
+		let owner = self.lifecycle_owner_get(epoch)?;
+		let mut allBoxedFuture = vec![];
+		for moduleId in modulesId
+		{
 			let Some(oneModule) = self._blocks.get(&moduleId)
 			else
 			{
@@ -541,15 +800,17 @@ impl ModuleHolder
 					.refresh(actions.clone(), moduleId.clone(), toaster.clone()));
 				if let Some(refreshFutur) = tmp
 				{
-					allBoxedFutur.push(refreshFutur);
+					allBoxedFuture.push(refreshFutur);
 				}
 			}
 		}
-
-		spawn_local_scoped(async move {
-			for oneFutur in allBoxedFutur {
-				oneFutur.await;
-			}
+		if (allBoxedFuture.is_empty())
+		{
+			return None;
+		}
+		return Some(ModuleRefreshTask {
+			owner,
+			futures: allBoxedFuture,
 		});
 	}
 
@@ -634,8 +895,12 @@ impl ModuleHolder
 			.collect()
 	}
 
-	pub fn blocks_insert(&mut self, newmodule: ModulePositions<ModuleType>)
+	pub(crate) fn blocks_insert(&mut self, epoch: ModuleHolderEpoch, newmodule: ModulePositions<ModuleType>)
 	{
+		if (!self.lifecycle_epoch_isActive(epoch))
+		{
+			return;
+		}
 		newmodule.depth_set(self._blockNb as u32);
 		self._blocks.insert(ModuleID::new(), ArcRwSignal::new(newmodule));
 		self._blockNb += 1;

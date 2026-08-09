@@ -5,6 +5,7 @@ use crate::api::IsToastable;
 use crate::front::utils::all_front_enum::AllFrontErrorEnum;
 use crate::front::utils::fluent::FluentManager::FluentManager;
 use crate::front::utils::users_data::ClientState;
+use crate::front::modules::module_holder::ModuleHolder;
 
 pub async fn toastingSuccess(toaster: &ToasterContext,keyTranslate: impl ToString)
 {
@@ -62,6 +63,7 @@ pub async fn toaster_api<T>(toaster: &ToasterContext, apiFn: Result<T,impl IsToa
 				{
 					toastingErr(toaster, AllFrontErrorEnum::CRYPTO_STORAGE_FAILED).await;
 				}
+				ModuleHolder::lifecycle_close();
 			}
 		},
 	};

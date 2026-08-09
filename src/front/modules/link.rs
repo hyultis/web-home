@@ -16,7 +16,6 @@ use leptos::prelude::{
 };
 use leptos::prelude::{BindAttribute, GetUntracked, ViewFn, With, Write};
 use leptos::prelude::{CollectView, ElementChild, IntoAny, RwSignal};
-use leptos::task::spawn_local;
 use leptos::{component, view, IntoView};
 use leptos_use::{
 	use_draggable_with_options, use_mouse_in_element, UseDraggableOptions, UseDraggableReturn,
@@ -89,6 +88,7 @@ impl LinksHolder
 		content: ArcRwSignal<Vec<Link>>,
 		cache: ArcRwSignal<Cache>,
 		dialogManager: DialogManager,
+		moduleActions: ModuleActionFn,
 	) -> impl IntoView
 	{
 		// drop zone
@@ -127,7 +127,7 @@ impl LinksHolder
 			style, is_dragging, ..
 		} = use_draggable_with_options(el, config);
 
-		let fnRemove = Self::removeLinkPopupFn(dialogManager, content, cache, pos);
+		let fnRemove = Self::removeLinkPopupFn(dialogManager, content, cache, pos, moduleActions);
 
 		return view! {
 			<div class="button ghost" style=move || {
@@ -153,6 +153,7 @@ impl LinksHolder
 		content: ArcRwSignal<Vec<Link>>,
 		cache: ArcRwSignal<Cache>,
 		pos: usize,
+		moduleActions: ModuleActionFn,
 	) -> impl Fn(MouseEvent)
 	{
 		let content = content.clone();
@@ -161,11 +162,16 @@ impl LinksHolder
 		return move |_| {
 			let content = content.clone();
 			let cache = cache.clone();
+			let moduleActions = moduleActions.clone();
 
 			let dialogContent =
 				DialogData::new()
 					.setTitle("MODULE_RSS_DEL")
 					.setOnValidate(move |_| {
+						if (!moduleActions.lifecycle_isActive())
+						{
+							return true;
+						}
 						content.update(|links| {
 							links.remove(pos);
 						});
@@ -182,6 +188,7 @@ impl LinksHolder
 		content: ArcRwSignal<Vec<Link>>,
 		cache: ArcRwSignal<Cache>,
 		dialogManager: DialogManager,
+		moduleActions: ModuleActionFn,
 	) -> impl Fn(MouseEvent) + Clone + 'static
 	{
 		let toaster = expect_toaster();
@@ -195,6 +202,7 @@ impl LinksHolder
 			let content = content.clone();
 			let cache = cache.clone();
 			let toaster = toaster.clone();
+			let moduleActions = moduleActions.clone();
 
 			let dialogContent = DialogData::new()
 				.setTitle("MODULE_RSS_ADD")
@@ -224,6 +232,10 @@ impl LinksHolder
 					.into_any()
 				})
 				.setOnValidate(move |_| {
+					if (!moduleActions.lifecycle_isActive())
+					{
+						return true;
+					}
 					let label = label.clone().get();
 					let url = url.clone().get();
 					let toaster = toaster.clone();
@@ -233,7 +245,7 @@ impl LinksHolder
 						let mut params = HashMap::new();
 						params.insert("input".to_string(), "url".to_string());
 
-						spawn_local(async move {
+						moduleActions.task_spawn(async move {
 							toastingParams(
 								toaster.clone(),
 								AllFrontUIEnum::MUST_NOT_EMPTY,
@@ -249,7 +261,7 @@ impl LinksHolder
 						let mut params = HashMap::new();
 						params.insert("input".to_string(), "label".to_string());
 
-						spawn_local(async move {
+						moduleActions.task_spawn(async move {
 							toastingParams(
 								toaster.clone(),
 								AllFrontUIEnum::MUST_NOT_EMPTY,
@@ -263,7 +275,7 @@ impl LinksHolder
 
 					if (Url::parse(&url).is_err())
 					{
-						spawn_local(async move {
+						moduleActions.task_spawn(async move {
 							toastingErr(&toaster, AllFrontUIEnum::INVALID_URL).await;
 						});
 						return false;
@@ -334,13 +346,13 @@ impl Backable for LinksHolder
 		LinksHolder::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>, _: ModuleActionFn, _: ModuleID) -> ViewFn
+	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, _: ModuleID) -> ViewFn
 	{
 		let contentInner = self.content.clone();
 		let updateInner = self._update.clone();
 		ViewFn::from(move || {
 			view! {
-				<LinksDraw content=contentInner.clone() update=updateInner.clone() editMode=editMode/>
+				<LinksDraw content=contentInner.clone() update=updateInner.clone() editMode=editMode moduleActions=moduleActions.clone()/>
 			}
 			.into_any()
 		})
@@ -412,6 +424,7 @@ fn LinksDraw(
 	content: ArcRwSignal<Vec<Link>>,
 	update: ArcRwSignal<Cache>,
 	editMode: RwSignal<bool>,
+	moduleActions: ModuleActionFn,
 ) -> impl IntoView
 {
 	let Some(dialogManager) = use_context::<DialogManager>()
@@ -422,7 +435,7 @@ fn LinksDraw(
 	};
 
 	let addLinkFn =
-		LinksHolder::addLinkPopupFn(content.clone(), update.clone(), dialogManager.clone());
+		LinksHolder::addLinkPopupFn(content.clone(), update.clone(), dialogManager.clone(), moduleActions.clone());
 
 	let draggedOriginPosition: ArcRwSignal<Option<usize>> = ArcRwSignal::new(None);
 	let draggedTargetPosition: ArcRwSignal<Option<usize>> = ArcRwSignal::new(None);
@@ -496,12 +509,13 @@ fn LinksDraw(
 					let contentInner = content.clone();
 					let updateInner = update.clone();
 					let dialogManagerInner = dialogManager.clone();
+					let moduleActionsInner = moduleActions.clone();
 					content.with(|links|{
 						links.iter()
 							.enumerate()
 							.map(move |(key,link)|
 							if editMode
-								{return LinksHolder::draw_editable_link(&link,key,draggedOriginPositionInner.clone(),draggedTargetPositionInner.clone(),somethingIsDraggingInner.clone(), contentInner.clone(), updateInner.clone(),dialogManagerInner.clone()).into_any();}
+								{return LinksHolder::draw_editable_link(&link,key,draggedOriginPositionInner.clone(),draggedTargetPositionInner.clone(),somethingIsDraggingInner.clone(), contentInner.clone(), updateInner.clone(),dialogManagerInner.clone(),moduleActionsInner.clone()).into_any();}
 							else
 								{return LinksHolder::draw_link(&link).into_any();}
 						)

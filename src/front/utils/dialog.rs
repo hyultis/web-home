@@ -213,6 +213,11 @@ impl DialogManager
 		self.dialog.set(Some(dialog));
 	}
 
+	pub(crate) fn clear(&self)
+	{
+		self.innerClose();
+	}
+
 	/// Ferme la popup courante
 	pub fn close(&self, start: impl Fn(()) + Clone + Send + Sync)
 	{
@@ -258,8 +263,8 @@ impl DialogManager
 #[cfg(test)]
 mod tests
 {
-	use super::DialogData;
-	use leptos::prelude::Owner;
+	use super::{DialogData, DialogManager};
+	use leptos::prelude::{GetUntracked, Owner};
 	use std::sync::Arc;
 	use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -281,6 +286,21 @@ mod tests
 
 		assert!(dialog.run_validate());
 		assert!(wasCalled.load(Ordering::Relaxed));
+	}
+
+	#[test]
+	fn dialog_clear_dropsAccountScopedContentImmediately()
+	{
+		let owner = Owner::new();
+		owner.with(|| {
+			let manager = DialogManager::new();
+			manager.open(DialogData::new().setTitle("account-a-content"));
+			assert!(manager.dialog.get_untracked().is_some());
+
+			manager.clear();
+			assert!(manager.dialog.get_untracked().is_none());
+		});
+		owner.cleanup();
 	}
 }
 

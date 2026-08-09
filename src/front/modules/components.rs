@@ -342,6 +342,16 @@ impl PausableStocker {
 		self.pause();
 		self.resume();
 	}
+
+	#[cfg(test)]
+	pub(super) fn test_paused() -> Self
+	{
+		return Self {
+			every_ms: 1_000,
+			on_tick: Arc::new(|| {}),
+			handle: None,
+		};
+	}
 }
 
 pub struct API_return_apply

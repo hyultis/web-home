@@ -1,12 +1,9 @@
 use wasm_bindgen::JsCast;
 use web_sys::{Blob, BlobPropertyBag, Url, HtmlAnchorElement};
 use js_sys::Uint8Array;
-use leptoaster::ToasterContext;
-use leptos::task::spawn_local;
 use crate::api::proxys::imap_components::Attachment;
-use crate::front::utils::toaster_helpers::toastingErr;
 
-pub fn download_attachment(att: Attachment, toasterInner: ToasterContext) {
+pub fn download_attachment(att: Attachment) -> bool {
 	let filename = att
 		.filename
 		.clone()
@@ -24,32 +21,20 @@ pub fn download_attachment(att: Attachment, toasterInner: ToasterContext) {
 		&js_sys::Array::of1(&uint8_array),
 		&blob_opts,
 	) else {
-		spawn_local(async move {
-			toastingErr(&toasterInner, "MODULE_MAIL_BLOBCREATORERROR").await;
-		});
-		return;
+		return false;
 	};
 
 	// Object URL
 	let Ok(url) = Url::create_object_url_with_blob(&blob) else {
-		spawn_local(async move {
-			toastingErr(&toasterInner, "MODULE_MAIL_BLOBCREATORERROR").await;
-		});
-		return;
+		return false;
 	};
 
 	// <a download>
 	let Some(window) = web_sys::window() else {
-		spawn_local(async move {
-			toastingErr(&toasterInner, "MODULE_MAIL_BLOBCREATORERROR").await;
-		});
-		return;
+		return false;
 	};
 	let Some(document) = window.document() else {
-		spawn_local(async move {
-			toastingErr(&toasterInner, "MODULE_MAIL_BLOBCREATORERROR").await;
-		});
-		return;
+		return false;
 	};
 	let a = document
 		.create_element("a")
@@ -67,4 +52,5 @@ pub fn download_attachment(att: Attachment, toasterInner: ToasterContext) {
 	// Cleanup
 	document.body().unwrap().remove_child(&a).unwrap();
 	Url::revoke_object_url(&url).unwrap();
+	return true;
 }

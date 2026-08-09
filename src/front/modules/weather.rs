@@ -149,7 +149,7 @@ impl Backable for Weather
 		let refreshContent = self.weatherContent.clone();
 
 		return Some(Box::pin(async move {
-			sync_weather_api(config, refreshContent).await;
+			sync_weather_api(config, refreshContent, moduleActions).await;
 		}));
 	}
 
@@ -345,8 +345,13 @@ struct WeatherApiResult
 async fn sync_weather_api(
 	config: ArcRwSignal<WeatherConfig>,
 	weatherContent: ArcRwSignal<Option<WeatherApiResult>>,
+	moduleActions: ModuleActionFn,
 )
 {
+	if (!moduleActions.lifecycle_isActive())
+	{
+		return;
+	}
 	if let Some(lastContent) = (weatherContent.clone().get_untracked())
 	{
 		if (Cache::now() - lastContent.lastUpdate.get() < 30 * 1_000_000_000)
@@ -398,6 +403,10 @@ async fn sync_weather_api(
 		{
 			return;
 		};
+		if (!moduleActions.lifecycle_isActive())
+		{
+			return;
+		}
 		let Ok(resp): Result<Response, _> = resp_value.dyn_into()
 		else
 		{
@@ -415,6 +424,10 @@ async fn sync_weather_api(
 		{
 			return;
 		};
+		if (!moduleActions.lifecycle_isActive())
+		{
+			return;
+		}
 		let Some(text) = text_js.as_string()
 		else
 		{
@@ -464,6 +477,10 @@ async fn sync_weather_api(
 		{}
 	}
 
+	if (!moduleActions.lifecycle_isActive())
+	{
+		return;
+	}
 	weatherContent.update(|content| {
 		*content = Some(weatherResult);
 	});

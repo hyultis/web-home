@@ -62,11 +62,24 @@ impl Rss
 		}
 	}
 
-	async fn sync(toaster: ToasterContext, rssContent: ArcRwSignal<Option<(u64,Feed)>>, config: ArcRwSignal<RssConfig>)
+	async fn sync(toaster: ToasterContext, rssContent: ArcRwSignal<Option<(u64,Feed)>>, config: ArcRwSignal<RssConfig>, moduleActions: ModuleActionFn)
 	{
+		if (!moduleActions.lifecycle_isActive())
+		{
+			return;
+		}
 		let url = config.get_untracked().link.clone();
 		let oldTime = rssContent.get_untracked().map(|content| content.0);
-		let Some((time,text)) = toaster_api(&toaster,API_proxys_wget(url.to_string(),oldTime).await, None).await else {return}; // TODO: return must throw error toaster
+		let apiResult = API_proxys_wget(url.to_string(),oldTime).await;
+		if (!moduleActions.lifecycle_isActive())
+		{
+			return;
+		}
+		let Some((time,text)) = toaster_api(&toaster,apiResult, None).await else {return}; // TODO: return must throw error toaster
+		if (!moduleActions.lifecycle_isActive())
+		{
+			return;
+		}
 		let Ok(feed) = parser::parse(text.as_bytes()) else {return};
 
 		rssContent.update(|rssContent| {
@@ -162,7 +175,7 @@ impl Backable for Rss
 	fn refresh(&self,moduleActions: ModuleActionFn, moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
 		let config = self.config.clone();
 		let rssContent = self.rssContent.clone();
-		let tmp = Self::sync(toaster,rssContent,config);
+		let tmp = Self::sync(toaster,rssContent,config,moduleActions);
 		return Some(Box::pin(async move {
 			tmp.await;
 		}));

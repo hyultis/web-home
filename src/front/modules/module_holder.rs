@@ -455,7 +455,11 @@ impl ModuleHolder
 
 	pub fn network_modules_update_caller(moduleHolder: ArcRwSignal<ModuleHolder>) -> Option<ApiCall>
 	{
-		return Self::network_deferredCall_inner(moduleHolder, |holder, crypto| holder.network_modules_update_prepare(crypto), Self::network_modules_update_async);
+		return Self::network_deferredCall_inner(
+			moduleHolder,
+			|holder, crypto| holder.network_modules_update_prepare(crypto).map(|modules| (modules, true)),
+			Self::network_modules_update_async,
+		);
 	}
 
 	fn network_modules_update_prepare(
@@ -481,13 +485,13 @@ impl ModuleHolder
 		return Ok(moduleToUpdateData);
 	}
 
-	async fn network_modules_update_async(moduleToUpdate: Vec<ModuleContent>) -> API_return_apply
+	async fn network_modules_update_async((moduleToUpdate, overwrite): (Vec<ModuleContent>, bool)) -> API_return_apply
 	{
 		if(moduleToUpdate.len()==0) {return API_return_apply::default();}
 
 		let mut apiReturn = API_return_apply::default();
 
-		let apiReturnModules = match API_modules_update(moduleToUpdate, true).await
+		let apiReturnModules = match API_modules_update(moduleToUpdate, overwrite).await
 		{
 			Ok(r) => r,
 			Err(err) => {
@@ -509,7 +513,11 @@ impl ModuleHolder
 
 	pub fn network_module_update_caller(moduleHolder: ArcRwSignal<ModuleHolder>, module: ModuleID) -> Option<ApiCall>
 	{
-		return Self::network_deferredCall_inner(moduleHolder, move |holder, crypto| holder.network_module_update_prepare(module.clone(), crypto), Self::network_modules_update_async);
+		return Self::network_deferredCall_inner(
+			moduleHolder,
+			move |holder, crypto| holder.network_module_update_prepare(module.clone(), crypto).map(|modules| (modules, false)),
+			Self::network_modules_update_async,
+		);
 	}
 
 	fn network_module_update_prepare(&self, moduleId: ModuleID, crypto: &ClientCryptoContext) -> Result<Vec<ModuleContent>, AllFrontErrorEnum>

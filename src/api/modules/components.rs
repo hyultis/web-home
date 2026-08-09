@@ -108,13 +108,11 @@ impl ModuleContent
 		use Htrace::HTrace;
 
 		let mut moduleRoot = config.value_get_mut(&self.getModulePath());
-		let mut lasttimestamp = 0;
-		if let Some(JsonValue::Object(content)) = moduleRoot.as_mut()
+		let lasttimestamp = match moduleRoot.as_mut()
 		{
-			if let Some(JsonValue::Number(timestampSaved) ) = content.get("timestamp"){
-				lasttimestamp = *timestampSaved as i64;
-			}
-		}
+			Some(JsonValue::Object(content)) => Self::timestamp_getFromValue(content.get("timestamp")),
+			_ => 0,
+		};
 		drop(moduleRoot);
 
 		if(!overwrite && lasttimestamp >= self.timestamp)
@@ -146,9 +144,7 @@ impl ModuleContent
 
 		let Some(JsonValue::Object(ref content)) = config.value_get(&self.getModulePath()) else {return Err(ModuleErrors::Empty)};
 
-		if let Some(JsonValue::String(timestampSaved) ) = content.get("timestamp"){
-			self.timestamp = timestampSaved.parse::<i64>().unwrap_or(0);
-		}
+		self.timestamp = Self::timestamp_getFromValue(content.get("timestamp"));
 		if let Some(JsonValue::String(content) ) = content.get("content"){
 			self.content = content.clone();
 		}
@@ -219,4 +215,48 @@ impl ModuleContent
 		return format!("modules/{}", name);
 	}
 
+	#[cfg(feature = "ssr")]
+	fn timestamp_getFromValue(timestamp: Option<&Hconfig::tinyjson::JsonValue>) -> i64
+	{
+		use Hconfig::tinyjson::JsonValue;
+
+		return match timestamp
+		{
+			Some(JsonValue::String(timestamp)) => timestamp.parse::<i64>().unwrap_or(0),
+			Some(JsonValue::Number(timestamp)) => *timestamp as i64,
+			_ => 0,
+		};
+	}
+
+}
+
+#[cfg(all(test, feature = "ssr"))]
+mod tests
+{
+	use Hconfig::tinyjson::JsonValue;
+
+	use super::ModuleContent;
+
+	#[test]
+	fn timestampRead_acceptsStringAndNumber()
+	{
+		assert_eq!(
+			ModuleContent::timestamp_getFromValue(Some(&JsonValue::String("42".to_string()))),
+			42,
+		);
+		assert_eq!(
+			ModuleContent::timestamp_getFromValue(Some(&JsonValue::Number(42.0))),
+			42,
+		);
+	}
+
+	#[test]
+	fn timestampRead_defaultsInvalidValuesToZero()
+	{
+		assert_eq!(
+			ModuleContent::timestamp_getFromValue(Some(&JsonValue::String("invalid".to_string()))),
+			0,
+		);
+		assert_eq!(ModuleContent::timestamp_getFromValue(None), 0);
+	}
 }

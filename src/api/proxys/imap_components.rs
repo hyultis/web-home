@@ -1,7 +1,4 @@
-use base64ct::{Base64, Encoding};
-use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::sync::LazyLock;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BoxName
@@ -13,6 +10,8 @@ pub struct BoxName
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Attributs
 {
+	#[serde(default)]
+	pub is_no_select: bool,
 	pub is_junk: bool,
 	pub is_trash: bool,
 	pub is_archive: bool,
@@ -27,6 +26,7 @@ impl Attributs
 	{
 		match attribute
 		{
+			imap_proto::NameAttribute::NoSelect => self.is_no_select = true,
 			imap_proto::NameAttribute::Archive => self.is_archive = true,
 			imap_proto::NameAttribute::Drafts => self.is_draft = true,
 			imap_proto::NameAttribute::Junk => self.is_junk = true,
@@ -39,7 +39,7 @@ impl Attributs
 
 	pub fn is_uninteresting(&self) -> bool
 	{
-		self.is_junk || self.is_trash || self.is_sent || self.is_draft || self.is_archive
+		self.is_no_select || self.is_junk || self.is_trash || self.is_sent || self.is_draft || self.is_archive
 	}
 }
 
@@ -57,17 +57,70 @@ impl imap_connector
 {
 	pub fn isGmail(&self) -> bool
 	{
-		self.host.contains("gmail.com")
+		let host = self.host.trim_end_matches('.').to_ascii_lowercase();
+		return host == "gmail.com" || host.ends_with(".gmail.com");
 	}
 
-	pub fn isBoxBlacklisted(&self, boxName: impl ToString) -> bool
+	pub fn isBoxSelected(&self, boxName: &str) -> bool
 	{
 		let Some(extra) = &self.extra
 		else
 		{
-			return true;
+			return false;
 		};
-		return extra.boxBlackList.contains(&boxName.to_string());
+		if let Some(boxAllowList) = &extra.boxAllowList
+		{
+			return boxAllowList.iter().any(|selectedBox| selectedBox == boxName);
+		}
+		return !extra.boxBlackList.iter().any(|blacklistedBox| blacklistedBox == boxName);
+	}
+
+	pub fn selectedBoxNames_get(&self) -> Option<&[String]>
+	{
+		return self.extra.as_ref()?.boxAllowList.as_deref();
+	}
+
+	pub fn boxSelection_set(&mut self, boxName: String, selected: bool)
+	{
+		let extra = self.extra.get_or_insert_with(imap_connector_extra::default);
+		let selectedBoxes = extra.boxAllowList.get_or_insert_with(Vec::new);
+		selectedBoxes.retain(|selectedBox| selectedBox != &boxName);
+		if (selected)
+		{
+			selectedBoxes.push(boxName);
+			selectedBoxes.sort_unstable();
+			selectedBoxes.dedup();
+		}
+	}
+
+	pub fn boxSelection_migrate(&mut self, boxes: &[BoxName]) -> bool
+	{
+		let Some(extra) = &mut self.extra
+		else
+		{
+			return false;
+		};
+		if let Some(selectedBoxes) = &mut extra.boxAllowList
+		{
+			let previousSelection = selectedBoxes.clone();
+			selectedBoxes.retain(|selectedBox| {
+				return boxes.iter().any(|boxContent| {
+					return &boxContent.name == selectedBox && !boxContent.attributes.is_uninteresting();
+				});
+			});
+			selectedBoxes.sort_unstable();
+			selectedBoxes.dedup();
+			return *selectedBoxes != previousSelection;
+		}
+		let mut selectedBoxes = boxes.iter()
+			.filter(|boxContent| !boxContent.attributes.is_uninteresting())
+			.filter(|boxContent| !extra.boxBlackList.iter().any(|boxName| boxName == &boxContent.name))
+			.map(|boxContent| boxContent.name.clone())
+			.collect::<Vec<_>>();
+		selectedBoxes.sort_unstable();
+		selectedBoxes.dedup();
+		extra.boxAllowList = Some(selectedBoxes);
+		return true;
 	}
 }
 
@@ -89,6 +142,8 @@ impl Default for imap_connector
 pub struct imap_connector_extra
 {
 	#[serde(default)]
+	pub boxAllowList: Option<Vec<String>>,
+	#[serde(default)]
 	pub boxBlackList: Vec<String>,
 	#[serde(default)]
 	pub flagBlackList: Vec<String>,
@@ -102,12 +157,44 @@ pub struct ImapMail
 	pub to: String,
 	pub subject: Option<String>,
 	pub content: ImapMailContentType,
-	pub files: Option<Vec<String>>,
 	pub date: i64,
-	pub boxName: String,
+	#[serde(default)]
 	pub parts: Vec<Attachment>,
 	pub attachement: Vec<Attachment>,
+	#[serde(default)]
 	pub confirmVue: bool,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone, Eq, Hash, PartialEq)]
+pub struct ImapMailKey
+{
+	pub boxName: String,
+	pub uidValidity: u32,
+	pub uid: u32,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct ImapMailboxSyncState
+{
+	pub boxName: String,
+	pub uidValidity: Option<u32>,
+	#[serde(default)]
+	pub knownUids: Vec<u32>,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct ImapSyncRequest
+{
+	pub mailboxes: Option<Vec<ImapMailboxSyncState>>,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct ImapMailboxSync
+{
+	pub boxName: String,
+	pub uidValidity: u32,
+	pub removedUids: Vec<u32>,
+	pub mails: Vec<ImapMail>,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
@@ -116,14 +203,50 @@ pub struct Attachment
 	pub filename: Option<String>,
 	pub content_type: String,
 	pub content_id: Option<String>,
+	#[serde(with = "attachmentDataBase64")]
 	pub data: Vec<u8>,
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
-pub struct ImapMailIdentifier
+mod attachmentDataBase64
 {
-	pub uid: u32,
-	pub boxName: String,
+	use base64ct::{Base64, Encoding};
+	use serde::{Deserialize, Deserializer, Serializer};
+
+	const DATA_MAXIMUM_BYTES: usize = 16 * 1024 * 1024;
+	const BASE64_MAXIMUM_BYTES: usize = (DATA_MAXIMUM_BYTES + 2) / 3 * 4;
+
+	#[derive(Deserialize)]
+	#[serde(untagged)]
+	enum AttachmentData
+	{
+		Base64(String),
+		LegacyBytes(Vec<u8>),
+	}
+
+	pub(super) fn serialize<S: Serializer>(data: &Vec<u8>, serializer: S) -> Result<S::Ok,S::Error>
+	{
+		if (data.len() > DATA_MAXIMUM_BYTES)
+		{
+			return Err(serde::ser::Error::custom("attachment is too large"));
+		}
+		return serializer.serialize_str(&Base64::encode_string(data));
+	}
+
+	pub(super) fn deserialize<'de,D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>,D::Error>
+	{
+		return match AttachmentData::deserialize(deserializer)?
+		{
+			AttachmentData::Base64(data) if data.len() <= BASE64_MAXIMUM_BYTES => Base64::decode_vec(&data)
+				.map_err(|_| serde::de::Error::custom("invalid attachment base64"))
+				.and_then(|data| {
+					return (data.len() <= DATA_MAXIMUM_BYTES)
+						.then_some(data)
+						.ok_or_else(|| serde::de::Error::custom("attachment is too large"));
+				}),
+			AttachmentData::LegacyBytes(data) if data.len() <= DATA_MAXIMUM_BYTES => Ok(data),
+			_ => Err(serde::de::Error::custom("attachment is too large")),
+		};
+	}
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -142,12 +265,6 @@ impl Default for ImapMailContentType
 	}
 }
 
-static CI_CONTENT: LazyLock<Regex> =
-	LazyLock::new(|| Regex::new(r#"(?i)src\s*=\s*("cid:[^"]+"|'cid:[^']+')"#).unwrap());
-static A_TAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)<a\b[^>]*>"#).unwrap());
-static A_TAG_TARGET: LazyLock<Regex> =
-	LazyLock::new(|| Regex::new(r#"(?i)\btarget\s*=\s*"[^"]*"|\btarget\s*=\s*'[^']*'"#).unwrap());
-
 impl ImapMailContentType
 {
 	pub fn is_none(&self) -> bool
@@ -160,110 +277,156 @@ impl ImapMailContentType
 		!matches!(self, Self::Html(_))
 	}
 
-	/// do not panic, just return an empty string in case of None
-	/// in case of Text, convert return line into <br/>
-	pub fn unwrap_or_default(&self, parts: &Vec<Attachment>) -> String
+	pub fn is_html(&self) -> bool
 	{
-		match self
-		{
-			Self::Text(text) => text.clone().replace("\n", "<br/>"),
-			Self::Html(html) =>
-			{
-				let result = CI_CONTENT
-					.replace_all(html, |caps: &regex::Captures| {
-						let full = caps.get(1).unwrap().as_str(); // ex: "cid:image@id"
-						let quote = &full[0..1]; // " ou '
-						let cid = &full[5..full.len() - 1]; // enlève "cid: et la quote finale
-						//log!("cid: {} quote: {}", cid, quote);
-
-						let filter = |part: &&Attachment| {
-							//log!("filter: {:?} == {}", part.content_id,cid);
-							if let Some(partcid) = &part.content_id
-							{
-								return partcid == &cid.to_string();
-							}
-							return false;
-						};
-
-						if let Some((mime, bytes)) = parts
-							.iter()
-							.filter(filter)
-							.next()
-							.map(|part| (part.content_type.clone(), part.data.clone()))
-						{
-							//log!("cid found");
-							let b64 = Base64::encode_string(bytes.as_slice());
-							format!(r#"src={quote}data:{mime};base64,{b64}{quote}"#)
-						}
-						else
-						{
-							// on laisse tel quel (comme ton return $match[0])
-							caps.get(0).unwrap().as_str().to_string()
-						}
-					})
-					.into_owned();
-
-				Self::normalize_a_targets(&html)
-			}
-			_ => "".to_string(),
-		}
-	}
-
-	pub fn normalize_a_targets(content: &String) -> String
-	{
-		A_TAG_RE
-			.replace_all(content, |caps: &regex::Captures| {
-				let tag = caps.get(0).unwrap().as_str();
-				//log!("tag: {}", tag);
-
-				if A_TAG_TARGET.is_match(tag)
-				{
-					// remplace le target existant
-					let returned =  A_TAG_TARGET
-						.replace_all(tag, r#"target="_blank" rel=\"noopener noreferrer\""#)
-						.into_owned();
-					//log!("returned: {}", returned);
-					return returned;
-				}
-
-				// injecte avant '>'
-				let insert_pos = tag.rfind('>').unwrap();
-				let returned = format!(
-					"{} target=\"_blank\" rel=\"noopener noreferrer\">",
-					&tag[..insert_pos]
-				);
-				//log!("returned: {}", returned);
-				returned
-			})
-			.into_owned()
+		matches!(self, Self::Html(_))
 	}
 }
 
-impl From<ImapMail> for ImapMailIdentifier
+#[cfg(test)]
+mod tests
 {
-	fn from(value: ImapMail) -> Self
-	{
-		ImapMailIdentifier {
-			uid: value.uid,
-			boxName: value.boxName,
-		}
-	}
-}
+	use super::{Attachment, Attributs, BoxName, ImapMailboxSyncState, imap_connector, imap_connector_extra};
 
-impl From<&ImapMail> for ImapMailIdentifier
-{
-	fn from(value: &ImapMail) -> Self
+	fn boxName_get(name: &str, attributes: Attributs) -> BoxName
 	{
-		ImapMailIdentifier {
-			uid: value.uid,
-			boxName: value.boxName.clone(),
-		}
+		return BoxName {name: name.to_string(),attributes};
 	}
-}
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ImapMailUpdate
-{
-	pub flags: Vec<String>,
-	pub boxName: BoxName,
+	#[test]
+	fn connectorExtra_deserializesLegacyConfigWithoutAllowList()
+	{
+		let extra: imap_connector_extra = serde_json::from_str(
+			r#"{"boxBlackList":["Blocked"],"flagBlackList":[]}"#,
+		).unwrap();
+
+		assert_eq!(extra.boxAllowList,None);
+		assert_eq!(extra.boxBlackList,vec!["Blocked"]);
+	}
+
+	#[test]
+	fn connectorWithoutExtraDoesNotSelectAnyMailbox()
+	{
+		let connector = imap_connector::default();
+
+		assert!(!connector.isBoxSelected("Alerts"));
+		assert_eq!(connector.selectedBoxNames_get(),None);
+	}
+
+	#[test]
+	fn connectorRecognizesOnlyGmailHostSuffixCaseInsensitively()
+	{
+		let mut connector = imap_connector::default();
+		connector.host = "IMAP.GMAIL.COM.".to_string();
+		assert!(connector.isGmail());
+
+		connector.host = "gmail.com.attacker.example".to_string();
+		assert!(!connector.isGmail());
+	}
+
+	#[test]
+	fn connectorMigratesLegacyBlacklistToExplicitInterestingSelection()
+	{
+		let mut connector = imap_connector::default();
+		connector.extra = Some(imap_connector_extra {
+			boxBlackList: vec!["Blocked".to_string()],
+			..Default::default()
+		});
+		let boxes = vec![
+			boxName_get("Alerts",Attributs::default()),
+			boxName_get("Blocked",Attributs::default()),
+			boxName_get("Archive",Attributs {is_archive: true,..Default::default()}),
+		];
+
+		assert!(connector.boxSelection_migrate(&boxes));
+		assert_eq!(connector.selectedBoxNames_get(),Some(["Alerts".to_string()].as_slice()));
+		assert!(connector.isBoxSelected("Alerts"));
+		assert!(!connector.isBoxSelected("Blocked"));
+		assert!(!connector.isBoxSelected("Archive"));
+		assert!(!connector.boxSelection_migrate(&boxes));
+	}
+
+	#[test]
+	fn connectorRemovesNonSelectableMailboxFromExplicitSelection()
+	{
+		let mut connector = imap_connector::default();
+		connector.extra = Some(imap_connector_extra {
+			boxAllowList: Some(vec!["[Gmail]".to_string(),"Alerts".to_string()]),
+			..Default::default()
+		});
+		let boxes = vec![
+			boxName_get("[Gmail]",Attributs {is_no_select: true,..Default::default()}),
+			boxName_get("Alerts",Attributs::default()),
+		];
+
+		assert!(connector.boxSelection_migrate(&boxes));
+		assert_eq!(connector.selectedBoxNames_get(),Some(["Alerts".to_string()].as_slice()));
+		assert!(!connector.boxSelection_migrate(&boxes));
+	}
+
+	#[cfg(feature = "ssr")]
+	#[test]
+	fn mailboxNoSelectAttributeIsNeverInteresting()
+	{
+		let mut attributes = Attributs::default();
+		attributes.add(&imap_proto::NameAttribute::NoSelect);
+
+		assert!(attributes.is_no_select);
+		assert!(attributes.is_uninteresting());
+	}
+
+	#[test]
+	fn mailboxAttributesReadLegacyContractWithoutNoSelect()
+	{
+		let attributes: Attributs = serde_json::from_str(
+			r#"{"is_junk":false,"is_trash":false,"is_archive":false,"is_sent":false,"is_draft":false}"#,
+		).unwrap();
+
+		assert!(!attributes.is_no_select);
+	}
+
+	#[test]
+	fn mailboxSyncStateReadsMissingKnownUidsAsEmpty()
+	{
+		let state: ImapMailboxSyncState = serde_json::from_str(
+			r#"{"boxName":"Alerts","uidValidity":null}"#,
+		).unwrap();
+
+		assert!(state.knownUids.is_empty());
+	}
+
+	#[test]
+	fn connectorCreatesExplicitSelectionOnFirstUserChoice()
+	{
+		let mut connector = imap_connector::default();
+
+		connector.boxSelection_set("Alerts".to_string(),true);
+		assert_eq!(connector.selectedBoxNames_get(),Some(["Alerts".to_string()].as_slice()));
+		connector.boxSelection_set("Alerts".to_string(),false);
+		assert_eq!(connector.selectedBoxNames_get(),Some([].as_slice()));
+	}
+
+	#[test]
+	fn attachmentUsesCompactBase64AndReadsLegacyByteArray()
+	{
+		let attachment = Attachment {
+			filename: Some("test.bin".to_string()),
+			content_type: "application/octet-stream".to_string(),
+			content_id: None,
+			data: vec![1,2,3],
+		};
+
+		let serialized = serde_json::to_value(&attachment).unwrap();
+		assert_eq!(serialized.get("data").and_then(serde_json::Value::as_str),Some("AQID"));
+		let roundTrip: Attachment = serde_json::from_value(serialized).unwrap();
+		assert_eq!(roundTrip.data,vec![1,2,3]);
+
+		let legacy: Attachment = serde_json::from_value(serde_json::json!({
+			"filename": null,
+			"content_type": "application/octet-stream",
+			"content_id": null,
+			"data": [1,2,3]
+		})).unwrap();
+		assert_eq!(legacy.data,vec![1,2,3]);
+	}
 }

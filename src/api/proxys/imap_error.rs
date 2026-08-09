@@ -19,10 +19,131 @@ pub enum ImapError {
 	SERVER_ERROR,
 }
 
+#[cfg(feature = "ssr")]
+impl ImapError
+{
+	pub(super) fn trace(self, operation: &'static str, stage: &'static str, mailboxIndex: Option<usize>) -> Self
+	{
+		use Htrace::components::level::Level;
+		use Htrace::HTrace;
+
+		if let Some(mailboxIndex) = mailboxIndex
+		{
+			HTrace!(
+				(Level::ERROR)
+				"[IMAP proxy] operation={} stage={} mailbox_index={} error={}",
+				operation,
+				stage,
+				mailboxIndex,
+				self
+			);
+		}
+		else
+		{
+			HTrace!(
+				(Level::ERROR)
+				"[IMAP proxy] operation={} stage={} error={}",
+				operation,
+				stage,
+				self
+			);
+		}
+		return self;
+	}
+
+	pub(super) fn fromImapAt(
+		value: Error,
+		operation: &'static str,
+		stage: &'static str,
+		mailboxIndex: Option<usize>,
+	) -> Self
+	{
+		use Htrace::components::level::Level;
+		use Htrace::HTrace;
+
+		let source = Self::imapSource_get(&value);
+		let result = Self::from(value);
+		if let Some(mailboxIndex) = mailboxIndex
+		{
+			HTrace!(
+				(Level::ERROR)
+				"[IMAP proxy] operation={} stage={} mailbox_index={} source={} error={}",
+				operation,
+				stage,
+				mailboxIndex,
+				source,
+				result
+			);
+		}
+		else
+		{
+			HTrace!(
+				(Level::ERROR)
+				"[IMAP proxy] operation={} stage={} source={} error={}",
+				operation,
+				stage,
+				source,
+				result
+			);
+		}
+		return result;
+	}
+
+	pub(super) fn imapSource_get(value: &Error) -> &'static str
+	{
+		return match value
+		{
+			Error::Io(_) => "io",
+			Error::TlsHandshake(_) => "tls_handshake",
+			Error::Tls(_) => "tls",
+			Error::Bad(_) => "bad_response",
+			Error::No(_) => "no_response",
+			Error::Bye(_) => "bye_response",
+			Error::ConnectionLost => "connection_lost",
+			Error::Parse(_) => "parse",
+			Error::Validate(_) => "validate",
+			Error::Append => "append",
+			Error::Unexpected(_) => "unexpected_response",
+			Error::MissingStatusResponse => "missing_status_response",
+			Error::TagMismatch(_) => "tag_mismatch",
+			Error::StartTlsNotAvailable => "starttls_unavailable",
+			Error::TlsNotConfigured => "tls_not_configured",
+			_ => "unknown",
+		};
+	}
+}
+
 impl FromServerFnError for ImapError {
 	type Encoder = JsonEncoding;
 
 	fn from_server_fn_error(value: ServerFnErrorErr) -> Self {
+		#[cfg(feature = "ssr")]
+		{
+			use Htrace::components::level::Level;
+			use Htrace::HTrace;
+
+			let source = match &value
+			{
+				ServerFnErrorErr::Registration(_) => "registration",
+				ServerFnErrorErr::UnsupportedRequestMethod(_) => "unsupported_method",
+				ServerFnErrorErr::Request(_) => "request",
+				ServerFnErrorErr::ServerError(_) => "server",
+				ServerFnErrorErr::MiddlewareError(_) => "middleware",
+				ServerFnErrorErr::Deserialization(_) => "deserialization",
+				ServerFnErrorErr::Serialization(_) => "serialization",
+				ServerFnErrorErr::Args(_) => "args",
+				ServerFnErrorErr::MissingArg(_) => "missing_arg",
+				ServerFnErrorErr::Response(_) => "response",
+			};
+			HTrace!(
+				(Level::ERROR)
+				"[IMAP proxy] operation=server_fn stage=codec source={} error={}",
+				source,
+				ImapError::SERVER_ERROR
+			);
+		}
+		#[cfg(not(feature = "ssr"))]
+		let _ = value;
 		ImapError::SERVER_ERROR
 	}
 }

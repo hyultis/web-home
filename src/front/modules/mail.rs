@@ -1,17 +1,18 @@
 use std::ops::DerefMut;
-use std::collections::HashMap;
+use std::collections::{HashMap,HashSet};
+use std::sync::Arc;
 use gloo_timers::callback::Timeout;
 use leptoaster::{expect_toaster, ToasterContext};
 use leptos::children::ViewFn;
 use leptos::prelude::{use_context, CollectView, StyleAttribute, Write};
 use leptos::prelude::{ClassAttribute, ElementChild, GetUntracked, Update};
-use leptos::prelude::{AnyView, ArcRwSignal, Get, IntoAny, OnAttribute, RwSignal};
+use leptos::prelude::{AnyView, ArcRwSignal, Get, IntoAny, OnAttribute, RwSignal, Set};
 use leptos::{component, view, IntoView};
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
 use crate::api::modules::components::{ModuleContent, ModuleID};
-use crate::api::proxys::imap::{API_proxys_imap_getFullUnsee, API_proxys_imap_getMailContent, API_proxys_imap_getUnseeSince, API_proxys_imap_listbox, API_proxys_imap_setMailSee};
-use crate::api::proxys::imap_components::{imap_connector, imap_connector_extra, Attachment, ImapMail};
+use crate::api::proxys::imap::{API_proxys_imap_getMailContent, API_proxys_imap_listbox, API_proxys_imap_setMailSee, API_proxys_imap_sync};
+use crate::api::proxys::imap_components::{imap_connector, Attachment, BoxName, ImapMailboxSync, ImapMailboxSyncState, ImapMail, ImapMailContentType, ImapMailKey, ImapSyncRequest};
 use crate::front::modules::components::{distant_time_simpler, Backable, BoxFuture, Cache, Cacheable, FieldHelper, FieldHelperType, ModuleName, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::contentDownloader::download_attachment;
@@ -113,6 +114,74 @@ impl MailTag
 	}
 }
 
+#[derive(Clone, Debug)]
+struct MailContentFrame
+{
+	content: Arc<ImapMailContentType>,
+}
+
+impl MailContentFrame
+{
+	fn new(content: ImapMailContentType) -> Self
+	{
+		return Self {content: Arc::new(content)};
+	}
+
+	fn remoteImagesControl_isAvailable(&self) -> bool
+	{
+		return self.content.is_html();
+	}
+
+	fn srcdoc_get(&self, remoteImagesAllowed: bool) -> String
+	{
+		let imageSources = if (remoteImagesAllowed)
+		{
+			"data: blob: http: https:"
+		}
+		else
+		{
+			"data: blob:"
+		};
+		let body = match self.content.as_ref()
+		{
+			ImapMailContentType::Text(text) => format!("<div class=\"mail-text\">{}</div>",Self::text_escape(text)),
+			ImapMailContentType::Html(html) => html.clone(),
+			ImapMailContentType::None => String::new(),
+		};
+		return format!(
+			concat!(
+				"<!doctype html><html><head><meta charset=\"utf-8\">",
+				"<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; base-uri 'none'; ",
+				"form-action 'none'; img-src {}; style-src 'unsafe-inline'\">",
+				"<meta name=\"referrer\" content=\"no-referrer\">",
+				"<style>html,body{{box-sizing:border-box;max-width:100%;}}body{{margin:.75rem;overflow-wrap:anywhere;}}",
+				"img{{max-width:100%;height:auto;}}.mail-text{{white-space:pre-wrap;}}</style>",
+				"</head><body>{}</body></html>"
+			),
+			imageSources,
+			body,
+		);
+	}
+
+	fn text_escape(text: &str) -> String
+	{
+		let mut escaped = String::with_capacity(text.len());
+		for character in text.chars()
+		{
+			match character
+			{
+				'&' => escaped.push_str("&amp;"),
+				'<' => escaped.push_str("&lt;"),
+				'>' => escaped.push_str("&gt;"),
+				'"' => escaped.push_str("&quot;"),
+				'\'' => escaped.push_str("&#39;"),
+				_ => escaped.push(character),
+			}
+		}
+		return escaped;
+	}
+}
+
 impl MailConfig
 {
 	fn mail_tag_is_active(&self) -> bool
@@ -126,13 +195,235 @@ impl MailConfig
 	}
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MailSyncIdentity
+{
+	host: String,
+	port: u16,
+	username: String,
+	boxAllowList: Option<Vec<String>>,
+	boxBlackList: Option<Vec<String>>,
+}
+
+impl MailSyncIdentity
+{
+	fn new(connector: &imap_connector) -> Self
+	{
+		let mut boxAllowList = connector.selectedBoxNames_get().map(<[String]>::to_vec);
+		if let Some(boxAllowList) = &mut boxAllowList
+		{
+			boxAllowList.sort_unstable();
+			boxAllowList.dedup();
+		}
+		let mut boxBlackList = connector.extra.as_ref().map(|extra| extra.boxBlackList.clone());
+		if let Some(boxBlackList) = &mut boxBlackList
+		{
+			boxBlackList.sort_unstable();
+			boxBlackList.dedup();
+		}
+		return Self {
+			host: connector.host.clone(),
+			port: connector.port,
+			username: connector.username.clone(),
+			boxAllowList,
+			boxBlackList,
+		};
+	}
+}
+
 #[derive(Clone, Debug, Default)]
 struct MailsContent
 {
-	lastUpdate: u64,
-	mailsData: HashMap<u64, ImapMail>,
-	mailsContent: HashMap<u64, String>,
-	boxs: Vec<String>,
+	mailboxes: Option<HashMap<String,Option<u32>>>,
+	mailsData: HashMap<ImapMailKey,ImapMail>,
+	pendingSeen: HashSet<ImapMailKey>,
+	confirmedSeen: HashSet<ImapMailKey>,
+	boxs: Vec<BoxName>,
+	syncIdentity: Option<MailSyncIdentity>,
+}
+
+impl MailsContent
+{
+	fn syncRequest_get(&mut self, connector: &imap_connector) -> Option<ImapSyncRequest>
+	{
+		let syncIdentity = MailSyncIdentity::new(connector);
+		if (self.syncIdentity.as_ref() != Some(&syncIdentity))
+		{
+			self.sync_reset(syncIdentity);
+		}
+		if (connector.extra.is_none())
+		{
+			return None;
+		}
+		if (self.mailboxes.is_none())
+		{
+			if let Some(selectedBoxNames) = connector.selectedBoxNames_get()
+			{
+				self.mailboxes = Some(selectedBoxNames.iter()
+					.map(|boxName| (boxName.clone(),None))
+					.collect());
+			}
+		}
+		if (self.mailboxes.as_ref().is_some_and(HashMap::is_empty))
+		{
+			return None;
+		}
+
+		let mailboxes = self.mailboxes.as_ref().map(|mailboxes| {
+			let mut states = mailboxes.iter().map(|(boxName,uidValidity)| {
+				let mut knownUids = uidValidity.map(|uidValidity| {
+					return self.mailsData.keys().chain(self.pendingSeen.iter())
+						.filter(|key| key.boxName == *boxName && key.uidValidity == uidValidity)
+						.map(|key| key.uid)
+						.collect::<Vec<_>>();
+				}).unwrap_or_default();
+				knownUids.sort_unstable();
+				knownUids.dedup();
+				return ImapMailboxSyncState {
+					boxName: boxName.clone(),
+					uidValidity: *uidValidity,
+					knownUids,
+				};
+			}).collect::<Vec<_>>();
+			states.sort_unstable_by(|left,right| left.boxName.cmp(&right.boxName));
+			return states;
+		});
+		return Some(ImapSyncRequest { mailboxes });
+	}
+
+	fn sync_apply(&mut self, mailboxes: Vec<ImapMailboxSync>)
+	{
+		let mut synchronizedMailboxes = HashMap::new();
+		for mailbox in mailboxes
+		{
+			let previousValidity = self.mailboxes.as_ref()
+				.and_then(|mailboxes| mailboxes.get(&mailbox.boxName))
+				.copied()
+				.flatten();
+			if (previousValidity != Some(mailbox.uidValidity))
+			{
+				self.mailsData.retain(|key,_| key.boxName != mailbox.boxName);
+				self.pendingSeen.retain(|key| key.boxName != mailbox.boxName);
+				self.confirmedSeen.retain(|key| key.boxName != mailbox.boxName);
+			}
+			for uid in mailbox.removedUids
+			{
+				let key = ImapMailKey {
+					boxName: mailbox.boxName.clone(),
+					uidValidity: mailbox.uidValidity,
+					uid,
+				};
+				self.mailsData.remove(&key);
+				self.pendingSeen.remove(&key);
+				self.confirmedSeen.remove(&key);
+			}
+			for mail in mailbox.mails
+			{
+				let key = ImapMailKey {
+					boxName: mailbox.boxName.clone(),
+					uidValidity: mailbox.uidValidity,
+					uid: mail.uid,
+				};
+				if (!self.pendingSeen.contains(&key))
+				{
+					self.mailsData.insert(key,mail);
+				}
+			}
+			let reconciledSeen = self.confirmedSeen.iter()
+				.filter(|key| key.boxName == mailbox.boxName && key.uidValidity == mailbox.uidValidity)
+				.cloned()
+				.collect::<Vec<_>>();
+			for key in reconciledSeen
+			{
+				self.confirmedSeen.remove(&key);
+				self.pendingSeen.remove(&key);
+			}
+			synchronizedMailboxes.insert(mailbox.boxName,Some(mailbox.uidValidity));
+		}
+		self.mailsData.retain(|key,_| {
+			return synchronizedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
+		});
+		self.pendingSeen.retain(|key| {
+			return synchronizedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
+		});
+		self.confirmedSeen.retain(|key| {
+			return synchronizedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
+		});
+		self.mailboxes = Some(synchronizedMailboxes);
+	}
+
+	fn topology_set(&mut self, boxes: &[BoxName], connector: &imap_connector)
+	{
+		self.syncIdentity = Some(MailSyncIdentity::new(connector));
+		self.boxs = boxes.to_vec();
+		if (connector.extra.is_none())
+		{
+			self.mailboxes = None;
+			self.mailsData.clear();
+			self.pendingSeen.clear();
+			self.confirmedSeen.clear();
+			return;
+		}
+		let previousMailboxes = self.mailboxes.take().unwrap_or_default();
+		let selectedMailboxes = boxes.iter()
+			.filter(|boxContent| !boxContent.attributes.is_uninteresting() && connector.isBoxSelected(&boxContent.name))
+			.map(|boxContent| {
+				return (boxContent.name.clone(),previousMailboxes.get(&boxContent.name).copied().flatten());
+			})
+			.collect::<HashMap<_,_>>();
+		self.mailsData.retain(|key,_| {
+			return selectedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
+		});
+		self.pendingSeen.retain(|key| {
+			return selectedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
+		});
+		self.confirmedSeen.retain(|key| {
+			return selectedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
+		});
+		self.mailboxes = Some(selectedMailboxes);
+	}
+
+	fn confirmation_set(&mut self, key: &ImapMailKey, value: bool)
+	{
+		if let Some(mail) = self.mailsData.get_mut(key)
+		{
+			mail.confirmVue = value;
+		}
+	}
+
+	fn mailSeen_begin(&mut self, key: &ImapMailKey) -> Option<ImapMail>
+	{
+		self.pendingSeen.insert(key.clone());
+		return self.mailsData.remove(key);
+	}
+
+	fn mailSeen_rollback(&mut self, key: ImapMailKey, mail: Option<ImapMail>)
+	{
+		self.pendingSeen.remove(&key);
+		self.confirmedSeen.remove(&key);
+		if let Some(mail) = mail
+		{
+			self.mailsData.insert(key,mail);
+		}
+	}
+
+	fn mailSeen_commit(&mut self, key: ImapMailKey)
+	{
+		if (self.pendingSeen.contains(&key))
+		{
+			self.confirmedSeen.insert(key);
+		}
+	}
+
+	fn sync_reset(&mut self, syncIdentity: MailSyncIdentity)
+	{
+		self.mailboxes = None;
+		self.mailsData.clear();
+		self.pendingSeen.clear();
+		self.confirmedSeen.clear();
+		self.boxs.clear();
+		self.syncIdentity = Some(syncIdentity);
+	}
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]
@@ -151,12 +442,14 @@ impl Mail
 	{
 		let getBoxsMailConfigInner = getBoxsMailConfig.clone();
 		let getBoxsMailsCacheInner = getBoxsMailsCache.clone();
+		let getBoxsConfigCache = update.clone();
 		let toaster = expect_toaster();
 		let moduleActionsGetBox = moduleActions.clone();
 		let getBoxsFn = move |_| {
 			let toaster = toaster.clone();
 			let getBoxsMailConfig = getBoxsMailConfigInner.clone();
 			let getBoxsMailContent = getBoxsMailsCacheInner.clone();
+			let getBoxsConfigCache = getBoxsConfigCache.clone();
 			let moduleActionsTask = moduleActionsGetBox.clone();
 			moduleActionsGetBox.task_spawn(async move {
 				let apiResult = API_proxys_imap_listbox(getBoxsMailConfig.get_untracked().imap.clone()).await;
@@ -170,9 +463,14 @@ impl Mail
 					{
 						return;
 					}
-					getBoxsMailContent.update(|mailContent|{
-						mailContent.boxs = result.iter().map(|boxcontent| boxcontent.name.clone()).collect();
-					});
+					let mut connector = getBoxsMailConfig.get_untracked().imap.clone();
+					if (connector.boxSelection_migrate(&result))
+					{
+						let updatedConnector = connector.clone();
+						getBoxsMailConfig.update(|config| config.imap = updatedConnector);
+						getBoxsConfigCache.update(|cache| cache.update());
+					}
+					getBoxsMailContent.update(|mailContent| mailContent.topology_set(&result,&connector));
 				}
 			});
 		};
@@ -213,22 +511,18 @@ impl Mail
 				{
 					let boxConfig = getBoxsMailConfig.clone();
 					let boxConfigCache = update.clone();
-					let switchBoxFn = move |boxName:String,isDisabled:bool| {
+					let boxTopology = getBoxsMailsCache.clone();
+					let switchBoxFn = move |boxName:String,isSelected:bool| {
 						boxConfig.update(|mailContent|{
-							if(mailContent.imap.extra.is_none()) {mailContent.imap.extra = Some(imap_connector_extra::default())}
-
-							if(isDisabled)
-							{
-								mailContent.imap.extra.as_mut().unwrap().boxBlackList.retain(|boxcontent| boxcontent != &boxName);
-							}
-							else
-							{
-								mailContent.imap.extra.as_mut().unwrap().boxBlackList.push(boxName.clone());
-							}
-
+							mailContent.imap.boxSelection_set(boxName.clone(),!isSelected);
 							boxConfigCache.update(|cache|{
 								cache.update();
 							});
+						});
+						let connector = boxConfig.get_untracked().imap.clone();
+						boxTopology.update(|mailContent| {
+							let boxes = mailContent.boxs.clone();
+							mailContent.topology_set(&boxes,&connector);
 						});
 					};
 
@@ -239,17 +533,21 @@ impl Mail
 						view!{
 							<hr/>
 							<Translate key="MODULE_MAIL_BOXS_LIST"/><br/>
-							{mailsCache.boxs.iter().map(|boxcontent| {
-								let switchBoxFn = switchBoxFn.clone();
-								let mut isDisabled = false;
-								if let Some(s) = &configBoxContent.imap.extra
+							{mailsCache.boxs.iter().map(|boxContent| {
+								let boxName = boxContent.name.clone();
+								if (boxContent.attributes.is_uninteresting())
 								{
-									if(s.boxBlackList.contains(boxcontent)){
-										isDisabled = true;
-									}
+									return view!{<span class="disabled uninteresting boxmail">{boxName}</span>}.into_any();
 								}
-								let boxcontent = boxcontent.clone();
-								view!{<span class={if isDisabled {"disabled boxmail"} else {"boxmail"}} on:click={move |_|switchBoxFn(boxcontent.clone(),isDisabled)}>{boxcontent.clone()}</span>}
+								let switchBoxFn = switchBoxFn.clone();
+								let isSelected = configBoxContent.imap.isBoxSelected(&boxName);
+								let boxNameContent = boxName.clone();
+								view!{
+									<span class={if isSelected {"boxmail"} else {"disabled boxmail"}}
+										on:click={move |_|switchBoxFn(boxName.clone(),isSelected)}>
+										{boxNameContent}
+									</span>
+								}.into_any()
 							}).collect_view()}
 						}.into_any()
 					}
@@ -259,15 +557,13 @@ impl Mail
 			}.into_any()
 	}
 
-	fn mail_mark_see(imapConnector: imap_connector, toaster: ToasterContext, mailId: ImapMail, mailsContent: ArcRwSignal<MailsContent>, moduleActions: ModuleActionFn)
+	fn mail_mark_see(imapConnector: imap_connector, toaster: ToasterContext, mailKey: ImapMailKey, mailsContent: ArcRwSignal<MailsContent>, moduleActions: ModuleActionFn)
 	{
 		// The request survives the dialog Owner, but remains owned by the active ModuleHolder lifecycle.
 		let moduleActionsTask = moduleActions.clone();
 		moduleActions.task_spawn(async move {
-			let mailUid = mailId.uid as u64;
 			// we remove the old data sooner to improve reactivity and re-add them later if something gone wrong
-			let oldMailsData;
-			let oldMailsContent;
+			let oldMail;
 			{
 				let Some(mut binding) = mailsContent.try_write()
 				else
@@ -275,11 +571,10 @@ impl Mail
 					return;
 				};
 				let mailsDatas: &mut MailsContent = binding.deref_mut();
-				oldMailsData = mailsDatas.mailsData.remove(&mailUid);
-				oldMailsContent = mailsDatas.mailsContent.remove(&mailUid);
+				oldMail = mailsDatas.mailSeen_begin(&mailKey);
 			}
 
-			let apiResult = API_proxys_imap_setMailSee(imapConnector, mailId.clone().into()).await;
+			let apiResult = API_proxys_imap_setMailSee(imapConnector,mailKey.clone()).await;
 			if (!moduleActionsTask.lifecycle_isActive())
 			{
 				return;
@@ -291,26 +586,20 @@ impl Mail
 			}
 			if (requestFailed)
 			{
-				mailsContent.update(|mailContent|{
-					if let Some(oldData) = oldMailsData {
-						mailContent.mailsData.insert(mailUid, oldData);
-					}
-					if let Some(oldDataContent) = oldMailsContent {
-						mailContent.mailsContent.insert(mailUid, oldDataContent);
-					}
-				});
+				mailsContent.update(|mailContent| mailContent.mailSeen_rollback(mailKey,oldMail));
 				return;
 			};
+			mailsContent.update(|mailContent| mailContent.mailSeen_commit(mailKey));
 
 		});
 	}
 
-	fn mail_view_content(imapConnector: imap_connector, toaster: ToasterContext, dialogManager: DialogManager, mailIdContent: ImapMail, mailsCache: ArcRwSignal<MailsContent>, moduleActions: ModuleActionFn)
+	fn mail_view_content(imapConnector: imap_connector, toaster: ToasterContext, dialogManager: DialogManager, mailKey: ImapMailKey, mailIdContent: ImapMail, mailsCache: ArcRwSignal<MailsContent>, moduleActions: ModuleActionFn)
 	{
 		// The resulting dialog can outlive the mail row Owner, but not the holder lifecycle.
 		let moduleActionsTask = moduleActions.clone();
 		moduleActions.task_spawn(async move {
-			let apiResult = API_proxys_imap_getMailContent(imapConnector.clone(), mailIdContent.clone().into()).await;
+			let apiResult = API_proxys_imap_getMailContent(imapConnector.clone(),mailKey.clone()).await;
 			if (!moduleActionsTask.lifecycle_isActive())
 			{
 				return;
@@ -323,14 +612,19 @@ impl Mail
 
 			let toasterBody = toaster.clone();
 			let mailIdContentBody = mailIdContent.clone();
+			let contentFrameBody = MailContentFrame::new(mailContent.content.clone());
+			let mailContentBody = Arc::new(mailContent);
 			let moduleActionsBody = moduleActionsTask.clone();
 			let moduleActionsValidate = moduleActionsTask.clone();
+			let mailKeyValidate = mailKey.clone();
 
 			let dialogContent = DialogData::new()
 				.setTitle(mailIdContent.subject.clone().map(|subject|format!("€{}", subject)).unwrap_or("MODULE_MAIL_NO_SUBJECT".to_string()))
 				.setBody(move || {
 					let mailId = mailIdContentBody.clone();
-					let mailContent = mailContent.clone();
+					let mailContent = mailContentBody.clone();
+					let contentFrame = contentFrameBody.clone();
+					let remoteImagesAllowed = ArcRwSignal::new(false);
 
 					let moduleActionsDownload = moduleActionsBody.clone();
 					let downloadAttachement = move |attachement: Attachment, toaster: ToasterContext| {
@@ -347,18 +641,29 @@ impl Mail
 								format!("{:0>2}/{:0>2}/{:0>4} {:0>2}:{:0>2}:{:0>2}",date.day(),date.month() as u8,date.year(),date.hour(),date.minute(),date.second())
 							}</span>
 							{
-							let views = mailContent.attachement.iter().map(|att| {
-								let attInner = att.clone();
+							let views = mailContent.attachement.iter().enumerate().map(|(attachmentIndex,att)| {
+								let attachmentMailContent = mailContent.clone();
 								let downloadAttachement = downloadAttachement.clone();
 									return match &att.filename {
 										None => {view!{{" "}<span class="attachement" on:click={
 												let toasterInner = toasterInner.clone();
-												move |_| downloadAttachement(attInner.clone(),toasterInner.clone())
+												move |_| {
+													if let Some(attachment) = attachmentMailContent.attachement.get(attachmentIndex).cloned()
+													{
+														downloadAttachement(attachment,toasterInner.clone());
+													}
+												}
 											}><i class="iconoir-doc-magnifying-glass"/>{" "}<Translate key="MODULE_MAIL_NO_SUBJECT"/></span>}}.into_any(),
 										Some(filename) => {
+											let attachmentMailContent = attachmentMailContent.clone();
 											view!{{" "}<span class="attachement"  on:click={
 												let toasterInner = toasterInner.clone();
-												move |_| downloadAttachement(attInner.clone(),toasterInner.clone())
+												move |_| {
+													if let Some(attachment) = attachmentMailContent.attachement.get(attachmentIndex).cloned()
+													{
+														downloadAttachement(attachment,toasterInner.clone());
+													}
+												}
 											}><i class="iconoir-doc-magnifying-glass"/>{" "}{filename.clone()}</span>}.into_any()
 										}
 									};
@@ -370,15 +675,42 @@ impl Mail
 								}
 								else {view!{}.into_any()}
 							}
-							<div style="flex-grow: 1; border: none; margin: 0; padding: 0;margin-top: 0.5em">
-						        <iframe srcdoc={mailContent.content.unwrap_or_default(&mailContent.parts)} sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" style="width:100%; height:100%; background:white; border: none; margin: 0; padding: 0;"></iframe>
+							{
+								let contentFrame = contentFrame.clone();
+								let remoteImagesAllowed = remoteImagesAllowed.clone();
+								move || {
+									if (!contentFrame.remoteImagesControl_isAvailable() || remoteImagesAllowed.get())
+									{
+										return view!{}.into_any();
+									}
+									let remoteImagesAllowed = remoteImagesAllowed.clone();
+									return view!{
+										<div class="module_mail_remote_images">
+											<span class="module_mail_remote_images_message"><Translate key="MODULE_MAIL_REMOTE_IMAGES_BLOCKED"/></span>
+											<button type="button" class="module_mail_remote_images_button" on:click={move |_|remoteImagesAllowed.set(true)}>
+												<Translate key="MODULE_MAIL_LOAD_REMOTE_IMAGES"/>
+											</button>
+										</div>
+									}.into_any();
+								}
+							}
+							<div class="module_mail_content_frame">
+								{
+									let contentFrame = contentFrame.clone();
+									let remoteImagesAllowed = remoteImagesAllowed.clone();
+									view!{
+										<iframe srcdoc={move || contentFrame.srcdoc_get(remoteImagesAllowed.get())}
+											sandbox="allow-popups allow-popups-to-escape-sandbox"
+											referrerpolicy="no-referrer"></iframe>
+									}
+								}
 							</div>
 						</div>
 					}.into_any()
 				})
 				.setButtonValidateTitle(Some("MODULE_MAIL_MAILCONTENTSEEN"))
 				.setOnValidate(move |_| {
-					Self::mail_mark_see(imapConnector.clone(), toaster.clone(), mailIdContent.clone(), mailsCache.clone(), moduleActionsValidate.clone());
+					Self::mail_mark_see(imapConnector.clone(), toaster.clone(), mailKeyValidate.clone(), mailsCache.clone(), moduleActionsValidate.clone());
 					return true;
 				})
 				.setIsLarger(true);
@@ -407,65 +739,39 @@ impl Mail
 		{
 			return;
 		}
-		let mailContent = mailContentRaw.get_untracked();
 		let config = config.get_untracked();
-		let (mailsToAdd,mailToUpdate) = if(mailContent.mailsData.is_empty())
-		{
-			let apiResult = API_proxys_imap_getFullUnsee(config.imap.clone()).await;
-			if (!moduleActions.lifecycle_isActive())
+		let request = {
+			let Some(mut mailContent) = mailContentRaw.try_write()
+			else
 			{
 				return;
-			}
-			let Some(allmails) = toaster_api(&toaster, apiResult, None).await else {
-				if (moduleActions.lifecycle_isActive())
-				{
-					toastingErr(&toaster, "MODULE_MAIL_SYNCERROR".to_string()).await;
-				}
-				return;
 			};
-			(allmails,HashMap::new())
-		}
+			mailContent.syncRequest_get(&config.imap)
+		};
+		let Some(request) = request
 		else
 		{
-			let apiResult = API_proxys_imap_getUnseeSince(config.imap.clone(),
-			                                                 mailContent.lastUpdate,
-			                                                 mailContent.mailsData.keys()
-				                                                 .map(|e| *e as u32)
-				                                                 .collect::<Vec<u32>>()).await;
-			if (!moduleActions.lifecycle_isActive())
+			return;
+		};
+		let apiResult = API_proxys_imap_sync(config.imap.clone(),request).await;
+		if (!moduleActions.lifecycle_isActive())
+		{
+			return;
+		}
+		let Some(mailboxes) = toaster_api(&toaster,apiResult,None).await
+		else
+		{
+			if (moduleActions.lifecycle_isActive())
 			{
-				return;
+				toastingErr(&toaster,"MODULE_MAIL_SYNCERROR".to_string()).await;
 			}
-			let Some((newmails,mailToUpdate)) = toaster_api(&toaster, apiResult, None).await
-			else {
-				if (moduleActions.lifecycle_isActive())
-				{
-					toastingErr(&toaster, "MODULE_MAIL_SYNCERROR".to_string()).await;
-				}
-				return;
-			};
-			(newmails,mailToUpdate)
+			return;
 		};
 		if (!moduleActions.lifecycle_isActive())
 		{
 			return;
 		}
-		mailContentRaw.update(move |mailContent| {
-			for mailToAdd in mailsToAdd {
-				if(mailContent.lastUpdate<mailToAdd.date as u64) {
-					mailContent.lastUpdate=mailToAdd.date as u64;
-				}
-				mailContent.mailsData.insert(mailToAdd.uid as u64, mailToAdd);
-			}
-
-			for (uid,content) in &mailToUpdate {
-				if(content.flags.contains(&"SEEN".to_string())) {
-					mailContent.mailsData.remove(&(*uid as u64));
-					mailContent.mailsContent.remove(&(*uid as u64));
-				}
-				//let Some(foundMailToUpdate) = mailContent.mailsData.get_mut(&(*uid as u64)) else {continue};
-			}
-		})
+		mailContentRaw.update(move |mailContent| mailContent.sync_apply(mailboxes));
 	}
 
 	fn utils_mailOverlay(mail: &ImapMail) -> AnyView
@@ -608,26 +914,16 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 	let toasterInner = toaster.clone();
 	let mailsCache = mailsClientCache.clone();
 	let moduleActionsView = moduleActions.clone();
-	let viewContentFn = move |mailIdcontent:ImapMail| {
-		Mail::mail_view_content(imapConnector.get_untracked().imap.clone(), toasterInner.clone(), dialogManager.clone(), mailIdcontent, mailsCache.clone(), moduleActionsView.clone());
+	let viewContentFn = move |mailKey:ImapMailKey,mailData:ImapMail| {
+		Mail::mail_view_content(imapConnector.get_untracked().imap.clone(), toasterInner.clone(), dialogManager.clone(), mailKey, mailData, mailsCache.clone(), moduleActionsView.clone());
 	};
 
 	let imapConnector = config.clone();
 	let mailsCache = mailsClientCache.clone();
 	let moduleActionsMark = moduleActions.clone();
-	let markViewFn = move |mailIdcontent:ImapMail| {
-		Mail::mail_mark_see(imapConnector.get_untracked().imap.clone(), toaster.clone(), mailIdcontent, mailsCache.clone(), moduleActionsMark.clone());
+	let markViewFn = move |mailKey:ImapMailKey| {
+		Mail::mail_mark_see(imapConnector.get_untracked().imap.clone(), toaster.clone(), mailKey, mailsCache.clone(), moduleActionsMark.clone());
 	};
-
-	/*let refreshMail = self.config.clone();
-	let actualContentRefresh = self.mailContent.clone();
-	let testSinceFn = move |_| {
-		let refreshMail = refreshMail.clone();
-		let actualContentRefresh = actualContentRefresh.clone();
-		spawn_local(async move {
-			let _ = API_proxys_imap_getUnseeSince(refreshMail.get_untracked().imap.clone(),actualContentRefresh.get_untracked().lastUpdate).await;
-		});
-	};*/
 
 
 	view!{{move || {
@@ -642,28 +938,24 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 				let mailsCache = mailsClientCache.clone();
 				let mailConfig = config.get();
 				let mailTagIsActive = mailConfig.mail_tag_is_active();
-				/*
-					<button on:click={testFn}>MAIL</button>
-					<button on:click={testSinceFn}>MAIL SINCE</button>
-				 */
 				view!{
 					{draw_title_if_present(mailConfig.title.clone())}
 					<div class="module_rss_upper">
 						<table class="module_rss_table module_mail_table">{
 							let markVueCacheInner = mailsCache.clone();
 							let mails = mailsCache.get().mailsData.clone();
-							let mut mailsContent = mails.values().cloned().collect::<Vec<_>>();
-							mailsContent.sort_by(|a,b| a.date.cmp(&b.date).reverse());
-							mailsContent.iter().enumerate()
-								//.filter(|(num,_)| *num <= 10)
-								.map(|(_,mail)|{
-									let id = mail.uid;
-									let mailId = mail.clone();
-									let mailIdMark = mail.clone();
+							let mut mailsContent = mails.into_iter().collect::<Vec<_>>();
+							mailsContent.sort_by(|(_,left),(_,right)| left.date.cmp(&right.date).reverse());
+							mailsContent.into_iter()
+								.map(|(mailKey,mail)|{
+									let mailKeyView = mailKey.clone();
+									let mailKeyMark = mailKey.clone();
+									let mailKeyConfirm = mailKey.clone();
+									let mailView = mail.clone();
 									let viewContentFn = viewContentFn.clone();
 									let markViewFn = markViewFn.clone();
 									let markVueCacheInner = markVueCacheInner.clone();
-									let mailTag = if(mailTagIsActive) {mailConfig.mail_tag(mail)} else {None};
+									let mailTag = if(mailTagIsActive) {mailConfig.mail_tag(&mail)} else {None};
 									view!{
 										<tr>
 											<td class="module_mail_date">{distant_time_simpler(mail.date)}</td>
@@ -687,34 +979,26 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 												}
 												else {view!{}.into_any()}
 											}
-											<td class="module_mail_subject mail_pointer alttext_upper" on:click={move |_| viewContentFn.clone()(mailId.clone())}>{mail.subject.clone()}{Mail::utils_mailOverlay(&mailId)}</td>
-											<td class="module_mail_status">{
-												if(mail.confirmVue)
-												{
-													view!{<i class="iconoir-mail-out-solid" on:click={move |_| markViewFn.clone()(mailIdMark.clone())}/>}.into_any()
-												}
-												else
-												{
-													view!{<i class="iconoir-mail-open" on:click={move |_| {
-														let markVueCacheInnerInner = markVueCacheInner.clone();
-														markVueCacheInner.update(|mailCache|{
-															if let Some(thismail) = mailCache.mailsData.get_mut(&(id as u64))
-															{
-																thismail.confirmVue = true;
-																Timeout::new(5000, move || {
-																        markVueCacheInnerInner.update(|mailCache|{
-																			if let Some(thismail) = mailCache.mailsData.get_mut(&(id as u64))
-																			{
-																				thismail.confirmVue = false;
-																			}
-																		});
-																    }
-																).forget();
-															}
-														});
-													}}/>}.into_any()
-												}
-											}</td>
+							<td class="module_mail_subject mail_pointer alttext_upper" on:click={move |_| viewContentFn.clone()(mailKeyView.clone(),mailView.clone())}>{mail.subject.clone()}{Mail::utils_mailOverlay(&mail)}</td>
+							<td class="module_mail_status">{
+								if(mail.confirmVue)
+								{
+									view!{<i class="iconoir-mail-out-solid" on:click={move |_| markViewFn.clone()(mailKeyMark.clone())}/>}.into_any()
+								}
+								else
+								{
+									view!{<i class="iconoir-mail-open" on:click={move |_| {
+										let markVueCacheInnerInner = markVueCacheInner.clone();
+										let mailKeyInner = mailKeyConfirm.clone();
+										markVueCacheInner.update(|mailCache|{
+											mailCache.confirmation_set(&mailKeyInner,true);
+										});
+										Timeout::new(5000, move || {
+											markVueCacheInnerInner.update(|mailCache| mailCache.confirmation_set(&mailKeyInner,false));
+										}).forget();
+									}}/>}.into_any()
+								}
+							}</td>
 										</tr>
 									}
 								}).collect_view()
@@ -728,8 +1012,10 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 #[cfg(test)]
 mod tests
 {
-	use super::{MailConfig, MailTag};
-	use crate::api::proxys::imap_components::ImapMail;
+	use std::collections::HashMap;
+
+	use super::{MailConfig, MailContentFrame, MailSyncIdentity, MailTag, MailsContent};
+	use crate::api::proxys::imap_components::{Attributs, BoxName, imap_connector, imap_connector_extra, ImapMailboxSync, ImapMail, ImapMailContentType, ImapMailKey};
 
 	fn config_with_suffix(suffix: &str) -> MailConfig
 	{
@@ -746,6 +1032,26 @@ mod tests
 			to: to.to_string(),
 			..Default::default()
 		};
+	}
+
+	fn mailKey_get(boxName: &str, uidValidity: u32, uid: u32) -> ImapMailKey
+	{
+		return ImapMailKey {boxName: boxName.to_string(),uidValidity,uid};
+	}
+
+	fn mailboxSync_get(boxName: &str, uidValidity: u32, removedUids: Vec<u32>, mailUids: Vec<u32>) -> ImapMailboxSync
+	{
+		return ImapMailboxSync {
+			boxName: boxName.to_string(),
+			uidValidity,
+			removedUids,
+			mails: mailUids.into_iter().map(|uid| ImapMail {uid,..Default::default()}).collect(),
+		};
+	}
+
+	fn boxName_get(name: &str, attributes: Attributs) -> BoxName
+	{
+		return BoxName {name: name.to_string(),attributes};
 	}
 
 	#[test]
@@ -815,5 +1121,219 @@ mod tests
 		assert_eq!(lowerTag.color,upperTag.color);
 		assert_eq!(lowerTag.style(),upperTag.style());
 		assert!(lowerTag.style().starts_with("--mail-tag-color:hsl("));
+	}
+
+	#[test]
+	fn mailContentFrameEscapesPlainTextBeforeSrcdocRendering()
+	{
+		let frame = MailContentFrame::new(ImapMailContentType::Text(
+			"<script>alert('x')</script>\nSafe & sound".to_string(),
+		));
+		let srcdoc = frame.srcdoc_get(false);
+
+		assert!(!srcdoc.contains("<script>alert"));
+		assert!(srcdoc.contains("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;"));
+		assert!(srcdoc.contains("Safe &amp; sound"));
+		assert!(srcdoc.contains("white-space:pre-wrap"));
+	}
+
+	#[test]
+	fn mailContentFrameAllowsRemoteImagesOnlyAfterLocalChoice()
+	{
+		let frame = MailContentFrame::new(ImapMailContentType::Html(
+			"<img src=\"https://tracker.example/pixel\">".to_string(),
+		));
+		let blocked = frame.srcdoc_get(false);
+		let allowed = frame.srcdoc_get(true);
+
+		assert!(frame.remoteImagesControl_isAvailable());
+		assert!(blocked.contains("default-src 'none'"));
+		assert!(blocked.contains("form-action 'none'"));
+		assert!(blocked.contains("img-src data: blob:;"));
+		assert!(!blocked.contains("img-src data: blob: http: https:;"));
+		assert!(allowed.contains("img-src data: blob: http: https:;"));
+	}
+
+	#[test]
+	fn mailCache_keepsSameUidFromDifferentMailboxes()
+	{
+		let mut cache = MailsContent::default();
+		cache.sync_apply(vec![
+			mailboxSync_get("Alerts",42,Vec::new(),vec![7]),
+			mailboxSync_get("News",99,Vec::new(),vec![7]),
+		]);
+
+		assert_eq!(cache.mailsData.len(),2);
+		assert!(cache.mailsData.contains_key(&mailKey_get("Alerts",42,7)));
+		assert!(cache.mailsData.contains_key(&mailKey_get("News",99,7)));
+	}
+
+	#[test]
+	fn mailCache_removesOnlyTheMailboxScopedUid()
+	{
+		let mut cache = MailsContent::default();
+		cache.sync_apply(vec![
+			mailboxSync_get("Alerts",42,Vec::new(),vec![7]),
+			mailboxSync_get("News",99,Vec::new(),vec![7]),
+		]);
+		cache.sync_apply(vec![
+			mailboxSync_get("Alerts",42,vec![7],Vec::new()),
+			mailboxSync_get("News",99,Vec::new(),Vec::new()),
+		]);
+
+		assert!(!cache.mailsData.contains_key(&mailKey_get("Alerts",42,7)));
+		assert!(cache.mailsData.contains_key(&mailKey_get("News",99,7)));
+	}
+
+	#[test]
+	fn mailCache_rebuildsOnlyMailboxWhoseUidValidityChanged()
+	{
+		let mut cache = MailsContent::default();
+		cache.sync_apply(vec![
+			mailboxSync_get("Alerts",42,Vec::new(),vec![7]),
+			mailboxSync_get("News",99,Vec::new(),vec![7]),
+		]);
+		cache.sync_apply(vec![
+			mailboxSync_get("Alerts",43,Vec::new(),vec![1]),
+			mailboxSync_get("News",99,Vec::new(),Vec::new()),
+		]);
+
+		assert!(!cache.mailsData.contains_key(&mailKey_get("Alerts",42,7)));
+		assert!(cache.mailsData.contains_key(&mailKey_get("Alerts",43,1)));
+		assert!(cache.mailsData.contains_key(&mailKey_get("News",99,7)));
+	}
+
+	#[test]
+	fn mailCache_acceptsMailThatBecomesUnreadAgain()
+	{
+		let mut cache = MailsContent::default();
+		cache.sync_apply(vec![mailboxSync_get("Alerts",42,Vec::new(),vec![7])]);
+		cache.sync_apply(vec![mailboxSync_get("Alerts",42,vec![7],Vec::new())]);
+		assert!(cache.mailsData.is_empty());
+
+		cache.sync_apply(vec![mailboxSync_get("Alerts",42,Vec::new(),vec![7])]);
+		assert!(cache.mailsData.contains_key(&mailKey_get("Alerts",42,7)));
+	}
+
+	#[test]
+	fn mailCache_doesNotReinsertMailWhileSeenStoreIsPending()
+	{
+		let mut cache = MailsContent::default();
+		let key = mailKey_get("Alerts",42,7);
+		cache.sync_apply(vec![mailboxSync_get("Alerts",42,Vec::new(),vec![7])]);
+		let removedMail = cache.mailSeen_begin(&key);
+		assert!(!cache.mailsData.contains_key(&key));
+
+		cache.sync_apply(vec![mailboxSync_get("Alerts",42,Vec::new(),vec![7])]);
+		assert!(!cache.mailsData.contains_key(&key));
+		assert!(cache.pendingSeen.contains(&key));
+
+		cache.mailSeen_rollback(key.clone(),removedMail);
+		assert!(cache.mailsData.contains_key(&key));
+		assert!(!cache.pendingSeen.contains(&key));
+	}
+
+	#[test]
+	fn mailCacheRediscoversUnreadMailAfterSeenReconciliation()
+	{
+		let mut cache = MailsContent::default();
+		let key = mailKey_get("Alerts",42,7);
+		cache.sync_apply(vec![mailboxSync_get("Alerts",42,Vec::new(),vec![7])]);
+		cache.mailSeen_begin(&key);
+		cache.mailSeen_commit(key.clone());
+
+		cache.sync_apply(vec![mailboxSync_get("Alerts",42,Vec::new(),Vec::new())]);
+		assert!(!cache.pendingSeen.contains(&key));
+		assert!(!cache.confirmedSeen.contains(&key));
+		assert!(!cache.mailsData.contains_key(&key));
+
+		cache.sync_apply(vec![mailboxSync_get("Alerts",42,Vec::new(),vec![7])]);
+		assert!(cache.mailsData.contains_key(&key));
+	}
+
+	#[test]
+	fn mailCache_groupsKnownUidsByMailboxInSyncRequest()
+	{
+		let mut connector = imap_connector::default();
+		connector.extra = Some(imap_connector_extra::default());
+		let mut cache = MailsContent::default();
+		cache.syncIdentity = Some(MailSyncIdentity::new(&connector));
+		cache.mailboxes = Some([
+			("News".to_string(),Some(99)),
+			("Alerts".to_string(),Some(42)),
+		].into_iter().collect());
+		cache.mailsData.insert(mailKey_get("Alerts",42,7),ImapMail {uid: 7,..Default::default()});
+		cache.mailsData.insert(mailKey_get("News",99,7),ImapMail {uid: 7,..Default::default()});
+
+		let request = cache.syncRequest_get(&connector).unwrap();
+		let mailboxes = request.mailboxes.unwrap();
+		assert_eq!(mailboxes.len(),2);
+		assert_eq!(mailboxes[0].boxName,"Alerts");
+		assert_eq!(mailboxes[0].knownUids,vec![7]);
+		assert_eq!(mailboxes[1].boxName,"News");
+		assert_eq!(mailboxes[1].knownUids,vec![7]);
+	}
+
+	#[test]
+	fn mailCache_doesNotSyncBeforeExplicitSelection()
+	{
+		let connector = imap_connector::default();
+		let mut cache = MailsContent::default();
+
+		assert!(cache.syncRequest_get(&connector).is_none());
+		assert!(cache.mailboxes.is_none());
+	}
+
+	#[test]
+	fn mailCache_doesNotSyncAnExplicitEmptySelection()
+	{
+		let mut connector = imap_connector::default();
+		connector.extra = Some(imap_connector_extra {
+			boxAllowList: Some(Vec::new()),
+			..Default::default()
+		});
+		let mut cache = MailsContent::default();
+
+		assert!(cache.syncRequest_get(&connector).is_none());
+		assert_eq!(cache.mailboxes,Some(HashMap::new()));
+	}
+
+	#[test]
+	fn mailCacheSeedsExplicitSelectionWithoutMailboxListing()
+	{
+		let mut connector = imap_connector::default();
+		connector.extra = Some(imap_connector_extra {
+			boxAllowList: Some(vec!["News".to_string(),"Alerts".to_string()]),
+			..Default::default()
+		});
+		let mut cache = MailsContent::default();
+
+		let request = cache.syncRequest_get(&connector).unwrap();
+		let mailboxes = request.mailboxes.unwrap();
+		assert_eq!(mailboxes.len(),2);
+		assert_eq!(mailboxes[0].boxName,"Alerts");
+		assert_eq!(mailboxes[1].boxName,"News");
+		assert!(mailboxes.iter().all(|mailbox| mailbox.uidValidity.is_none()));
+	}
+
+	#[test]
+	fn mailCacheTopologyKeepsOnlySelectedInterestingMailboxes()
+	{
+		let mut connector = imap_connector::default();
+		connector.extra = Some(imap_connector_extra {
+			boxAllowList: Some(vec!["Alerts".to_string(),"Archive".to_string()]),
+			..Default::default()
+		});
+		let boxes = vec![
+			boxName_get("Alerts",Attributs::default()),
+			boxName_get("News",Attributs::default()),
+			boxName_get("Archive",Attributs {is_archive: true,..Default::default()}),
+		];
+		let mut cache = MailsContent::default();
+
+		cache.topology_set(&boxes,&connector);
+
+		assert_eq!(cache.boxs.len(),3);
+		assert_eq!(cache.mailboxes,Some([("Alerts".to_string(),None)].into_iter().collect()));
 	}
 }

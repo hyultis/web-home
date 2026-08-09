@@ -148,6 +148,36 @@ An empty, malformed or non-integer list fails closed and disables IMAP proxy con
 
 `trace_front_log` enables bounded browser-to-server development traces. It is always forced off when WebHome runs with `ENV=PROD`, even if `site.json` contains `true`.
 
+## Third-party browser assets
+
+WebHome loads [Iconoir 7.11.1](https://github.com/iconoir-icons/iconoir/releases/tag/v7.11.1), licensed under MIT, from this fixed jsDelivr URL:
+
+```text
+https://cdn.jsdelivr.net/npm/iconoir@7.11.1/css/iconoir.css
+```
+
+The stylesheet is protected by this Subresource Integrity value:
+
+```text
+sha384-luECWXGw+Rk0LDPKZ8m2vuzYJnGiJfFabF16BAqKVf7rdp1/jvaViZ+BFXFuaD5H
+```
+
+When updating Iconoir, change the versioned URL and its SRI value together. Download the exact new URL, calculate its SHA-384 value, then run the Leptos build and visually check both regular and solid icons. Do not replace the fixed version with a mutable branch or tag.
+
+```bash
+curl -fsS "https://cdn.jsdelivr.net/npm/iconoir@VERSION/css/iconoir.css" \
+	| openssl dgst -sha384 -binary \
+	| openssl base64 -A
+```
+
+## Browser Content Security Policy
+
+WebHome enforces a complete Content Security Policy covering Leptos hydration, same-origin server functions and workers, Open-Meteo, Iconoir, and the isolated mail iframe. It was deployed in report-only mode before enforcement so the application's real browser requirements could be checked without regressions.
+
+Browsers can submit violations to the same-origin `POST /csp-report` endpoint. The endpoint accepts only the standard `application/csp-report` and `application/reports+json` formats, with a 16 KiB request limit. It does not store report bodies. Logs are limited to 64 entries per minute and retain only the directive, origins without credentials/path/query, and line/column numbers.
+
+After a CSP change, exercise login, home modules, weather, LINK/RSS navigation, mail rendering and its explicit remote-image action, downloads, editing/dragging, and sleep recovery. Review warnings beginning with `Browser CSP report`; under the enforced policy these warnings identify resources the browser has blocked.
+
 ## Todo
 
 Things to fix :

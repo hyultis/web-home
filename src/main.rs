@@ -12,15 +12,21 @@ use Htrace::HTraceError;
 use web_home::entry::AppProps;
 use crate::api::{ALLOW_REGISTRATION, IS_TRACE_FRONT_LOG};
 use crate::api::proxys::proxy_cache::CACHE_DIR;
+#[cfg(feature = "ssr")]
+use crate::browser_content_security::BrowserContentSecurity;
 use crate::global_security::generate_salt;
 
 mod api;
+#[cfg(feature = "ssr")]
+mod browser_content_security;
 pub mod global_security;
 
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
 	use std::fs;
+	use axum::extract::DefaultBodyLimit;
+	use axum::routing::post;
 	use axum::Router;
     use leptos::prelude::*;
     use leptos_axum::{generate_route_list, LeptosRoutes};
@@ -117,10 +123,15 @@ async fn main() {
             let leptos_options = leptos_options.clone();
             move || shell((leptos_options.clone(),trace_front_log,allow_registration))
         })
-        .fallback(leptos_axum::file_and_error_handler(move |lo|shell((lo,trace_front_log,allow_registration))))
-	    .layer(middleware::from_fn(helper::tracing_request))
-	    .layer(middleware::from_fn(helper::http_good_practice))
+	    .fallback(leptos_axum::file_and_error_handler(move |lo|shell((lo,trace_front_log,allow_registration))))
 	    .layer(session_layer)
+	    .route(
+		    BrowserContentSecurity::REPORT_PATH,
+		    post(BrowserContentSecurity::report_receive)
+			    .layer(DefaultBodyLimit::max(BrowserContentSecurity::REPORT_BODY_MAXIMUM_BYTES)),
+	    )
+	    .layer(middleware::from_fn(helper::tracing_request))
+	    .layer(middleware::from_fn(BrowserContentSecurity::headers_apply))
         .with_state(leptos_options);
 
     // to run our app
@@ -136,7 +147,6 @@ mod helper {
 	use axum::response::Response;
 	use Hconfig::HConfig::HConfig;
 	use Hconfig::tinyjson::JsonValue;
-	use http::header::*;
 
 	pub fn preFillConfig(config: &mut HConfig,fieldName: impl Into<String>, data: impl Into<JsonValue>)
 	{
@@ -158,30 +168,15 @@ mod helper {
 
 		let method = request.method().to_string();
 		let uri = request.uri().to_string();
+		let isCspReport = super::BrowserContentSecurity::reportPath_is(request.uri().path());
 
 
 		let response = next.run(request).await;
 
-		if(!(uri.contains("API_translate_getBook") || uri.contains("API_Htrace_log")))
+		if(!(uri.contains("API_translate_getBook") || uri.contains("API_Htrace_log") || isCspReport))
 		{
 			HTrace!("Request {} on {} : {}", method, uri, response.status());
 		}
-
-		response
-	}
-
-
-	pub(crate) async fn http_good_practice(
-		request: Request,
-		next: Next,
-	) -> Response {
-		let mut response = next.run(request).await;
-
-		response.headers_mut().insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
-		response.headers_mut().insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static("frame-ancestors 'none'"));
-		response.headers_mut().insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
-		response.headers_mut().insert(STRICT_TRANSPORT_SECURITY, HeaderValue::from_static("max-age=63072000; includeSubDomains; preload"));
-		response.headers_mut().insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
 
 		response
 	}

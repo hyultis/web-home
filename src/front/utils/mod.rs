@@ -10,6 +10,9 @@ pub mod dialog;
 pub mod toaster_helpers;
 pub mod all_front_enum;
 pub mod contentDownloader;
+mod external_url;
+
+pub(super) use external_url::SafeExternalUrl;
 
 
 pub fn draw_title_if_present(title: String) -> AnyView

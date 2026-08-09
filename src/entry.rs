@@ -19,7 +19,14 @@ use crate::front::utils::translate::Translate;
 use crate::front::utils::users_data::ClientState;
 
 pub fn shell((options,trace_front_log,allowRegistration): (LeptosOptions, bool, bool)) -> impl IntoView {
-	//	<meta http-equiv="Content-Security-Policy" modules="default-src https: * 'unsafe-inline' 'unsafe-eval' 'strict-dynamic' 'wasm-unsafe-eval'; script-src-elem *"/>
+	#[cfg(feature="ssr")]
+	if let Some(requestParts) = use_context::<http::request::Parts>()
+	{
+		if let Some(nonce) = requestParts.extensions.get::<leptos::nonce::Nonce>()
+		{
+			provide_context(nonce.clone());
+		}
+	}
 
 	view! {
 		<!DOCTYPE html>
@@ -30,7 +37,6 @@ pub fn shell((options,trace_front_log,allowRegistration): (LeptosOptions, bool, 
 				<meta http-equiv="Referrer-Policy" content="no-referrer, strict-origin-when-cross-origin"/>
 				<meta lang="fr" name="description" content="Webhome"/>
 				<meta lang="en" name="description" content="Webhome"/>
-				//<meta http-equiv="Content-Security-Policy" modules="script-src https: 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'"/> // actuellement instable avec leptos ?
 				<AutoReload options=options.clone() />
 				<HydrationScripts options islands=true/>
 				<MetaTags/>
@@ -102,7 +108,13 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 		// injects a stylesheet into the document <head>
 		// id=leptos means cargo-leptos will hot-reload this stylesheet
 		<Stylesheet id="leptos" href="/pkg/webhome.css"/>
-		<Stylesheet id="iconoir" href="https://cdn.jsdelivr.net/gh/iconoir-icons/iconoir@main/css/iconoir.css"/>
+		<Link
+			id="iconoir"
+			rel="stylesheet"
+			href="https://cdn.jsdelivr.net/npm/iconoir@7.11.1/css/iconoir.css"
+			integrity="sha384-luECWXGw+Rk0LDPKZ8m2vuzYJnGiJfFabF16BAqKVf7rdp1/jvaViZ+BFXFuaD5H"
+			crossorigin="anonymous"
+		/>
 
 		<Link rel="icon" href="/favicon.png" type_="image/png" sizes="64x64" />
 

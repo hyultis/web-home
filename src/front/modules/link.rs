@@ -5,6 +5,7 @@ use crate::front::modules::components::{
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::dialog::{DialogData, DialogManager};
+use crate::front::utils::SafeExternalUrl;
 use crate::front::utils::toaster_helpers::{toastingErr, toastingParams};
 use crate::HWebTrace;
 use leptoaster::{expect_toaster, ToastLevel, ToasterContext};
@@ -15,7 +16,7 @@ use leptos::prelude::{
 	OnAttribute, Set, StyleAttribute, Update,
 };
 use leptos::prelude::{BindAttribute, GetUntracked, ViewFn, With, Write};
-use leptos::prelude::{CollectView, ElementChild, IntoAny, RwSignal};
+use leptos::prelude::{AnyView, CollectView, ElementChild, IntoAny, RwSignal};
 use leptos::{component, view, IntoView};
 use leptos_use::{
 	use_draggable_with_options, use_mouse_in_element, UseDraggableOptions, UseDraggableReturn,
@@ -25,7 +26,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::Arc;
-use url::Url;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Link
@@ -72,11 +72,16 @@ impl LinksHolder
 		self.id = name;
 	}
 
-	fn draw_link(link: &Link) -> impl IntoView
+	fn draw_link(link: &Link) -> AnyView
 	{
-		return view! {
-			<a href={link.url.clone()} rel="noopener noreferrer nofollow" target="_blank">{link.label.clone()}</a>
+		let Some(url) = SafeExternalUrl::parse(&link.url)
+		else
+		{
+			return view! {<span class="button">{link.label.clone()}</span>}.into_any();
 		};
+		return view! {
+			<a href={url.into_string()} rel="noopener noreferrer nofollow" target="_blank">{link.label.clone()}</a>
+		}.into_any();
 	}
 
 	fn draw_editable_link(
@@ -273,13 +278,14 @@ impl LinksHolder
 						return false;
 					};
 
-					if (Url::parse(&url).is_err())
+					let Some(url) = SafeExternalUrl::parse(&url)
+					else
 					{
 						moduleActions.task_spawn(async move {
 							toastingErr(&toaster, AllFrontUIEnum::INVALID_URL).await;
 						});
 						return false;
-					}
+					};
 
 					let Some(mut guard) = content.try_write()
 					else
@@ -299,7 +305,7 @@ impl LinksHolder
 						links.remove(pos);
 					}
 
-					links.push(Link::new(label, url));
+					links.push(Link::new(label, url.into_string()));
 					cache.update(|cache| {
 						cache.update();
 					});

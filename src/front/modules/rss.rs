@@ -12,6 +12,7 @@ use crate::front::modules::components::{distant_time_simpler, Backable, BoxFutur
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::toaster_helpers::toaster_api;
 use crate::front::utils::translate::Translate;
+use crate::front::utils::SafeExternalUrl;
 
 #[derive(Serialize,Deserialize,Debug)]
 #[derive(Clone)]
@@ -118,9 +119,12 @@ impl Rss
 		let Some(link) = entryTitle.first() else {
 			return view!{}.into_any();
 		};
+		let Some(url) = SafeExternalUrl::parse(&link.href) else {
+			return view!{}.into_any();
+		};
 
 		return view!{
-			<a href={link.href.clone()} rel="noopener noreferrer nofollow" target="_blank"><i class="iconoir-link"></i></a>
+			<a href={url.into_string()} rel="noopener noreferrer nofollow" target="_blank"><i class="iconoir-link"></i></a>
 		}.into_any();
 	}
 }
@@ -276,10 +280,19 @@ fn RssDraw(config: ArcRwSignal<RssConfig>,
 							.map(|(_,entry)|{
 								if let Some(link) = &entry.links.first() && let Some(title) = &entry.title
 								{
+									let title = title.content.clone();
+									let titleView = if let Some(url) = SafeExternalUrl::parse(&link.href)
+									{
+										view!{<a href={url.into_string()} rel="noopener noreferrer nofollow" target="_blank">{title}</a>}.into_any()
+									}
+									else
+									{
+										view!{<span>{title}</span>}.into_any()
+									};
 									view!{
 										<tr>
 											<td>{distant_time_simpler(entry.published.clone().unwrap_or_default().timestamp())}</td>
-											<td><a href={link.href.clone()} rel="noopener noreferrer nofollow" target="_blank">{title.content.clone()}</a></td>
+											<td>{titleView}</td>
 										</tr>
 									}.into_any()
 								}

@@ -121,3 +121,5 @@ MODULE_MAIL_SYNCERROR = Synchronisation mail impossible
 MODULE_MAIL_MAILCONTENTSEEN = Marquer comme lu
 MODULE_MAIL_REMOTE_IMAGES_BLOCKED = Les images distantes sont bloquées pour protéger votre confidentialité.
 MODULE_MAIL_LOAD_REMOTE_IMAGES = Charger les images pour ce mail
+MODULE_MAIL_ALWAYS_LOAD_REMOTE_IMAGES = Toujours charger pour cet expéditeur
+MODULE_MAIL_REMOTE_IMAGES_ALLOWLIST = Expéditeurs autorisés pour les images distantes (cliquer pour retirer) :

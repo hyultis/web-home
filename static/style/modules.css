@@ -304,6 +304,53 @@
 	opacity: 0.55;
 }
 
+.module_mail_remote_images_allowlist {
+	margin: 0.6em 0;
+	padding: 0.5em 0.6em;
+	border: 1px solid var(--maincolor);
+	border-radius: 5px;
+	background-color: var(--backgroundcolorlighter);
+}
+
+.module_mail_remote_images_allowlist_title {
+	display: block;
+	margin-bottom: 0.35em;
+	font-size: 0.9em;
+}
+
+.module_mail_remote_images_allowlist_entries {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35em;
+}
+
+.module_mail_remote_images_allowlist .module_mail_remote_images_allowlist_entry {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45em;
+	max-width: 100%;
+	margin: 0;
+	padding: 0.25em 0.45em;
+	border: 1px solid var(--maincolor);
+	border-radius: 4px;
+	background-color: var(--backgroundcolor);
+	font-family: monospace;
+	font-size: 0.85em;
+	overflow-wrap: anywhere;
+}
+
+.module_mail_remote_images_allowlist .module_mail_remote_images_allowlist_entry:hover {
+	border-color: var(--buttonbackgrounddanger);
+	background-color: var(--buttonbackgrounddanger);
+}
+
+.module_mail_remote_images_allowlist_remove {
+	color: var(--urlcolor);
+	font-family: system-ui, sans-serif;
+	font-size: 1.2em;
+	font-weight: bold;
+}
+
 .module_mail_content_parent {
 	display: flex;
 	width: 100%;
@@ -362,6 +409,13 @@
 	min-width: 0;
 }
 
+.module_mail_remote_images_actions {
+	display: flex;
+	align-items: stretch;
+	justify-content: flex-end;
+	gap: 0.4em;
+}
+
 .module_mail_remote_images .module_mail_remote_images_button {
 	display: inline-flex;
 	align-items: center;
@@ -381,13 +435,22 @@
 	background-color: var(--urlcolordarker);
 }
 
-@media (max-width: 600px) {
+.module_mail_remote_images .module_mail_remote_images_sender_button {
+	border-color: var(--maincolorlighter);
+}
+
+@media (max-width: 850px) {
 	.module_mail_remote_images {
 		grid-template-columns: auto minmax(0, 1fr);
 	}
 
-	.module_mail_remote_images .module_mail_remote_images_button {
+	.module_mail_remote_images_actions {
 		grid-column: 1 / -1;
+		flex-wrap: wrap;
+	}
+
+	.module_mail_remote_images .module_mail_remote_images_button {
+		flex: 1 1 15em;
 		width: 100%;
 		white-space: normal;
 	}

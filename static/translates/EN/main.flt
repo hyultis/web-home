@@ -121,3 +121,5 @@ MODULE_MAIL_SYNCERROR = Mail synchronization failed
 MODULE_MAIL_MAILCONTENTSEEN = Mark as read
 MODULE_MAIL_REMOTE_IMAGES_BLOCKED = Remote images are blocked to protect your privacy.
 MODULE_MAIL_LOAD_REMOTE_IMAGES = Load images for this email
+MODULE_MAIL_ALWAYS_LOAD_REMOTE_IMAGES = Always load images from this sender
+MODULE_MAIL_REMOTE_IMAGES_ALLOWLIST = Senders allowed to load remote images (click to remove):

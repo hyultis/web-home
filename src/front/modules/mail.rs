@@ -30,6 +30,8 @@ struct MailConfig
 	pub title: String,
 	#[serde(default)]
 	mailAsTag: String,
+	#[serde(default)]
+	remoteImageSenderAllowList: Vec<String>,
 	pub imap: imap_connector,
 }
 impl Default for MailConfig
@@ -39,8 +41,69 @@ impl Default for MailConfig
 		Self {
 			title: "".to_string(),
 			mailAsTag: "".to_string(),
+			remoteImageSenderAllowList: Vec::new(),
 			imap: imap_connector::default(),
 		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MailSenderAddress
+{
+	normalized: String,
+}
+
+impl MailSenderAddress
+{
+	const MAXIMUM_BYTES: usize = 320;
+
+	fn from_header(addressHeader: &str) -> Option<Self>
+	{
+		return addressHeader.split([',',';']).find_map(Self::from_candidate);
+	}
+
+	fn from_candidate(addressCandidate: &str) -> Option<Self>
+	{
+		let addressCandidate = addressCandidate.trim();
+		let address = if let Some((_,address)) = addressCandidate.rsplit_once('<')
+		{
+			address.split_once('>').map(|(address,_)| address).unwrap_or(address)
+		}
+		else
+		{
+			addressCandidate.split_whitespace()
+				.find(|part| part.contains('@'))
+				.unwrap_or(addressCandidate)
+		};
+
+		let address = address.trim().trim_matches(|character: char| {
+			return character.is_whitespace() || matches!(character, '<' | '>' | '"' | '\'' | '(' | ')');
+		});
+		let (localPart,domain) = address.rsplit_once('@')?;
+		let localPart = localPart.trim().trim_matches(|character: char| matches!(character, '"' | '\''));
+		let domain = domain.trim().trim_matches(|character: char| {
+			return character.is_whitespace() || matches!(character, '<' | '>' | '"' | '\'' | '(' | ')');
+		});
+		if (localPart.is_empty() || domain.is_empty() || localPart.contains('@') || domain.contains('@'))
+		{
+			return None;
+		}
+		if (localPart.chars().chain(domain.chars()).any(|character| character.is_whitespace() || character.is_control()))
+		{
+			return None;
+		}
+
+		let normalized = format!("{}@{}",localPart.to_lowercase(),domain.to_lowercase());
+		if (normalized.len() > Self::MAXIMUM_BYTES)
+		{
+			return None;
+		}
+		return Some(Self {normalized});
+	}
+
+	fn as_str(&self) -> &str
+	{
+		return &self.normalized;
 	}
 }
 
@@ -192,6 +255,40 @@ impl MailConfig
 	fn mail_tag(&self, mail: &ImapMail) -> Option<MailTag>
 	{
 		return MailTag::from_address_header(&mail.to,&self.mailAsTag);
+	}
+
+	fn remoteImageSender_isAllowed(&self, senderAddress: &MailSenderAddress) -> bool
+	{
+		return self.remoteImageSenderAllowList.iter()
+			.any(|allowedAddress| allowedAddress.eq_ignore_ascii_case(senderAddress.as_str()));
+	}
+
+	fn remoteImageSender_allow(&mut self, senderAddress: &MailSenderAddress) -> bool
+	{
+		if (self.remoteImageSender_isAllowed(senderAddress))
+		{
+			return false;
+		}
+		self.remoteImageSenderAllowList.push(senderAddress.as_str().to_string());
+		self.remoteImageSenderAllowList.sort_unstable();
+		return true;
+	}
+
+	fn remoteImageSender_remove(&mut self, senderAddress: &str) -> bool
+	{
+		let previousLength = self.remoteImageSenderAllowList.len();
+		self.remoteImageSenderAllowList.retain(|allowedAddress| {
+			return !allowedAddress.eq_ignore_ascii_case(senderAddress);
+		});
+		return self.remoteImageSenderAllowList.len() != previousLength;
+	}
+
+	fn remoteImageSenderAllowList_get(&self) -> Vec<String>
+	{
+		let mut allowList = self.remoteImageSenderAllowList.clone();
+		allowList.sort_unstable_by_key(|address| address.to_lowercase());
+		allowList.dedup_by(|left,right| left.eq_ignore_ascii_case(right));
+		return allowList;
 	}
 }
 
@@ -499,6 +596,8 @@ impl Mail
 		                              |d| d.get().imap.password,
 		                              |ev,inner| inner.imap.password = ev.target().value());
 		passwordF.setInputType(FieldHelperType::PASSWORD);
+		let remoteImageAllowListConfig = getBoxsMailConfig.clone();
+		let remoteImageAllowListCache = update.clone();
 
 		view!{
 			<div class="module_mail_config">
@@ -507,6 +606,43 @@ impl Mail
 				{hostF.draw()}:{portF.draw()}<br/>
 				{usernameF.draw()}<br/>
 				{passwordF.draw()}<br/>
+				{
+					move || {
+						let allowedAddresses = remoteImageAllowListConfig.get().remoteImageSenderAllowList_get();
+						if (allowedAddresses.is_empty())
+						{
+							return view!{}.into_any();
+						}
+						return view!{
+							<div class="module_mail_remote_images_allowlist">
+								<span class="module_mail_remote_images_allowlist_title">
+									<Translate key="MODULE_MAIL_REMOTE_IMAGES_ALLOWLIST"/>
+								</span>
+								<div class="module_mail_remote_images_allowlist_entries">
+									{allowedAddresses.into_iter().map(|senderAddress| {
+										let senderAddressContent = senderAddress.clone();
+										let remoteImageAllowListConfig = remoteImageAllowListConfig.clone();
+										let remoteImageAllowListCache = remoteImageAllowListCache.clone();
+										return view!{
+											<button type="button" class="module_mail_remote_images_allowlist_entry" on:click={move |_| {
+												let mut changed = false;
+												remoteImageAllowListConfig.update(|config| {
+													changed = config.remoteImageSender_remove(&senderAddress);
+												});
+												if (changed)
+												{
+													remoteImageAllowListCache.update(|cache| cache.update());
+												}
+											}}>
+												<span>{senderAddressContent}</span><span class="module_mail_remote_images_allowlist_remove">{"×"}</span>
+											</button>
+										};
+									}).collect_view()}
+								</div>
+							</div>
+						}.into_any();
+					}
+				}
 				<button on:click={getBoxsFn}><Translate key="MODULE_MAIL_GETBOXS"/></button>
 				{
 					let boxConfig = getBoxsMailConfig.clone();
@@ -594,9 +730,10 @@ impl Mail
 		});
 	}
 
-	fn mail_view_content(imapConnector: imap_connector, toaster: ToasterContext, dialogManager: DialogManager, mailKey: ImapMailKey, mailIdContent: ImapMail, mailsCache: ArcRwSignal<MailsContent>, moduleActions: ModuleActionFn)
+	fn mail_view_content(mailConfig: ArcRwSignal<MailConfig>, configUpdate: ArcRwSignal<Cache>, toaster: ToasterContext, dialogManager: DialogManager, mailKey: ImapMailKey, mailIdContent: ImapMail, mailsCache: ArcRwSignal<MailsContent>, moduleActions: ModuleActionFn, moduleId: ModuleID)
 	{
 		// The resulting dialog can outlive the mail row Owner, but not the holder lifecycle.
+		let imapConnector = mailConfig.get_untracked().imap.clone();
 		let moduleActionsTask = moduleActions.clone();
 		moduleActions.task_spawn(async move {
 			let apiResult = API_proxys_imap_getMailContent(imapConnector.clone(),mailKey.clone()).await;
@@ -614,7 +751,14 @@ impl Mail
 			let mailIdContentBody = mailIdContent.clone();
 			let contentFrameBody = MailContentFrame::new(mailContent.content.clone());
 			let mailContentBody = Arc::new(mailContent);
+			let senderAddressBody = MailSenderAddress::from_header(&mailIdContent.from);
+			let remoteImagesInitiallyAllowedBody = senderAddressBody.as_ref().is_some_and(|senderAddress| {
+				return mailConfig.get_untracked().remoteImageSender_isAllowed(senderAddress);
+			});
+			let mailConfigBody = mailConfig.clone();
+			let configUpdateBody = configUpdate.clone();
 			let moduleActionsBody = moduleActionsTask.clone();
+			let moduleIdBody = moduleId.clone();
 			let moduleActionsValidate = moduleActionsTask.clone();
 			let mailKeyValidate = mailKey.clone();
 
@@ -624,9 +768,14 @@ impl Mail
 					let mailId = mailIdContentBody.clone();
 					let mailContent = mailContentBody.clone();
 					let contentFrame = contentFrameBody.clone();
-					let remoteImagesAllowed = ArcRwSignal::new(false);
+					let senderAddress = senderAddressBody.clone();
+					let mailConfig = mailConfigBody.clone();
+					let configUpdate = configUpdateBody.clone();
+					let moduleId = moduleIdBody.clone();
+					let remoteImagesAllowed = ArcRwSignal::new(remoteImagesInitiallyAllowedBody);
 
 					let moduleActionsDownload = moduleActionsBody.clone();
+					let moduleActionsRemoteImages = moduleActionsBody.clone();
 					let downloadAttachement = move |attachement: Attachment, toaster: ToasterContext| {
 						Self::attachment_download(attachement,toaster,moduleActionsDownload.clone());
 					};
@@ -678,18 +827,58 @@ impl Mail
 							{
 								let contentFrame = contentFrame.clone();
 								let remoteImagesAllowed = remoteImagesAllowed.clone();
+								let senderAddress = senderAddress.clone();
+								let mailConfig = mailConfig.clone();
+								let configUpdate = configUpdate.clone();
+								let moduleId = moduleId.clone();
+								let moduleActionsRemoteImages = moduleActionsRemoteImages.clone();
 								move || {
 									if (!contentFrame.remoteImagesControl_isAvailable() || remoteImagesAllowed.get())
 									{
 										return view!{}.into_any();
 									}
-									let remoteImagesAllowed = remoteImagesAllowed.clone();
+									let remoteImagesAllowedOnce = remoteImagesAllowed.clone();
+									let senderPersistentAction = if let Some(senderAddress) = senderAddress.clone()
+									{
+										let remoteImagesAllowed = remoteImagesAllowed.clone();
+										let mailConfig = mailConfig.clone();
+										let configUpdate = configUpdate.clone();
+										let moduleId = moduleId.clone();
+										let moduleActionsRemoteImages = moduleActionsRemoteImages.clone();
+										view!{
+											<button type="button" class="module_mail_remote_images_button module_mail_remote_images_sender_button" on:click={move |_| {
+												if (!moduleActionsRemoteImages.lifecycle_isActive())
+												{
+													return;
+												}
+												remoteImagesAllowed.set(true);
+												let mut changed = false;
+												mailConfig.update(|config| {
+													changed = config.remoteImageSender_allow(&senderAddress);
+												});
+								if (changed)
+								{
+									configUpdate.update(|cache| cache.update());
+									(moduleActionsRemoteImages.updateFn)(moduleId.clone());
+								}
+											}}>
+												<Translate key="MODULE_MAIL_ALWAYS_LOAD_REMOTE_IMAGES"/>
+											</button>
+										}.into_any()
+									}
+									else
+									{
+										view!{}.into_any()
+									};
 									return view!{
 										<div class="module_mail_remote_images">
 											<span class="module_mail_remote_images_message"><Translate key="MODULE_MAIL_REMOTE_IMAGES_BLOCKED"/></span>
-											<button type="button" class="module_mail_remote_images_button" on:click={move |_|remoteImagesAllowed.set(true)}>
-												<Translate key="MODULE_MAIL_LOAD_REMOTE_IMAGES"/>
-											</button>
+											<div class="module_mail_remote_images_actions">
+												<button type="button" class="module_mail_remote_images_button" on:click={move |_|remoteImagesAllowedOnce.set(true)}>
+													<Translate key="MODULE_MAIL_LOAD_REMOTE_IMAGES"/>
+												</button>
+												{senderPersistentAction}
+											</div>
 										</div>
 									}.into_any();
 								}
@@ -801,13 +990,13 @@ impl Backable for Mail
 		Mail::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, _: ModuleID) -> ViewFn {
+	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, moduleId: ModuleID) -> ViewFn {
 		let configInner = self.config.clone();
 		let clientCacheInner = self.mailsClientCache.clone();
 		let updateInner = self._update.clone();
 		ViewFn::from(move || {
 			view! {
-				<MailDraw config=configInner.clone() mailsClientCache=clientCacheInner.clone() update=updateInner.clone() editMode=editMode moduleActions=moduleActions.clone()/>
+				<MailDraw config=configInner.clone() mailsClientCache=clientCacheInner.clone() update=updateInner.clone() editMode=editMode moduleActions=moduleActions.clone() moduleId=moduleId.clone()/>
 			}.into_any()
 		})
 
@@ -902,7 +1091,8 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 	            mailsClientCache: ArcRwSignal<MailsContent>,
 	            update: ArcRwSignal<Cache>,
 	            editMode: RwSignal<bool>,
-	            moduleActions: ModuleActionFn) -> impl IntoView
+	            moduleActions: ModuleActionFn,
+	            moduleId: ModuleID) -> impl IntoView
 {
 	let Some(dialogManager) = use_context::<DialogManager>() else {
 		HWebTrace!("cannot get dialogManager in link");
@@ -910,12 +1100,14 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 	};
 	let toaster = expect_toaster();
 
-	let imapConnector = config.clone();
+	let mailConfigView = config.clone();
+	let configUpdateView = update.clone();
 	let toasterInner = toaster.clone();
 	let mailsCache = mailsClientCache.clone();
 	let moduleActionsView = moduleActions.clone();
+	let moduleIdView = moduleId.clone();
 	let viewContentFn = move |mailKey:ImapMailKey,mailData:ImapMail| {
-		Mail::mail_view_content(imapConnector.get_untracked().imap.clone(), toasterInner.clone(), dialogManager.clone(), mailKey, mailData, mailsCache.clone(), moduleActionsView.clone());
+		Mail::mail_view_content(mailConfigView.clone(), configUpdateView.clone(), toasterInner.clone(), dialogManager.clone(), mailKey, mailData, mailsCache.clone(), moduleActionsView.clone(), moduleIdView.clone());
 	};
 
 	let imapConnector = config.clone();
@@ -1014,7 +1206,7 @@ mod tests
 {
 	use std::collections::HashMap;
 
-	use super::{MailConfig, MailContentFrame, MailSyncIdentity, MailTag, MailsContent};
+	use super::{MailConfig, MailContentFrame, MailSenderAddress, MailSyncIdentity, MailTag, MailsContent};
 	use crate::api::proxys::imap_components::{Attributs, BoxName, imap_connector, imap_connector_extra, ImapMailboxSync, ImapMail, ImapMailContentType, ImapMailKey};
 
 	fn config_with_suffix(suffix: &str) -> MailConfig
@@ -1064,6 +1256,62 @@ mod tests
 
 		assert_eq!(config.mailAsTag,"");
 		assert!(!config.mail_tag_is_active());
+	}
+
+	#[test]
+	fn mail_config_without_remote_image_allowlist_uses_empty_list()
+	{
+		let mut serializedConfig = serde_json::to_value(MailConfig::default()).unwrap();
+		serializedConfig.as_object_mut().unwrap().remove("remoteImageSenderAllowList");
+
+		let config: MailConfig = serde_json::from_value(serializedConfig).unwrap();
+
+		assert!(config.remoteImageSenderAllowList.is_empty());
+	}
+
+	#[test]
+	fn mail_config_roundtrip_keeps_remote_image_allowlist()
+	{
+		let senderAddress = MailSenderAddress::from_header("Newsletter <news@example.com>").unwrap();
+		let mut config = MailConfig::default();
+		assert!(config.remoteImageSender_allow(&senderAddress));
+
+		let serializedConfig = serde_json::to_string(&config).unwrap();
+		let restoredConfig: MailConfig = serde_json::from_str(&serializedConfig).unwrap();
+
+		assert!(restoredConfig.remoteImageSender_isAllowed(&senderAddress));
+	}
+
+	#[test]
+	fn mailSenderAddress_normalizesExactAddressWithoutDisplayName()
+	{
+		let senderAddress = MailSenderAddress::from_header("Newsletter <News@Example.COM>").unwrap();
+
+		assert_eq!(senderAddress.as_str(),"news@example.com");
+	}
+
+	#[test]
+	fn remoteImageSenderAllowList_matchesOnlyExactNormalizedAddress()
+	{
+		let senderAddress = MailSenderAddress::from_header("Newsletter <News@Example.COM>").unwrap();
+		let sameSenderAddress = MailSenderAddress::from_header("NEWS@example.com").unwrap();
+		let otherSenderAddress = MailSenderAddress::from_header("other@example.com").unwrap();
+		let mut config = MailConfig::default();
+
+		assert!(config.remoteImageSender_allow(&senderAddress));
+		assert!(!config.remoteImageSender_allow(&sameSenderAddress));
+		assert!(config.remoteImageSender_isAllowed(&sameSenderAddress));
+		assert!(!config.remoteImageSender_isAllowed(&otherSenderAddress));
+		assert_eq!(config.remoteImageSenderAllowList_get(),vec!["news@example.com"]);
+		assert!(config.remoteImageSender_remove("NEWS@example.com"));
+		assert!(!config.remoteImageSender_isAllowed(&senderAddress));
+	}
+
+	#[test]
+	fn mailSenderAddress_rejectsHeaderWithoutUsableAddress()
+	{
+		assert_eq!(MailSenderAddress::from_header("Newsletter"),None);
+		assert_eq!(MailSenderAddress::from_header("bad@@example.com"),None);
 	}
 
 	#[test]

@@ -146,7 +146,7 @@ The container healthcheck calls `GET /health`. This endpoint returns `204 No Con
 
 ### Continuous integration and manual deployment
 
-The CI workflow is started manually, or reused as part of a manually started publication. It runs the locked SSR test suite, checks the browser WASM target, produces a release Leptos build, and audits `Cargo.lock` against the current RustSec database. Dependabot proposes bounded Cargo and GitHub Actions updates without starting CI automatically.
+The CI workflow is started manually, or reused as part of a manually started publication. It runs the locked SSR test suite, checks the browser WASM target, produces a release Leptos build, and audits `Cargo.lock` against the current RustSec database. Dependency and GitHub Actions updates are reviewed manually when the maintainer groups a new batch of work; this repository does not configure automatic Dependabot update jobs.
 
 The publish workflow calls those same quality gates before building the Docker image. It then authenticates the production SSH host, streams the image into `docker load`, transfers the Compose file, and recreates the service with `docker compose up --detach --force-recreate --remove-orphans`. It deliberately provides neither automatic rollback nor a zero-downtime orchestration for this personal single-host deployment.
 

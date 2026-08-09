@@ -1,9 +1,8 @@
-name: ci
-run-name: verify WebHome
+name: optional quality checks
+run-name: run optional WebHome checks
 
 on:
   workflow_dispatch:
-  workflow_call:
 
 permissions:
   contents: read

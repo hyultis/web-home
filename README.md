@@ -144,11 +144,11 @@ sudo chown -R 1000:1000 config dynamic
 
 The container healthcheck calls `GET /health`. This endpoint returns `204 No Content`, does not create an application session, and is omitted from routine request logs.
 
-### Continuous integration and manual deployment
+### Optional checks and manual deployment
 
-The CI workflow is started manually, or reused as part of a manually started publication. It runs the locked SSR test suite, checks the browser WASM target, produces a release Leptos build, and audits `Cargo.lock` against the current RustSec database. Dependency and GitHub Actions updates are reviewed manually when the maintainer groups a new batch of work; this repository does not configure automatic Dependabot update jobs.
+The optional quality-check workflow is started only through its own manual action. It runs the locked SSR test suite, checks the browser WASM target, produces a release Leptos build, and audits `Cargo.lock` against the current RustSec database. It is independent from deployment: neither workflow starts nor waits for the other. Dependency and GitHub Actions updates are reviewed manually when the maintainer groups a new batch of work; this repository does not configure automatic Dependabot update jobs.
 
-The publish workflow calls those same quality gates before building the Docker image. It then authenticates the production SSH host, streams the image into `docker load`, transfers the Compose file, and recreates the service with `docker compose up --detach --force-recreate --remove-orphans`. It deliberately provides neither automatic rollback nor a zero-downtime orchestration for this personal single-host deployment.
+The publish workflow directly builds the Docker image, authenticates the production SSH host, streams the image into `docker load`, transfers the Compose file, and recreates the service with `docker compose up --detach --force-recreate --remove-orphans`. Building the application inside the image remains necessary for deployment, but the optional SSR/WASM/Leptos/RustSec checks are not a prerequisite. The workflow deliberately provides neither automatic rollback nor a zero-downtime orchestration for this personal single-host deployment.
 
 Configure these GitHub Actions secrets:
 

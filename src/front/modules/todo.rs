@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Formatter};
 use leptoaster::ToasterContext;
 use leptos::prelude::{OnTargetAttribute, Set};
-use leptos::prelude::{ElementChild, GetUntracked, PropAttribute, Update};
+use leptos::prelude::{AriaAttributes, ElementChild, GetUntracked, GlobalAttributes, PropAttribute, Update};
 use leptos::prelude::{ArcRwSignal, ClassAttribute, Get, IntoAny, RwSignal};
 use leptos::{component, view, IntoView};
 use leptos::children::ViewFn;
@@ -10,6 +10,7 @@ use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleName, ModuleSizeContrainte, RefreshTime};
 use leptos_use::watch_debounced;
 use crate::front::modules::module_actions::ModuleActionFn;
+use crate::front::utils::translate::TranslateText;
 
 static MAX_LENGTH: usize = 100000;
 
@@ -144,6 +145,8 @@ impl Backable for Todo
 #[component]
 fn TodoDraw(contentTocheck: ArcRwSignal<String>, cache: ArcRwSignal<Cache>, moduleActions: ModuleActionFn, moduleId: ModuleID) -> impl IntoView
 {
+	let contentId = format!("module-todo-{}",moduleId.id);
+	let counterId = format!("{}-counter",contentId);
 	let contentWatcher = contentTocheck.clone();
 	let _newWatcher = watch_debounced(
 		move || contentWatcher.get(),
@@ -157,16 +160,22 @@ fn TodoDraw(contentTocheck: ArcRwSignal<String>, cache: ArcRwSignal<Cache>, modu
 	let contentWrite = contentTocheck.clone();
 	let contentLen = contentTocheck.clone();
 	return view!{
-			<textarea class="module_todo"
-                prop:value=move || contentGet.get()
-				on:input:target=move |ev| {
-					cache.update(|cache|{
-						cache.update();
-					});
-					let mut newContent: String = ev.target().value();
-					newContent.truncate(MAX_LENGTH);
-					contentWrite.set(newContent);
-				}></textarea>
-			<span class="module_todo_counter">{move || contentLen.get().len()}/{MAX_LENGTH}c</span>
+			<div class="module_todo_layout">
+				<label class="visually_hidden" for={contentId.clone()}><TranslateText key="MODULE_TODO_CONTENT"/></label>
+				<textarea class="module_todo"
+					id={contentId}
+					aria-describedby={counterId.clone()}
+					maxlength={MAX_LENGTH}
+					prop:value=move || contentGet.get()
+					on:input:target=move |ev| {
+						cache.update(|cache|{
+							cache.update();
+						});
+						let mut newContent: String = ev.target().value();
+						newContent.truncate(MAX_LENGTH);
+						contentWrite.set(newContent);
+					}></textarea>
+				<span id={counterId} class="module_todo_counter">{move || contentLen.get().len()}/{MAX_LENGTH}c</span>
+			</div>
 		}.into_any();
 }

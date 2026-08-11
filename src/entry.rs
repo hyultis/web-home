@@ -3,7 +3,7 @@ use leptos::view;
 use leptos::IntoView;
 use leptos::prelude::*;
 use leptos::reactive::spawn_local_scoped;
-use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title};
+use leptos_meta::{provide_meta_context, Html, Link, Meta, MetaTags, Stylesheet, Title};
 use leptos_router::components::{Route, Router, Routes, A};
 use leptos_router::{hooks, path};
 use leptos_use::use_locales;
@@ -61,6 +61,7 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 	provide_context(dialog_manager.clone());
 	let clientState = ClientState::new();
 	provide_context(clientState.clone());
+	let documentLangState = clientState.clone();
 	let locales = use_locales();
 
 	let is_initialized = RwSignal::new(false);
@@ -104,6 +105,8 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 	});
 
 	view! {
+		<Html {..} lang=move || documentLangState.lang_get().to_ascii_lowercase()/>
+
 		// injects a stylesheet into the document <head>
 		// id=leptos means cargo-leptos will hot-reload this stylesheet
 		<Stylesheet id="leptos" href="/pkg/webhome.css"/>
@@ -120,18 +123,20 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 		// sets the document title
 		<Title text="Web Home"/>
 		<Meta name="description" content="Web Home"/>
-		<Toaster stacked={false} />
+		<div class="toaster_host" role="status" aria-live="polite" aria-atomic="false">
+			<Toaster stacked={false} />
+		</div>
 
 		<div id="body">
 			// modules for this welcome page
 			<Router>
-				<section>
+				<div class="route_host">
 					<Routes fallback=|| Page404>
 						<Route path=path!("/") view=Connection/>
 						<Route path=path!("/newuser") view=Inscription/>
 						<Route path=path!("/home") view=Home/>
 					</Routes>
-				</section>
+				</div>
 			</Router>
             <DialogHost manager=dialog_manager />
 		</div>
@@ -142,10 +147,20 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 #[island]
 pub fn Page404() -> impl IntoView {
 	view!{
-		<h2><Translate key="page404_title"/></h2>
-		<article>
-			<Translate key="page404_content"/> {" "}
-			<A href="/"><Translate key="menu_home"/></A>{"."}
-		</article>
+		<div class="page_layout">
+			<main class="error_page">
+				<article class="centered_box error_card" aria-labelledby="page404-title">
+					<div class="error_code" aria-hidden="true">"404"</div>
+					<h1 id="page404-title"><Translate key="page404_title"/></h1>
+					<p>
+						<Translate key="page404_content"/> {" "}
+						<A href="/"><Translate key="menu_home"/></A>{"."}
+					</p>
+				</article>
+			</main>
+			<footer class="site_footer">
+				<Translate key="pageRoot_foot"/>
+			</footer>
+		</div>
 	}
 }

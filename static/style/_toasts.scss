@@ -1,0 +1,16 @@
+.toaster_host
+{
+	position: relative;
+	z-index: var(--leptoaster-z-index);
+}
+
+.toast
+{
+	border-radius: var(--radius-card) !important;
+	box-shadow: var(--shadow-card);
+}
+
+.toast > span
+{
+	overflow-wrap: anywhere;
+}

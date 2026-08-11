@@ -1,15 +1,15 @@
 use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::modules::components::{moduleContent, Cache, ModuleSizeContrainte};
 use crate::front::modules::module_actions::ModuleActionFn;
-use leptos::html::I;
+use crate::front::utils::translate::TranslateText;
+use leptos::html::Button;
 use leptos::prelude::{AnyView, ClassAttribute, IntoAny, RwSignal};
 use leptos::prelude::{
-	ArcRwSignal, Effect, ElementChild, Get, NodeRef, NodeRefAttribute, OnAttribute, Set,
-	StyleAttribute, Update, ViewFn,
+	ArcRwSignal, ElementChild, Get, GetUntracked, NodeRef, NodeRefAttribute, OnAttribute,
+	Set, StyleAttribute, Update, ViewFn,
 };
 use leptos::{component, view, IntoView};
-use leptos_use::core::Position;
-use leptos_use::{use_draggable_with_options, UseDraggableOptions, UseDraggableReturn};
+use leptos_use::{use_draggable_with_options, UseDraggableOptions};
 
 pub struct ModulePositions<module: moduleContent>
 {
@@ -123,107 +123,70 @@ fn ModulePositionDraw(
 	innerView: ViewFn,
 ) -> impl IntoView
 {
-	let el_move = NodeRef::<I>::new();
-	let el_resize = NodeRef::<I>::new();
+	let el_move = NodeRef::<Button>::new();
+	let el_resize = NodeRef::<Button>::new();
 
-	let start_drag_pos_move = RwSignal::new(Position::default());
-	let mut config_move = UseDraggableOptions::default().exact(true);
-	config_move = config_move.on_start(move |d| {
-		start_drag_pos_move.set(d.position);
-		true
-	});
-
-	let UseDraggableReturn {
-		position: move_position,
-		is_dragging: is_dragging_move,
-		..
-	} = use_draggable_with_options(el_move, config_move);
-
-	Effect::new({
-		let pos = pos.clone();
-		let cache = cache.clone();
-		move |_| {
-			if !is_dragging_move.get()
-			{
-				return;
-			}
-
-			let new_x = (move_position.get().x as i32 - 8).max(0);
-			let new_y = (move_position.get().y as i32 - 8 - 30).max(0);
-
-			cache.update(|c| c.update());
-			pos.update(|p| {
-				p[0] = new_x;
-				p[1] = new_y;
+	let moveOffset = pos.clone();
+	let movePosition = pos.clone();
+	let moveCache = cache.clone();
+	let config_move = UseDraggableOptions::default()
+		.exact(true)
+		.prevent_default(true)
+		.target_offset(move |_| {
+			let currentPosition = moveOffset.get_untracked();
+			(currentPosition[0] as f64,currentPosition[1] as f64)
+		})
+		.on_move(move |drag| {
+			moveCache.update(|cache| cache.update());
+			movePosition.update(|position| {
+				position[0] = (drag.position.x.round() as i32).max(0);
+				position[1] = (drag.position.y.round() as i32).max(0);
 			});
-		}
-	});
+		});
+	let _moveDraggable = use_draggable_with_options(el_move, config_move);
 
-	let start_drag_pos_resize = RwSignal::new(Position::default());
-	let mut config_resize = UseDraggableOptions::default().exact(true);
-	config_resize = config_resize.on_start(move |d| {
-		start_drag_pos_resize.set(d.position);
-		true
-	});
+	let resizeOffset = size.clone();
+	let resizeSize = size.clone();
+	let resizeCache = cache.clone();
+	let xMin = constraints.x_min;
+	let xMax = constraints.x_max;
+	let yMin = constraints.y_min;
+	let yMax = constraints.y_max;
+	let config_resize = UseDraggableOptions::default()
+		.exact(true)
+		.prevent_default(true)
+		.target_offset(move |_| {
+			let currentSize = resizeOffset.get_untracked();
+			(currentSize[0] as f64,currentSize[1] as f64)
+		})
+		.on_move(move |drag| {
+			let mut newWidth = (drag.position.x.round() as i32).max(150);
+			let mut newHeight = (drag.position.y.round() as i32).max(150);
 
-	let UseDraggableReturn {
-		position: resize_position,
-		is_dragging: is_dragging_resize,
-		..
-	} = use_draggable_with_options(el_resize, config_resize);
-
-	Effect::new({
-		let pos = pos.clone();
-		let size = size.clone();
-		let cache = cache.clone();
-
-		move |_| {
-			if !is_dragging_resize.get()
+			if let Some(max) = xMax
 			{
-				return;
+				newWidth = newWidth.min(max as i32);
+			}
+			if let Some(min) = xMin
+			{
+				newWidth = newWidth.max(min as i32);
+			}
+			if let Some(max) = yMax
+			{
+				newHeight = newHeight.min(max as i32);
+			}
+			if let Some(min) = yMin
+			{
+				newHeight = newHeight.max(min as i32);
 			}
 
-			let current_pos = pos.get();
-
-			let mut new_x = resize_position.get().x as i32 - current_pos[0] + 8;
-			if let Some(max) = constraints.x_max
-			{
-				if new_x > max as i32
-				{
-					new_x = max as i32;
-				}
-			}
-			if let Some(min) = constraints.x_min
-			{
-				if new_x < min as i32
-				{
-					new_x = min as i32;
-				}
-			}
-
-			let mut new_y = resize_position.get().y as i32 - current_pos[1] + 8 - 30;
-			if let Some(max) = constraints.y_max
-			{
-				if new_y > max as i32
-				{
-					new_y = max as i32;
-				}
-			}
-			if let Some(min) = constraints.y_min
-			{
-				if new_y < min as i32
-				{
-					new_y = min as i32;
-				}
-			}
-
-			cache.update(|c| c.update());
-			size.update(|s| {
-				s[0] = new_x.max(150) as u32;
-				s[1] = new_y.max(150) as u32;
+			resizeCache.update(|cache| cache.update());
+			resizeSize.update(|size| {
+				size[0] = newWidth as u32;
+				size[1] = newHeight as u32;
 			});
-		}
-	});
+		});
+	let _resizeDraggable = use_draggable_with_options(el_resize, config_resize);
 
 	let remove_fn = {
 		let module_actions = moduleActions.clone();
@@ -243,23 +206,30 @@ fn ModulePositionDraw(
 
 			if editMode.get() {
 				view! {
-					<div style=style>
-						<div class="module">
+					<div class="module_position" style=style>
+						<div class="module module--editing">
 							<div class="module_header">
-								<i class="iconoir-path-arrow-solid" node_ref=el_move></i>
-								<i class="iconoir-xmark" on:click=remove_fn.clone()></i>
+								<button type="button" class="module_handle module_move_handle" node_ref=el_move>
+									<i class="iconoir-path-arrow-solid" aria-hidden="true"></i>
+									<span class="visually_hidden"><TranslateText key="FRONTUI_MODULE_MOVE_ACTION"/></span>
+								</button>
+								<button type="button" class="module_handle module_remove_button" on:click=remove_fn.clone()>
+									<i class="iconoir-xmark" aria-hidden="true"></i>
+									<span class="visually_hidden"><TranslateText key="FRONTUI_MODULE_REMOVE_ACTION"/></span>
+								</button>
 							</div>
-							{innerView.run()}
+							<div class="module_content">{innerView.run()}</div>
 						</div>
-						<i class="iconoir-arrow-down-right-square grabbable"
-						   node_ref=el_resize
-						   style="float: right; margin-top: -0.9em; margin-right: -0.1em"></i>
+						<button type="button" class="module_handle module_resize_handle" node_ref=el_resize>
+							<i class="iconoir-arrow-down-right-square" aria-hidden="true"></i>
+							<span class="visually_hidden"><TranslateText key="FRONTUI_MODULE_RESIZE_ACTION"/></span>
+						</button>
 					</div>
 				}.into_any()
 			} else {
 				view! {
-					<div class="module" style=style>
-						{innerView.run()}
+					<div class="module module_position" style=style>
+						<div class="module_content">{innerView.run()}</div>
 					</div>
 				}.into_any()
 			}

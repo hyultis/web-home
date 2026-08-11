@@ -1,76 +1,81 @@
 
-.linksheader {}
-.linksheader a {
-	display: inline-block;
-	padding: 0 0.5em;
-	margin: 0 0.1em;
-	border: 1px solid var(--maincolor);
-	color: var(--defaultfontcolor);
-	border-radius: 5px;
-	background-color: var(--backgroundcolor);
+.linksheader
+{
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-width: 0;
+	padding: 1px;
 }
 
+.linksheader a,
+.linksheader .button
+{
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-2);
+	min-height: var(--control-height);
+	margin: 0;
+	border: 1px solid var(--color-border-control);
+	border-radius: calc(var(--radius-control) + 2px);
+	background: var(--color-surface-2);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+	color: var(--color-text);
+	line-height: var(--line-height-tight);
+	padding: var(--space-2) var(--space-3);
+	text-decoration: none;
+	white-space: nowrap;
+}
 
-.linksheader a:hover {
+.linksheader a:visited
+{
+	color: var(--color-text);
+}
+
+.linksheader a:hover,
+.linksheader .button:hover
+{
+	border-color: var(--color-accent);
+	background: var(--color-surface-3);
+	color: var(--color-text);
+}
+
+.linksheader .link_edit_item
+{
+	cursor: default;
+}
+
+.linksheader .link_drag_handle
+{
+	color: var(--color-accent);
+	font-size: var(--font-size-lg);
+}
+
+.linksheader .add
+{
 	cursor: pointer;
 }
 
-.linksheader .button {
-	display: inline-block;
-	padding: 0 0.5em;
-	margin: 0 0.1em;
-	border: 1px solid var(--maincolor);
-	color: var(--defaultfontcolor);
-	border-radius: 5px;
-	background-color: var(--backgroundcolor);
+.linksheader .ghost
+{
+	opacity: 0.35;
+	pointer-events: none;
 }
 
-.linksheader .add {
-	cursor: pointer;
-}
-
-.linksheader .ghost {
-	opacity: 0.3;
-}
-
-.linksheader .drop {
+.linksheader .drop
+{
+	border-color: var(--color-warning);
+	background: var(--color-warning-background);
+	box-shadow: 0 0 0 2px var(--color-warning-background);
 	cursor: cell;
-	animation: glow 5s infinite;
 }
 
-.linksheader .subbuttonremove{
-	cursor: pointer;
-	margin-left: 0.5em;
-	background-color: var(--buttonbackgrounddanger);
-	padding-left: 0.3em;
-	border: 1px solid var(--maincolor);
-}
-
-.linksheader .subbuttonremove:hover {
-	background-color: var(--buttonbackgroundwarn);
-}
-
-.linksheader [class^="iconoir-"]::before,
-.linksheader [class*=" iconoir-"]::before {
-	display: inline-block;
-	vertical-align: sub;
-	margin-right: 5px;
-}
-
-@keyframes glow {
-	0%{
-		box-shadow: 0px 0px 3px 3px #FF9139;
-	}
-	25%{
-		box-shadow: 0px 0px 3px 5px #FFBB41;
-	}
-	50%{
-		box-shadow: 0px 0px 3px 2px #FF9139;
-	}
-	75%{
-		box-shadow: 0px 0px 3px 4px #FFBB41;
-	}
-	100%{
-		box-shadow: 0px 0px 3px 1px #FF9139;
-	}
+.linksheader .subbuttonremove
+{
+	width: var(--control-height-compact);
+	height: var(--control-height-compact);
+	min-height: var(--control-height-compact);
+	margin-left: var(--space-1);
 }

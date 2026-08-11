@@ -1,4 +1,4 @@
-use leptos::prelude::{ClassAttribute, CollectView, ElementChild};
+use leptos::prelude::{AriaAttributes, ClassAttribute, CollectView, ElementChild, GlobalAttributes};
 use feed_rs::model::{Feed, Link, Text};
 use feed_rs::parser;
 use leptoaster::{ToasterContext};
@@ -11,7 +11,7 @@ use crate::api::proxys::wget::{API_proxys_wget};
 use crate::front::modules::components::{distant_time_simpler, Backable, BoxFuture, Cache, Cacheable, FieldHelper, ModuleName, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::toaster_helpers::toaster_api;
-use crate::front::utils::translate::Translate;
+use crate::front::utils::translate::{Translate, TranslateText};
 use crate::front::utils::SafeExternalUrl;
 
 #[derive(Serialize,Deserialize,Debug)]
@@ -88,18 +88,18 @@ impl Rss
 		})
 	}
 
-	fn utils_title(title: String, entryTitle: Option<Text>) -> String
+	fn utils_title(title: String, entryTitle: Option<Text>) -> AnyView
 	{
 		if(!title.is_empty()) {
-			return title;
+			return view!{{title}}.into_any();
 		}
 
 		if let Some(innertitle) = entryTitle
 		{
-			return innertitle.content;
+			return view!{{innertitle.content}}.into_any();
 		}
 
-		return "MODULE_RSS_NO_TITLE".to_string();
+		return view!{<TranslateText key="MODULE_RSS_NO_TITLE"/>}.into_any();
 	}
 
 	fn utils_desc(descRaw: &Option<Text>) -> AnyView
@@ -110,7 +110,11 @@ impl Rss
 
 
 		return view!{
-			<i class="iconoir-info-circle alttext_upper"><div class="alttext">{desc.content.clone()}</div></i>
+			<span class="module_title_action module_title_info alttext_upper" tabindex="0">
+				<i class="iconoir-info-circle" aria-hidden="true"></i>
+				<span class="visually_hidden"><TranslateText key="MODULE_RSS_DESCRIPTION"/></span>
+				<span class="alttext" role="tooltip">{desc.content.clone()}</span>
+			</span>
 		}.into_any();
 	}
 
@@ -124,7 +128,10 @@ impl Rss
 		};
 
 		return view!{
-			<a href={url.into_string()} rel="noopener noreferrer nofollow" target="_blank"><i class="iconoir-link"></i></a>
+			<a class="module_title_action" href={url.into_string()} rel="noopener noreferrer nofollow" target="_blank">
+				<i class="iconoir-link" aria-hidden="true"></i>
+				<span class="visually_hidden"><TranslateText key="MODULE_RSS_OPEN_FEED_ACTION"/></span>
+			</a>
 		}.into_any();
 	}
 }
@@ -254,13 +261,17 @@ fn RssDraw(config: ArcRwSignal<RssConfig>,
 					|ev,inner| inner.maxline = ev.target().value().parse::<u8>().unwrap_or(10));
 
 				view!{
-					{titleF.draw()}
-					{linkF.draw()}
-					{maxLineF.draw()}
-					<Translate key="MODULE_RSS_DEMO"/><br/>
-					<table class="module_rss_table"><tr>
-						<td>{"0d"}</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse nulla nisi, faucibus ut eros non, porttitor posuere ante. Nunc faucibus sagittis sodales. Ut consectetur erat urna, id posuere nibh accumsan at. Praesent tincidunt eget lorem in elementum. Suspendisse varius neque sed magna efficitur, vitae varius arcu volutpat.</td>
-					</tr></table>
+					<div class="module_config module_rss_config">
+						{titleF.draw()}
+						{linkF.draw()}
+						{maxLineF.draw()}
+						<div class="module_config_preview">
+							<span class="module_config_section_title"><Translate key="MODULE_RSS_DEMO"/></span>
+							<table class="module_rss_table" aria-hidden="true"><tbody><tr>
+								<td class="module_rss_age">{"0d"}</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse nulla nisi, faucibus ut eros non, porttitor posuere ante.</td>
+							</tr></tbody></table>
+						</div>
+					</div>
 				}.into_any()
 			}
 			else
@@ -271,9 +282,12 @@ fn RssDraw(config: ArcRwSignal<RssConfig>,
 
 					view!{
 						<>
-						<h2>{Rss::utils_title(config.get().title,rssContent.title)}{Rss::utils_desc(&rssContent.description)}{Rss::utils_link(rssContent.links)}</h2>
+						<div class="module_titlebar">
+							<h2 class="module_title">{Rss::utils_title(config.get().title,rssContent.title)}</h2>
+							<div class="module_title_actions">{Rss::utils_desc(&rssContent.description)}{Rss::utils_link(rssContent.links)}</div>
+						</div>
 						<div class="module_rss_upper">
-						<table class="module_rss_table">
+						<table class="module_rss_table"><tbody>
 						{   rssContent.entries.sort_by(|a,b| a.published.cmp(&b.published).reverse());
 							rssContent.entries.iter().enumerate()
 							.filter(|(num,_)| *num <= config.get().maxline as usize)
@@ -290,8 +304,8 @@ fn RssDraw(config: ArcRwSignal<RssConfig>,
 										view!{<span>{title}</span>}.into_any()
 									};
 									view!{
-										<tr>
-											<td>{distant_time_simpler(entry.published.clone().unwrap_or_default().timestamp())}</td>
+										<tr class="module_rss_row">
+											<td class="module_rss_age">{distant_time_simpler(entry.published.clone().unwrap_or_default().timestamp())}</td>
 											<td>{titleView}</td>
 										</tr>
 									}.into_any()
@@ -299,7 +313,7 @@ fn RssDraw(config: ArcRwSignal<RssConfig>,
 								else {view!{}.into_any()}
 							}).collect_view()
 						}
-						</table>
+						</tbody></table>
 						</div>
 						</>
 					}.into_any()

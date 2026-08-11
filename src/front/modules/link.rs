@@ -4,16 +4,16 @@ use crate::front::modules::components::{
 };
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
-use crate::front::utils::dialog::{DialogData, DialogManager};
+use crate::front::utils::dialog::{DialogActionStyle, DialogData, DialogManager};
 use crate::front::utils::SafeExternalUrl;
 use crate::front::utils::toaster_helpers::toastingErr;
-use crate::front::utils::translate::Translate;
+use crate::front::utils::translate::{Translate, TranslateText};
 use crate::HWebTrace;
 use leptoaster::{expect_toaster, ToasterContext};
 use leptos::ev::MouseEvent;
 use leptos::html::{Div, I};
 use leptos::prelude::{
-	use_context, ArcRwSignal, ClassAttribute, Effect, Get, NodeRef, NodeRefAttribute,
+	use_context, ArcRwSignal, AriaAttributes, ClassAttribute, Effect, Get, NodeRef, NodeRefAttribute,
 	OnAttribute, Set, StyleAttribute, Update,
 };
 use leptos::prelude::{BindAttribute, GetUntracked, ViewFn, With, Write};
@@ -76,10 +76,10 @@ impl LinksHolder
 		let Some(url) = SafeExternalUrl::parse(&link.url)
 		else
 		{
-			return view! {<span class="button">{link.label.clone()}</span>}.into_any();
+			return view! {<span class="button linksheader_item">{link.label.clone()}</span>}.into_any();
 		};
 		return view! {
-			<a href={url.into_string()} rel="noopener noreferrer nofollow" target="_blank">{link.label.clone()}</a>
+			<a class="linksheader_item" href={url.into_string()} rel="noopener noreferrer nofollow" target="_blank">{link.label.clone()}</a>
 		}.into_any();
 	}
 
@@ -139,15 +139,21 @@ impl LinksHolder
 				if(is_dragging.get()) {show = "display: inline-block;";}
 				format!("position: fixed; {} {}", style.get(),show)
 			}>
-				<i  class="iconoir-arrow-separate grabbable"></i>{link.label.clone()}
+				<i class="iconoir-arrow-separate grabbable link_drag_handle" aria-hidden="true"></i>
+				<span>{link.label.clone()}</span>
 			</div>
 			<div class={move || {
 				let mut classDrop = "";
 				let targetPos = draggedOriginPosition.get().map(|x| x as i32).unwrap_or(-1);
 				if somethingIsDragging.get() && !is_outside.get() && targetPos != pos as i32 {classDrop = " drop"}
-				format!("button{}",classDrop)
+				format!("button link_edit_item{}",classDrop)
 			}} node_ref=target>
-				<i node_ref=el class="iconoir-arrow-separate grabbable"></i>{link.label.clone()}<i class="iconoir-xmark subbuttonremove" on:click={fnRemove}></i>
+				<i node_ref=el class="iconoir-arrow-separate grabbable link_drag_handle" aria-hidden="true"></i>
+				<span>{link.label.clone()}</span>
+				<button type="button" class="icon_button icon_button--danger subbuttonremove" on:click={fnRemove}>
+					<i class="iconoir-xmark" aria-hidden="true"></i>
+					<span class="visually_hidden"><TranslateText key="MODULE_LINK_REMOVE_ACTION"/></span>
+				</button>
 			</div>
 		};
 	}
@@ -171,6 +177,8 @@ impl LinksHolder
 			let dialogContent =
 				DialogData::new()
 					.setTitle("MODULE_LINK_DEL")
+					.setButtonValidateTitle(Some(AllFrontUIEnum::REMOVED))
+					.setValidateStyle(DialogActionStyle::Danger)
 					.setOnValidate(move |_| {
 						if (!moduleActions.lifecycle_isActive())
 						{
@@ -510,7 +518,12 @@ fn LinksDraw(
 					})
 				}
 			}
-			{move || editMode.get().then(|| view!{<div class="button add" on:click=addLinkFn.clone()><i class="iconoir-plus-circle"></i><Translate key="MODULE_LINK_ADD_ACTION"/></div>})}
+			{move || editMode.get().then(|| view!{
+				<button type="button" class="button add" on:click=addLinkFn.clone()>
+					<i class="iconoir-plus-circle" aria-hidden="true"></i>
+					<Translate key="MODULE_LINK_ADD_ACTION"/>
+				</button>
+			})}
 			</div>
 		}.into_any()
 }

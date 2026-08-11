@@ -4,7 +4,7 @@ use std::sync::Arc;
 use gloo_timers::callback::Timeout;
 use leptoaster::{expect_toaster, ToasterContext};
 use leptos::children::ViewFn;
-use leptos::prelude::{use_context, CollectView, StyleAttribute, Write};
+use leptos::prelude::{use_context, AriaAttributes, CollectView, StyleAttribute, Write};
 use leptos::prelude::{ClassAttribute, ElementChild, GetUntracked, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, Get, IntoAny, OnAttribute, RwSignal, Set};
 use leptos::{component, view, IntoView};
@@ -584,11 +584,10 @@ impl Mail
 		let hostF = FieldHelper::new(&getBoxsMailConfig,&update,"MODULE_MAIL_HOST",
 		                                  |d| d.get().imap.host,
 		                                  |ev,inner| inner.imap.host = ev.target().value());
-		let mut portF = FieldHelper::new(&getBoxsMailConfig,&update,"",
+		let mut portF = FieldHelper::new(&getBoxsMailConfig,&update,"MODULE_MAIL_PORT",
 		                              |d| d.get().imap.port.to_string(),
 		                              |ev,inner| inner.imap.port = ev.target().value().parse::<u16>().unwrap_or(993));
 		portF.setInputType(FieldHelperType::NUMBER(1,65535));
-		portF.setStyle("width:90px");
 		let usernameF = FieldHelper::new(&getBoxsMailConfig,&update,"MODULE_MAIL_USERNAME",
 		                              |d| d.get().imap.username,
 		                              |ev,inner| inner.imap.username = ev.target().value());
@@ -600,12 +599,15 @@ impl Mail
 		let remoteImageAllowListCache = update.clone();
 
 		view!{
-			<div class="module_mail_config">
+			<div class="module_config module_mail_config">
 				{titleF.draw()}
 				{mailAsTagF.draw()}
-				{hostF.draw()}:{portF.draw()}<br/>
-				{usernameF.draw()}<br/>
-				{passwordF.draw()}<br/>
+				<div class="module_mail_connection_fields">
+					{hostF.draw()}
+					{portF.draw()}
+				</div>
+				{usernameF.draw()}
+				{passwordF.draw()}
 				{
 					move || {
 						let allowedAddresses = remoteImageAllowListConfig.get().remoteImageSenderAllowList_get();
@@ -634,7 +636,8 @@ impl Mail
 													remoteImageAllowListCache.update(|cache| cache.update());
 												}
 											}}>
-												<span>{senderAddressContent}</span><span class="module_mail_remote_images_allowlist_remove">{"×"}</span>
+												<span class="visually_hidden"><TranslateText key="FRONTUI_REMOVED"/>{" "}</span>
+												<span>{senderAddressContent}</span><span class="module_mail_remote_images_allowlist_remove" aria-hidden="true">{"×"}</span>
 											</button>
 										};
 									}).collect_view()}
@@ -643,7 +646,9 @@ impl Mail
 						}.into_any();
 					}
 				}
-				<button on:click={getBoxsFn}><Translate key="MODULE_MAIL_GETBOXS"/></button>
+				<div class="module_config_actions">
+					<button type="button" on:click={getBoxsFn}><Translate key="MODULE_MAIL_GETBOXS"/></button>
+				</div>
 				{
 					let boxConfig = getBoxsMailConfig.clone();
 					let boxConfigCache = update.clone();
@@ -667,24 +672,29 @@ impl Mail
 					if(!mailsCache.boxs.is_empty())
 					{
 						view!{
-							<hr/>
-							<Translate key="MODULE_MAIL_BOXS_LIST"/><br/>
-							{mailsCache.boxs.iter().map(|boxContent| {
-								let boxName = boxContent.name.clone();
-								if (boxContent.attributes.is_uninteresting())
-								{
-									return view!{<span class="disabled uninteresting boxmail">{boxName}</span>}.into_any();
-								}
-								let switchBoxFn = switchBoxFn.clone();
-								let isSelected = configBoxContent.imap.isBoxSelected(&boxName);
-								let boxNameContent = boxName.clone();
-								view!{
-									<span class={if isSelected {"boxmail"} else {"disabled boxmail"}}
-										on:click={move |_|switchBoxFn(boxName.clone(),isSelected)}>
-										{boxNameContent}
-									</span>
-								}.into_any()
-							}).collect_view()}
+							<section class="module_mail_boxes">
+								<span class="module_config_section_title"><Translate key="MODULE_MAIL_BOXS_LIST"/></span>
+								<div class="module_mail_boxes_list">
+									{mailsCache.boxs.iter().map(|boxContent| {
+										let boxName = boxContent.name.clone();
+										if (boxContent.attributes.is_uninteresting())
+										{
+											return view!{<span class="boxmail boxmail--unavailable" aria-disabled="true">{boxName}</span>}.into_any();
+										}
+										let switchBoxFn = switchBoxFn.clone();
+										let isSelected = configBoxContent.imap.isBoxSelected(&boxName);
+										let boxNameContent = boxName.clone();
+										view!{
+											<button type="button"
+												class={if isSelected {"boxmail boxmail--selected"} else {"boxmail"}}
+												aria-pressed={isSelected}
+												on:click={move |_|switchBoxFn(boxName.clone(),isSelected)}>
+												{boxNameContent}
+											</button>
+										}.into_any()
+									}).collect_view()}
+								</div>
+							</section>
 						}.into_any()
 					}
 					else {view!{}.into_any()}
@@ -783,18 +793,19 @@ impl Mail
 					let toasterInner = toasterBody.clone();
 					view!{
 						<div class="module_mail_content_parent">
-							<span><b><Translate key="MODULE_MAIL_FROM"/></b>{" "}{mailId.from}</span>
-							<span><b><Translate key="MODULE_MAIL_TO"/></b>{" "}{mailId.to}</span>
-							<span><b><Translate key="MODULE_MAIL_DATE"/></b>{" "}{
-								let date = UtcDateTime::from_unix_timestamp(mailId.date).unwrap_or(UtcDateTime::now());
-								format!("{:0>2}/{:0>2}/{:0>4} {:0>2}:{:0>2}:{:0>2}",date.day(),date.month() as u8,date.year(),date.hour(),date.minute(),date.second())
-							}</span>
-							{
+							<div class="module_mail_metadata">
+								<span><b><Translate key="MODULE_MAIL_FROM"/></b>{" "}{mailId.from}</span>
+								<span><b><Translate key="MODULE_MAIL_TO"/></b>{" "}{mailId.to}</span>
+								<span><b><Translate key="MODULE_MAIL_DATE"/></b>{" "}{
+									let date = UtcDateTime::from_unix_timestamp(mailId.date).unwrap_or(UtcDateTime::now());
+									format!("{:0>2}/{:0>2}/{:0>4} {:0>2}:{:0>2}:{:0>2}",date.day(),date.month() as u8,date.year(),date.hour(),date.minute(),date.second())
+								}</span>
+								{
 							let views = mailContent.attachement.iter().enumerate().map(|(attachmentIndex,att)| {
 								let attachmentMailContent = mailContent.clone();
 								let downloadAttachement = downloadAttachement.clone();
 									return match &att.filename {
-										None => {view!{{" "}<span class="attachement" on:click={
+										None => {view!{{" "}<button type="button" class="attachement" on:click={
 												let toasterInner = toasterInner.clone();
 												move |_| {
 													if let Some(attachment) = attachmentMailContent.attachement.get(attachmentIndex).cloned()
@@ -802,10 +813,10 @@ impl Mail
 														downloadAttachement(attachment,toasterInner.clone());
 													}
 												}
-											}><i class="iconoir-doc-magnifying-glass"/>{" "}<TranslateText key="MODULE_MAIL_NO_SUBJECT"/></span>}}.into_any(),
+											}><i class="iconoir-doc-magnifying-glass" aria-hidden="true"/>{" "}<TranslateText key="MODULE_MAIL_NO_SUBJECT"/><span class="visually_hidden">{" - "}<TranslateText key="MODULE_MAIL_DOWNLOAD_ATTACHMENT_ACTION"/></span></button>}}.into_any(),
 										Some(filename) => {
 											let attachmentMailContent = attachmentMailContent.clone();
-											view!{{" "}<span class="attachement"  on:click={
+											view!{{" "}<button type="button" class="attachement" on:click={
 												let toasterInner = toasterInner.clone();
 												move |_| {
 													if let Some(attachment) = attachmentMailContent.attachement.get(attachmentIndex).cloned()
@@ -813,7 +824,7 @@ impl Mail
 														downloadAttachement(attachment,toasterInner.clone());
 													}
 												}
-											}><i class="iconoir-doc-magnifying-glass"/>{" "}{filename.clone()}</span>}.into_any()
+											}><i class="iconoir-doc-magnifying-glass" aria-hidden="true"/>{" "}{filename.clone()}<span class="visually_hidden">{" - "}<TranslateText key="MODULE_MAIL_DOWNLOAD_ATTACHMENT_ACTION"/></span></button>}.into_any()
 										}
 									};
 								});
@@ -823,7 +834,8 @@ impl Mail
 									view!{<span><b><Translate key="MODULE_MAIL_ATTACHEMENT"/></b>{views.collect_view()}</span>}.into_any()
 								}
 								else {view!{}.into_any()}
-							}
+								}
+							</div>
 							{
 								let contentFrame = contentFrame.clone();
 								let remoteImagesAllowed = remoteImagesAllowed.clone();
@@ -889,6 +901,7 @@ impl Mail
 									let remoteImagesAllowed = remoteImagesAllowed.clone();
 									view!{
 										<iframe srcdoc={move || contentFrame.srcdoc_get(remoteImagesAllowed.get())}
+											aria-labelledby="webhome-dialog-title"
 											sandbox="allow-popups allow-popups-to-escape-sandbox"
 											referrerpolicy="no-referrer"></iframe>
 									}
@@ -1132,13 +1145,18 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 				let mailTagIsActive = mailConfig.mail_tag_is_active();
 				view!{
 					{draw_title_if_present(mailConfig.title.clone())}
-					<div class="module_rss_upper">
-						<table class="module_rss_table module_mail_table">{
+					<div class="module_rss_upper">{
 							let markVueCacheInner = mailsCache.clone();
 							let mails = mailsCache.get().mailsData.clone();
 							let mut mailsContent = mails.into_iter().collect::<Vec<_>>();
 							mailsContent.sort_by(|(_,left),(_,right)| left.date.cmp(&right.date).reverse());
-							mailsContent.into_iter()
+							if (mailsContent.is_empty())
+							{
+								view!{<div class="module_empty_state"><Translate key="MODULE_MAIL_NO_MAIL"/></div>}.into_any()
+							}
+							else
+							{
+							view!{<table class="module_rss_table module_mail_table"><tbody>{mailsContent.into_iter()
 								.map(|(mailKey,mail)|{
 									let mailKeyView = mailKey.clone();
 									let mailKeyMark = mailKey.clone();
@@ -1148,8 +1166,9 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 									let markViewFn = markViewFn.clone();
 									let markVueCacheInner = markVueCacheInner.clone();
 									let mailTag = if(mailTagIsActive) {mailConfig.mail_tag(&mail)} else {None};
+									let mailSubject = mail.subject.clone().filter(|subject| !subject.is_empty());
 									view!{
-										<tr>
+										<tr class="module_mail_row">
 											<td class="module_mail_date">{distant_time_simpler(mail.date)}</td>
 											{
 												if(mailTagIsActive)
@@ -1171,15 +1190,35 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 												}
 												else {view!{}.into_any()}
 											}
-							<td class="module_mail_subject mail_pointer alttext_upper" on:click={move |_| viewContentFn.clone()(mailKeyView.clone(),mailView.clone())}>{mail.subject.clone()}{Mail::utils_mailOverlay(&mail)}</td>
+							<td class="module_mail_subject alttext_upper">
+								<button type="button" class="module_mail_subject_button" on:click={move |_| viewContentFn.clone()(mailKeyView.clone(),mailView.clone())}>
+									{
+										if let Some(subject) = mailSubject
+										{
+											view!{<span>{subject}</span>}.into_any()
+										}
+										else
+										{
+											view!{<span><TranslateText key="MODULE_MAIL_NO_SUBJECT"/></span>}.into_any()
+										}
+									}
+									<span class="visually_hidden">{" - "}<TranslateText key="MODULE_MAIL_OPEN_ACTION"/></span>
+								</button>
+								{Mail::utils_mailOverlay(&mail)}
+							</td>
 							<td class="module_mail_status">{
 								if(mail.confirmVue)
 								{
-									view!{<i class="iconoir-mail-out-solid" on:click={move |_| markViewFn.clone()(mailKeyMark.clone())}/>}.into_any()
+									view!{
+										<button type="button" class="module_mail_status_button module_mail_status_button--confirm" on:click={move |_| markViewFn.clone()(mailKeyMark.clone())}>
+											<i class="iconoir-mail-out-solid" aria-hidden="true"/>
+											<span class="visually_hidden"><TranslateText key="MODULE_MAIL_CONFIRM_MARK_READ_ACTION"/></span>
+										</button>
+									}.into_any()
 								}
 								else
 								{
-									view!{<i class="iconoir-mail-open" on:click={move |_| {
+									view!{<button type="button" class="module_mail_status_button" on:click={move |_| {
 										let markVueCacheInnerInner = markVueCacheInner.clone();
 										let mailKeyInner = mailKeyConfirm.clone();
 										markVueCacheInner.update(|mailCache|{
@@ -1188,14 +1227,17 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 										Timeout::new(5000, move || {
 											markVueCacheInnerInner.update(|mailCache| mailCache.confirmation_set(&mailKeyInner,false));
 										}).forget();
-									}}/>}.into_any()
+									}}>
+										<i class="iconoir-mail-open" aria-hidden="true"/>
+										<span class="visually_hidden"><TranslateText key="MODULE_MAIL_MARK_READ_ACTION"/></span>
+									</button>}.into_any()
 								}
 							}</td>
 										</tr>
 									}
-								}).collect_view()
+								}).collect_view()}</tbody></table>}.into_any()
 							}
-						</table>
+						}
 				</div>}.into_any()
 			}
 	}}}.into_any()

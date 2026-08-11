@@ -1,22 +1,30 @@
-use leptos::prelude::StyleAttribute;
-use leptos::prelude::{ElementChild, IntoAny};
+use leptos::ev::KeyboardEvent;
+use leptos::html::Div;
+use leptos::prelude::{AriaAttributes, ElementChild, GlobalAttributes, IntoAny, NodeRef, NodeRefAttribute};
 use leptos::prelude::OnAttribute;
 use leptos::prelude::{AnyView, ClassAttribute, Signal, Update};
 use leptos::prelude::{Get, GetUntracked, RwSignal, Set};
 use leptos::{component, view, IntoView};
 use leptos_use::{use_css_var, use_timeout_fn, UseTimeoutFnReturn};
 use std::sync::Arc;
+#[cfg(feature="hydrate")]
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature="hydrate")]
+use wasm_bindgen::JsCast;
+#[cfg(feature="hydrate")]
+use web_sys::HtmlElement;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::translate::TranslateText;
 
 #[component]
 pub fn DialogHost(manager: DialogManager) -> impl IntoView
 {
-	let (color, _) = use_css_var("--animationduration");
+	let (color, _) = use_css_var("--motion-overlay");
 	let duration = Signal::derive(move || {
 		let value = color.get();
 		parse_css_time_to_secs(&value)
 	});
+	let dialogRef = NodeRef::<Div>::new();
 
 	let fnManager = manager.clone();
 	let UseTimeoutFnReturn {
@@ -33,6 +41,7 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 
 	let fnManager = manager.clone();
 	let startfn = start.clone();
+	let keyboardStart = startfn.clone();
 	let closeFn = move |_| {
 		if (is_pending.get())
 		{
@@ -48,6 +57,20 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 		}
 		fnManager.validate(start.clone());
 	};
+	let fnManager = manager.clone();
+	let keyboardCloseFn = move |event: KeyboardEvent| {
+		if (event.key() == "Tab")
+		{
+			dialogFocus_trap(&event,dialogRef);
+			return;
+		}
+		if (event.key() != "Escape" || is_pending.get())
+		{
+			return;
+		}
+		event.prevent_default();
+		fnManager.close(keyboardStart.clone());
+	};
 
 	view! {
 		{move || {
@@ -59,9 +82,18 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 							let mut larger = "";
 							if data.is_larger {larger = " larger";}
 							format!("dialog-backdrop{}{}",closing,larger)
-						}} style="z-index: 9999" on:click=closeFn.clone()>
-						<div class="dialog-window" on:click=|e| e.stop_propagation()>
-							<h2>{
+						}} on:click=closeFn.clone() on:keydown=keyboardCloseFn.clone()>
+						<div
+							class="dialog-window"
+							node_ref=dialogRef
+							role="dialog"
+							aria-modal="true"
+							aria-labelledby="webhome-dialog-title"
+							tabindex="-1"
+							autofocus=true
+							on:click=|e| e.stop_propagation()
+						>
+							<h2 id="webhome-dialog-title">{
 								if(data.title.starts_with("€")) {
 									view!({data.title.chars().next().map(|c| &data.title[c.len_utf8()..]).unwrap_or("MODULE_MAIL_NO_SUBJECT")}).into_any()
 								}
@@ -69,22 +101,22 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 									view!(<TranslateText key={data.title}/>).into_any()
 								}
 					}</h2>
-							<p class="dialog-content">{
+							<div class="dialog-content">{
 								let tmp = data.body.clone();
 								tmp()
-							}</p>
+							}</div>
 							<div class="dialog-buttons">
 								{
-									if let Some(button) = data.button_validate_title.clone()
+									if let Some(button) = data.button_close_title.clone()
 									{
-										view!{<button class="validate" on:click=validateFn.clone()><TranslateText key={button}/></button>}.into_any()
+										view!{<button type="button" class="close" on:click=closeFn.clone()><TranslateText key={button}/></button>}.into_any()
 									}
 									else {view!{}.into_any()}
 								}
 								{
-									if let Some(button) = data.button_close_title.clone()
+									if let Some(button) = data.button_validate_title.clone()
 									{
-										view!{<button class="close" on:click=closeFn.clone()><TranslateText key={button}/></button>}.into_any()
+										view!{<button type="button" class={data.validate_style.class_get()} on:click=validateFn.clone()><TranslateText key={button}/></button>}.into_any()
 									}
 									else {view!{}.into_any()}
 								}
@@ -109,6 +141,28 @@ pub struct DialogData
 	is_larger: bool,
 	button_validate_title: Option<String>,
 	button_close_title: Option<String>,
+	validate_style: DialogActionStyle,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum DialogActionStyle
+{
+	Success,
+	Warning,
+	Danger,
+}
+
+impl DialogActionStyle
+{
+	fn class_get(self) -> &'static str
+	{
+		return match self
+		{
+			Self::Success => "validate",
+			Self::Warning => "validate validate_warning",
+			Self::Danger => "validate validate_danger",
+		};
+	}
 }
 
 impl DialogData
@@ -124,6 +178,7 @@ impl DialogData
 			is_larger: false,
 			button_validate_title: Some(AllFrontUIEnum::VALID.to_string()),
 			button_close_title: Some(AllFrontUIEnum::CLOSE.to_string()),
+			validate_style: DialogActionStyle::Success,
 		}
 	}
 
@@ -181,6 +236,12 @@ impl DialogData
 		self
 	}
 
+	pub(crate) fn setValidateStyle(mut self, validate_style: DialogActionStyle) -> Self
+	{
+		self.validate_style = validate_style;
+		self
+	}
+
 	/// Change the label of the close button (or hide it if `NONE`).
 	pub fn setButtonCloseTitle(mut self, button_close_title: Option<impl ToString>)
 	{
@@ -192,7 +253,20 @@ impl DialogData
 pub struct DialogManager
 {
 	dialog: RwSignal<Option<DialogData>>,
+	focusReturn: RwSignal<Option<DialogFocusReturn>>,
 }
+
+#[cfg(feature="hydrate")]
+#[derive(Clone)]
+struct DialogFocusReturn
+{
+	id: String,
+	removeId: bool,
+}
+
+#[cfg(not(feature="hydrate"))]
+#[derive(Clone)]
+struct DialogFocusReturn;
 
 impl DialogManager
 {
@@ -200,6 +274,7 @@ impl DialogManager
 	{
 		Self {
 			dialog: RwSignal::new(None),
+			focusReturn: RwSignal::new(None),
 		}
 	}
 
@@ -210,6 +285,10 @@ impl DialogManager
 		dialog: DialogData
 	)
 	{
+		if (self.dialog.get_untracked().is_none())
+		{
+			self.focusReturn.set(dialogFocus_capture());
+		}
 		self.dialog.set(Some(dialog));
 	}
 
@@ -257,13 +336,114 @@ impl DialogManager
 	fn innerClose(&self)
 	{
 		self.dialog.set(None);
+		if let Some(focusReturn) = self.focusReturn.get_untracked()
+		{
+			dialogFocus_restore(&focusReturn);
+			self.focusReturn.set(None);
+		}
 	}
+}
+
+#[cfg(feature="hydrate")]
+fn dialogFocus_capture() -> Option<DialogFocusReturn>
+{
+	static FOCUS_ID: AtomicU64 = AtomicU64::new(1);
+
+	let document = web_sys::window()?.document()?;
+	let activeElement = document.active_element()?;
+	let currentId = activeElement.id();
+	if (!currentId.is_empty())
+	{
+		return Some(DialogFocusReturn {id: currentId,removeId: false});
+	}
+
+	let focusId = format!("webhome-dialog-focus-return-{}",FOCUS_ID.fetch_add(1,Ordering::Relaxed));
+	activeElement.set_id(&focusId);
+	return Some(DialogFocusReturn {id: focusId,removeId: true});
+}
+
+#[cfg(not(feature="hydrate"))]
+fn dialogFocus_capture() -> Option<DialogFocusReturn>
+{
+	return None;
+}
+
+#[cfg(feature="hydrate")]
+fn dialogFocus_restore(focusReturn: &DialogFocusReturn)
+{
+	let Some(document) = web_sys::window().and_then(|window| window.document()) else {return};
+	let Some(element) = document.get_element_by_id(&focusReturn.id) else {return};
+	if let Ok(htmlElement) = element.clone().dyn_into::<HtmlElement>()
+	{
+		let _ = htmlElement.focus();
+	}
+	if (focusReturn.removeId)
+	{
+		let _ = element.remove_attribute("id");
+	}
+}
+
+#[cfg(not(feature="hydrate"))]
+fn dialogFocus_restore(_: &DialogFocusReturn)
+{
+}
+
+#[cfg(feature="hydrate")]
+fn dialogFocus_trap(event: &KeyboardEvent, dialogRef: NodeRef<Div>)
+{
+	let Some(dialog) = dialogRef.get_untracked() else {return};
+	let Ok(nodes) = dialog.query_selector_all(concat!(
+		"a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),",
+		"textarea:not([disabled]),[tabindex]:not([tabindex=\"-1\"]):not([aria-disabled=\"true\"])"
+	)) else {return};
+	let mut focusableElements = Vec::new();
+	for index in 0..nodes.length()
+	{
+		if let Some(node) = nodes.item(index) && let Ok(element) = node.dyn_into::<HtmlElement>()
+		{
+			focusableElements.push(element);
+		}
+	}
+
+	let dialogElement: HtmlElement = dialog.unchecked_into();
+	let activeElement = web_sys::window()
+		.and_then(|window| window.document())
+		.and_then(|document| document.active_element())
+		.and_then(|element| element.dyn_into::<HtmlElement>().ok());
+	let Some(firstElement) = focusableElements.first() else {
+		event.prevent_default();
+		let _ = dialogElement.focus();
+		return;
+	};
+	let Some(lastElement) = focusableElements.last() else {return};
+	let dialogHasFocus = activeElement.as_ref().is_none_or(|element| element == &dialogElement);
+	let mustWrap = if (event.shift_key())
+	{
+		dialogHasFocus || activeElement.as_ref().is_some_and(|element| element == firstElement)
+	}
+	else
+	{
+		activeElement.as_ref().is_some_and(|element| element == lastElement)
+	};
+	if (!mustWrap)
+	{
+		return;
+	}
+
+	event.prevent_default();
+	let target = if (event.shift_key()) {lastElement} else {firstElement};
+	let _ = target.focus();
+}
+
+#[cfg(not(feature="hydrate"))]
+fn dialogFocus_trap(_: &KeyboardEvent, _: NodeRef<Div>)
+{
 }
 
 #[cfg(test)]
 mod tests
 {
-	use super::{DialogData, DialogManager};
+	use super::{DialogActionStyle, DialogData, DialogManager};
 	use leptos::prelude::{GetUntracked, Owner};
 	use std::sync::Arc;
 	use std::sync::atomic::{AtomicBool, Ordering};
@@ -301,6 +481,14 @@ mod tests
 			assert!(manager.dialog.get_untracked().is_none());
 		});
 		owner.cleanup();
+	}
+
+	#[test]
+	fn dialogActionStyle_mapsSemanticClasses()
+	{
+		assert_eq!(DialogActionStyle::Success.class_get(),"validate");
+		assert_eq!(DialogActionStyle::Warning.class_get(),"validate validate_warning");
+		assert_eq!(DialogActionStyle::Danger.class_get(),"validate validate_danger");
 	}
 }
 

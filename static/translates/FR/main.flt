@@ -52,6 +52,15 @@ FRONTUI_HOME_CHANGE_OK = Enregistrer les changements ?
 FRONTUI_HOME_CHANGE_CANCEL = Annuler les changements ?
 FRONTUI_HOME_CHANGE_NEW = Type du nouveau module ?
 FRONTUI_MODULE_TYPE = Type de module :
+FRONTUI_QUICK_LINKS = Liens rapides
+FRONTUI_HOME_EDIT_ACTION = Modifier le tableau de bord
+FRONTUI_HOME_ADD_ACTION = Ajouter un module
+FRONTUI_HOME_SAVE_ACTION = Enregistrer les changements
+FRONTUI_HOME_CANCEL_ACTION = Annuler les changements
+FRONTUI_LOGOUT_ACTION = Se déconnecter
+FRONTUI_MODULE_MOVE_ACTION = Déplacer le module
+FRONTUI_MODULE_REMOVE_ACTION = Supprimer le module
+FRONTUI_MODULE_RESIZE_ACTION = Redimensionner le module
 
 #time
 DISTANT_TIME_RESULT_SEC = s
@@ -63,6 +72,7 @@ DISTANT_TIME_RESULT_YEAR = Y
 
 #modules
 MODULE_TITLE_CONF = Titre:
+MODULE_TODO_CONTENT = Contenu de la note
 
 #module link
 MODULE_LINK_DEL = Supprimer un lien ?
@@ -70,6 +80,7 @@ MODULE_LINK_ADD = Ajouter un lien
 MODULE_LINK_LABEL = Libellé :
 MODULE_LINK_URL = URL :
 MODULE_LINK_ADD_ACTION = Ajouter
+MODULE_LINK_REMOVE_ACTION = Supprimer le lien
 MODULE_LINK_URL_MUST_NOT_EMPTY = L'URL ne doit pas être vide
 MODULE_LINK_LABEL_MUST_NOT_EMPTY = Le libellé ne doit pas être vide
 
@@ -83,6 +94,9 @@ MODULE_TYPE_WEATHER = Météo
 MODULE_RSS_LINK = Lien RSS:
 MODULE_RSS_MAXLINE = Nombre de lignes:
 MODULE_RSS_DEMO = Exemple:
+MODULE_RSS_NO_TITLE = Flux sans titre
+MODULE_RSS_DESCRIPTION = Description du flux
+MODULE_RSS_OPEN_FEED_ACTION = Ouvrir le flux RSS
 WGET_ERROR_BLANK_URL = L'url configuré est vide.
 WGET_ERROR_AUTH_REQUIRED = { FRONTERROR_SESSION_EXPIRED }
 WGET_ERROR_DESTINATION_FORBIDDEN = La destination RSS configurée n'est pas autorisée.
@@ -111,12 +125,19 @@ MODULE_WEATHER_SNOW_GRAIN = Grêle
 MODULE_WEATHER_STORM = Orages
 MODULE_WEATHER_HEAVYSTORM = Orages Important
 MODULE_WEATHER_POSITION = Position:
+MODULE_WEATHER_LATITUDE = Latitude :
+MODULE_WEATHER_LONGITUDE = Longitude :
 MODULE_WEATHER_LOCATE = Localiser
 MODULE_WEATHER_MAXDAY = Jours max:
+MODULE_WEATHER_WIND = Vent
+MODULE_WEATHER_PRECIPITATION = Précipitations
+MODULE_WEATHER_MINIMUM_TEMPERATURE = Température minimale
+MODULE_WEATHER_MAXIMUM_TEMPERATURE = Température maximale
 
 #module mail
 MODULE_MAIL_ASTAG = Email comme catégorie:
-MODULE_MAIL_HOST = Host/port:
+MODULE_MAIL_HOST = Serveur :
+MODULE_MAIL_PORT = Port :
 MODULE_MAIL_USERNAME = Login:
 MODULE_MAIL_PASSWORD = Password:
 MODULE_MAIL_GETBOXS = Obtenir les boites / vérification connection
@@ -130,7 +151,11 @@ MODULE_MAIL_ATTACHEMENT = Pieces jointes:
 MODULE_MAIL_BLOBCREATORERROR = Impossible de crée le téléchargement pour ce fichier
 MODULE_MAIL_SYNCERROR = Synchronisation mail impossible
 MODULE_MAIL_MAILCONTENTSEEN = Marquer comme lu
+MODULE_MAIL_OPEN_ACTION = Ouvrir le mail
+MODULE_MAIL_MARK_READ_ACTION = Marquer le mail comme lu
+MODULE_MAIL_CONFIRM_MARK_READ_ACTION = Confirmer le marquage comme lu
+MODULE_MAIL_DOWNLOAD_ATTACHMENT_ACTION = Télécharger la pièce jointe
 MODULE_MAIL_REMOTE_IMAGES_BLOCKED = Les images distantes sont bloquées pour protéger votre confidentialité.
 MODULE_MAIL_LOAD_REMOTE_IMAGES = Charger les images pour ce mail
 MODULE_MAIL_ALWAYS_LOAD_REMOTE_IMAGES = Toujours charger pour cet expéditeur
-MODULE_MAIL_REMOTE_IMAGES_ALLOWLIST = Expéditeurs autorisés pour les images distantes (cliquer pour retirer) :
+MODULE_MAIL_REMOTE_IMAGES_ALLOWLIST = Expéditeurs autorisés pour les images distantes (activer pour retirer) :

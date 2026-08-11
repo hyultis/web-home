@@ -1,0 +1,152 @@
+html
+{
+	min-height: 100%;
+	background: var(--color-canvas);
+	font-family: var(--font-family-sans);
+	font-size: 100%;
+	scrollbar-color: var(--color-border-control) var(--color-surface-1);
+	scrollbar-width: thin;
+}
+
+body
+{
+	min-width: 20rem;
+	min-height: 100%;
+	background: var(--color-canvas);
+	color: var(--color-text);
+	font-family: var(--font-family-sans);
+	font-size: var(--font-size-base);
+	line-height: var(--line-height-base);
+	text-rendering: optimizeLegibility;
+	-webkit-font-smoothing: antialiased;
+}
+
+#body
+{
+	min-height: 100vh;
+}
+
+.visually_hidden
+{
+	position: absolute !important;
+	width: 1px !important;
+	height: 1px !important;
+	margin: -1px !important;
+	padding: 0 !important;
+	overflow: hidden !important;
+	clip: rect(0 0 0 0) !important;
+	clip-path: inset(50%) !important;
+	border: 0 !important;
+	white-space: nowrap !important;
+}
+
+::selection
+{
+	background: var(--color-accent);
+	color: var(--color-text-inverse);
+}
+
+a
+{
+	color: inherit;
+	cursor: pointer;
+	text-decoration-color: transparent;
+	text-decoration-line: underline;
+	text-decoration-thickness: 1px;
+	text-underline-offset: 0.18em;
+	transition:
+		color var(--motion-interaction) var(--motion-easing),
+		text-decoration-color var(--motion-interaction) var(--motion-easing);
+}
+
+a:visited
+{
+	color: inherit;
+}
+
+a:hover
+{
+	color: var(--color-accent);
+	text-decoration-color: currentColor;
+}
+
+a:active
+{
+	color: var(--color-accent-strong);
+}
+
+h1,
+h2
+{
+	color: var(--color-text);
+	font-weight: var(--font-weight-semibold);
+	line-height: var(--line-height-tight);
+}
+
+h1
+{
+	font-size: var(--font-size-2xl);
+	margin: var(--space-3) 0;
+}
+
+h2
+{
+	font-size: var(--font-size-lg);
+	margin-bottom: var(--space-1);
+	text-align: center;
+}
+
+strong,
+b
+{
+	font-weight: var(--font-weight-bold);
+}
+
+small
+{
+	color: var(--color-text-muted);
+	font-size: var(--font-size-sm);
+}
+
+code,
+kbd,
+samp,
+pre
+{
+	font-family: var(--font-family-mono);
+}
+
+@media (max-width: 40rem)
+{
+	:root
+	{
+		--space-5: 1.25rem;
+		--space-6: 1.5rem;
+	}
+}
+
+@media (prefers-reduced-motion: reduce)
+{
+	:root
+	{
+		--motion-interaction: 0ms;
+		--motion-overlay: 0ms;
+		--motion-emphasis: 0ms;
+	}
+
+	html:focus-within
+	{
+		scroll-behavior: auto;
+	}
+
+	*,
+	*::before,
+	*::after
+	{
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		scroll-behavior: auto !important;
+		transition-delay: 0ms !important;
+		transition-duration: 0.01ms !important;
+	}
+}

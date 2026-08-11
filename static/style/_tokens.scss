@@ -1,0 +1,94 @@
+:root
+{
+	color-scheme: dark;
+
+	/* Le futur choix de couleur ne modifiera que cette teinte. */
+	--theme-primary-hue: 212;
+	--color-canvas: hsl(var(--theme-primary-hue), 29%, 6%);
+	--color-surface-1: hsl(var(--theme-primary-hue), 29%, 10%);
+	--color-surface-2: hsl(var(--theme-primary-hue), 29%, 14%);
+	--color-surface-3: hsl(var(--theme-primary-hue), 26%, 18%);
+	--color-border: hsl(var(--theme-primary-hue), 24%, 26%);
+	--color-border-control: hsl(calc(var(--theme-primary-hue) - 3), 22%, 43%);
+	--color-text: #f3f6f8;
+	--color-text-muted: hsl(calc(var(--theme-primary-hue) - 2), 16%, 71%);
+	--color-text-inverse: #0b0f14;
+	--color-accent: #ff7a45;
+	--color-accent-strong: #f35a1f;
+	--color-accent-muted: #ffad8a;
+	--color-focus: hsl(calc(var(--theme-primary-hue) - 8), 100%, 72%);
+	--color-success: #53d88b;
+	--color-success-background: #112b20;
+	--color-warning: #f7c65a;
+	--color-warning-background: #33280e;
+	--color-danger: #ff7070;
+	--color-danger-background: #34191c;
+	--color-info: #70b7ff;
+	--color-info-background: #10263a;
+	--color-overlay: rgba(3, 6, 10, 0.72);
+
+	--font-family-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	--font-family-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+	--font-size-xs: 0.75rem;
+	--font-size-sm: 0.875rem;
+	--font-size-base: 1rem;
+	--font-size-lg: 1.125rem;
+	--font-size-xl: 1.25rem;
+	--font-size-2xl: 1.75rem;
+	--line-height-tight: 1.25;
+	--line-height-base: 1.5;
+	--font-weight-medium: 500;
+	--font-weight-semibold: 600;
+	--font-weight-bold: 700;
+
+	--space-1: 0.25rem;
+	--space-2: 0.5rem;
+	--space-3: 0.75rem;
+	--space-4: 1rem;
+	--space-5: 1.5rem;
+	--space-6: 2rem;
+
+	--radius-control: 0.375rem;
+	--radius-card: 0.625rem;
+	--radius-overlay: 0.875rem;
+	--control-height: 2.25rem;
+	--control-height-compact: 2rem;
+
+	--shadow-card: 0 0.75rem 1.75rem rgba(0, 0, 0, 0.22);
+	--shadow-overlay: 0 1.5rem 3.75rem rgba(0, 0, 0, 0.48);
+	--focus-outline: 2px solid var(--color-focus);
+	--focus-offset: 2px;
+	--layer-header: 10;
+	--layer-dialog: 10000;
+	--layer-toast: 10010;
+
+	--motion-interaction: 120ms;
+	--motion-overlay: 180ms;
+	--motion-emphasis: 240ms;
+	--motion-easing: cubic-bezier(0.2, 0, 0, 1);
+
+}
+
+/* Leptoaster injecte ensuite ses valeurs sur :root ; cette specificite garde WebHome proprietaire du theme. */
+html:root
+{
+	--leptoaster-width: 20rem;
+	--leptoaster-max-width: calc(100vw - 2rem);
+	--leptoaster-z-index: var(--layer-toast);
+	--leptoaster-font-family: var(--font-family-sans);
+	--leptoaster-font-size: var(--font-size-sm);
+	--leptoaster-line-height: 1.25rem;
+	--leptoaster-font-weight: var(--font-weight-semibold);
+	--leptoaster-info-background-color: var(--color-info-background);
+	--leptoaster-info-border-color: var(--color-info);
+	--leptoaster-info-text-color: var(--color-info);
+	--leptoaster-success-background-color: var(--color-success-background);
+	--leptoaster-success-border-color: var(--color-success);
+	--leptoaster-success-text-color: var(--color-success);
+	--leptoaster-warn-background-color: var(--color-warning-background);
+	--leptoaster-warn-border-color: var(--color-warning);
+	--leptoaster-warn-text-color: var(--color-warning);
+	--leptoaster-error-background-color: var(--color-danger-background);
+	--leptoaster-error-border-color: var(--color-danger);
+	--leptoaster-error-text-color: var(--color-danger);
+}

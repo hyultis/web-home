@@ -5,15 +5,15 @@ use crate::front::modules::components::{
 };
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::draw_title_if_present;
-use crate::front::utils::translate::Translate;
+use crate::front::utils::translate::{Translate, TranslateText};
 use crate::HWebTrace;
 use js_sys::{Array, Intl, Object, Reflect};
 use leptoaster::ToasterContext;
 use leptos::children::ViewFn;
 use leptos::prelude::{ArcRwSignal, IntoAny, RwSignal};
 use leptos::prelude::{
-	ClassAttribute, CollectView, ElementChild, Get, GetUntracked, OnAttribute, StyleAttribute,
-	Update,
+	ClassAttribute, CollectView, ElementChild, Get, GetUntracked, GlobalAttributes, OnAttribute,
+	StyleAttribute, Update,
 };
 use leptos::{component, view, IntoView};
 use serde::{Deserialize, Serialize};
@@ -103,7 +103,7 @@ impl Weather
 
 		let h = Self::lerp(h1, h2, t);
 		let s = 70.0; // saturation fixe
-		let l = 50.0; // luminosité fixe
+		let l = 68.0; // luminosité fixe pour garder le contraste sur le bandeau sombre
 
 		(h, s, l)
 	}
@@ -722,21 +722,25 @@ fn WeatherDraw(
 		                                  |d| d.get().title,
 		                                  |ev,inner| inner.title = ev.target().value());
 				titleF.setFullSize();
-				let latitudeF = FieldHelper::new(&config,&update,"MODULE_WEATHER_POSITION",
+				let latitudeF = FieldHelper::new(&config,&update,"MODULE_WEATHER_LATITUDE",
 		                                  |d| d.get().latitude.to_string(),
 		                                  |ev,inner| inner.latitude = ev.target().value().parse::<f64>().unwrap_or(0.0));
-				let longitudeF = FieldHelper::new(&config,&update,"",
+				let longitudeF = FieldHelper::new(&config,&update,"MODULE_WEATHER_LONGITUDE",
 		                                  |d| d.get().longitude.to_string(),
 		                                  |ev,inner| inner.longitude = ev.target().value().parse::<f64>().unwrap_or(0.0));
 				let maxdayF = FieldHelper::new(&config,&update,"MODULE_WEATHER_MAXDAY",
 		                                  |d| d.get().maxday.to_string(),
 		                                  |ev,inner| inner.maxday = ev.target().value().parse::<u8>().unwrap_or(0));
 				view!{
-				<div class="module_weather_config">
+				<div class="module_config module_weather_config">
 					{titleF.draw()}
-					{latitudeF.draw()}/
-					{longitudeF.draw()}<br/>
-					<button on:click={locateFn}><Translate key="MODULE_WEATHER_LOCATE"/></button><br/>
+					<div class="module_weather_position_fields">
+						{latitudeF.draw()}
+						{longitudeF.draw()}
+					</div>
+					<div class="module_config_actions">
+						<button type="button" on:click={locateFn}><Translate key="MODULE_WEATHER_LOCATE"/></button>
+					</div>
 					{maxdayF.draw()}
 				</div>
 				}.into_any()
@@ -751,13 +755,30 @@ fn WeatherDraw(
 						let units = haveContent.unit.clone();
 						haveContent.days.iter().map(|days| {
 							view!{
-								<div class="day">
-									{format!("{:0>2}",days.day.day())}/{format!("{:0>2}",days.day.month() as u8)}<br/>
-									<img src={format!("weather/{}.png",days.codeIntoImg())} alt={days.codeIntoImg()} /><br/>
-									<Translate key={days.codeIntoTranslate()}/><br/>
-									<span style={Weather::celsiusToColor(days.temp_min)}>{days.temp_min}{units.clone().temp}</span>{" - "}<span style={Weather::celsiusToColor(days.temp_max)}>{days.temp_max}{units.clone().temp}</span><br/>
-									<i class="iconoir-wind"/>{" "}{days.wind_max}{units.clone().wind}<br/>
-									<i class="iconoir-heavy-rain"/>{" "}{days.precipitation}{units.clone().precipitation}
+								<div class="day" tabindex="0">
+									<span class="module_weather_date">{format!("{:0>2}",days.day.day())}/{format!("{:0>2}",days.day.month() as u8)}</span>
+									<img class="module_weather_icon" src={format!("weather/{}.png",days.codeIntoImg())} alt="" />
+									<span class="module_weather_condition"><Translate key={days.codeIntoTranslate()}/></span>
+									<div class="module_weather_summary">
+										<span class="module_weather_temperatures">
+											<span class="module_weather_temperature module_weather_temperature--minimum" style={Weather::celsiusToColor(days.temp_min)}>
+												<span class="visually_hidden"><TranslateText key="MODULE_WEATHER_MINIMUM_TEMPERATURE"/></span>{days.temp_min}{units.clone().temp}
+											</span>
+											<span class="module_weather_temperature module_weather_temperature--maximum" style={Weather::celsiusToColor(days.temp_max)}>
+												<span class="visually_hidden"><TranslateText key="MODULE_WEATHER_MAXIMUM_TEMPERATURE"/></span>{days.temp_max}{units.clone().temp}
+											</span>
+										</span>
+										<div class="module_weather_secondary">
+											<span class="module_weather_details">
+												<i class="iconoir-wind" aria-hidden="true"/>
+												<span class="visually_hidden"><TranslateText key="MODULE_WEATHER_WIND"/></span>{" "}{days.wind_max}{units.clone().wind}
+											</span>
+											<span class="module_weather_details">
+												<i class="iconoir-heavy-rain" aria-hidden="true"/>
+												<span class="visually_hidden"><TranslateText key="MODULE_WEATHER_PRECIPITATION"/></span>{" "}{days.precipitation}{units.clone().precipitation}
+											</span>
+										</div>
+									</div>
 								</div>
 							}
 						}).collect_view()

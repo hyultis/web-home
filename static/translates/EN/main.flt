@@ -52,6 +52,15 @@ FRONTUI_HOME_CHANGE_OK = Save changes?
 FRONTUI_HOME_CHANGE_CANCEL = Cancel changes?
 FRONTUI_HOME_CHANGE_NEW = Type of the new module?
 FRONTUI_MODULE_TYPE = Module type:
+FRONTUI_QUICK_LINKS = Quick links
+FRONTUI_HOME_EDIT_ACTION = Edit dashboard
+FRONTUI_HOME_ADD_ACTION = Add a module
+FRONTUI_HOME_SAVE_ACTION = Save changes
+FRONTUI_HOME_CANCEL_ACTION = Cancel changes
+FRONTUI_LOGOUT_ACTION = Log out
+FRONTUI_MODULE_MOVE_ACTION = Move module
+FRONTUI_MODULE_REMOVE_ACTION = Delete module
+FRONTUI_MODULE_RESIZE_ACTION = Resize module
 
 #time
 DISTANT_TIME_RESULT_SEC = s
@@ -63,6 +72,7 @@ DISTANT_TIME_RESULT_YEAR = Y
 
 #modules
 MODULE_TITLE_CONF = Title:
+MODULE_TODO_CONTENT = Note content
 
 #module link
 MODULE_LINK_DEL = Delete a link?
@@ -70,6 +80,7 @@ MODULE_LINK_ADD = Add a link
 MODULE_LINK_LABEL = Label:
 MODULE_LINK_URL = URL:
 MODULE_LINK_ADD_ACTION = Add
+MODULE_LINK_REMOVE_ACTION = Delete link
 MODULE_LINK_URL_MUST_NOT_EMPTY = URL must not be empty
 MODULE_LINK_LABEL_MUST_NOT_EMPTY = Label must not be empty
 
@@ -83,6 +94,9 @@ MODULE_TYPE_WEATHER = Weather
 MODULE_RSS_LINK = RSS link:
 MODULE_RSS_MAXLINE = Number of lines:
 MODULE_RSS_DEMO = Example:
+MODULE_RSS_NO_TITLE = Untitled feed
+MODULE_RSS_DESCRIPTION = Feed description
+MODULE_RSS_OPEN_FEED_ACTION = Open RSS feed
 WGET_ERROR_BLANK_URL = The configured URL is empty.
 WGET_ERROR_AUTH_REQUIRED = { FRONTERROR_SESSION_EXPIRED }
 WGET_ERROR_DESTINATION_FORBIDDEN = The configured RSS destination is not allowed.
@@ -111,12 +125,19 @@ MODULE_WEATHER_SNOW_GRAIN = Hail
 MODULE_WEATHER_STORM = Storms
 MODULE_WEATHER_HEAVYSTORM = Severe storms
 MODULE_WEATHER_POSITION = Position:
+MODULE_WEATHER_LATITUDE = Latitude:
+MODULE_WEATHER_LONGITUDE = Longitude:
 MODULE_WEATHER_LOCATE = Locate
 MODULE_WEATHER_MAXDAY = Max days:
+MODULE_WEATHER_WIND = Wind
+MODULE_WEATHER_PRECIPITATION = Precipitation
+MODULE_WEATHER_MINIMUM_TEMPERATURE = Minimum temperature
+MODULE_WEATHER_MAXIMUM_TEMPERATURE = Maximum temperature
 
 #module mail
 MODULE_MAIL_ASTAG = Mail as tag:
-MODULE_MAIL_HOST = Host/port:
+MODULE_MAIL_HOST = Server:
+MODULE_MAIL_PORT = Port:
 MODULE_MAIL_USERNAME = Login:
 MODULE_MAIL_PASSWORD = Password:
 MODULE_MAIL_GETBOXS = Fetch mailboxes / check connection
@@ -130,7 +151,11 @@ MODULE_MAIL_ATTACHEMENT = Attachments:
 MODULE_MAIL_BLOBCREATORERROR = Unable to create the download for this file
 MODULE_MAIL_SYNCERROR = Mail synchronization failed
 MODULE_MAIL_MAILCONTENTSEEN = Mark as read
+MODULE_MAIL_OPEN_ACTION = Open email
+MODULE_MAIL_MARK_READ_ACTION = Mark email as read
+MODULE_MAIL_CONFIRM_MARK_READ_ACTION = Confirm marking as read
+MODULE_MAIL_DOWNLOAD_ATTACHMENT_ACTION = Download attachment
 MODULE_MAIL_REMOTE_IMAGES_BLOCKED = Remote images are blocked to protect your privacy.
 MODULE_MAIL_LOAD_REMOTE_IMAGES = Load images for this email
 MODULE_MAIL_ALWAYS_LOAD_REMOTE_IMAGES = Always load images from this sender
-MODULE_MAIL_REMOTE_IMAGES_ALLOWLIST = Senders allowed to load remote images (click to remove):
+MODULE_MAIL_REMOTE_IMAGES_ALLOWLIST = Senders allowed to load remote images (activate to remove):

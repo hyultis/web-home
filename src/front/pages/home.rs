@@ -3,7 +3,7 @@ use leptos::prelude::{CollectView, Get, PropAttribute};
 use crate::front::modules::components::Backable;
 use crate::front::modules::module_holder::{ModuleHolder, ModuleHolderEpoch};
 use crate::front::utils::all_front_enum::{AllFrontErrorEnum, AllFrontLoginEnum, AllFrontUIEnum};
-use crate::front::utils::dialog::{DialogData, DialogManager};
+use crate::front::utils::dialog::{DialogActionStyle, DialogData, DialogManager};
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
 use crate::front::utils::translate::{Translate, TranslateText};
 use crate::front::utils::users_data::{ClientCryptoContext, ClientState};
@@ -13,7 +13,7 @@ use leptos::ev::MouseEvent;
 use leptos::prelude::ElementChild;
 use leptos::prelude::{
 	use_context, ArcRwSignal, ClassAttribute, Effect, IntoAny, OnAttribute,
-	on_cleanup, RenderHtml, RwSignal, Set, Update,
+	on_cleanup, AriaAttributes, GlobalAttributes, RenderHtml, RwSignal, Set, Update,
 };
 use leptos::{component, island, view, IntoView};
 use leptos_router::{hooks, NavigateOptions};
@@ -127,6 +127,8 @@ pub fn Home() -> impl IntoView
 	let disconnectFn = move |_| {
 		let dialogContent = DialogData::new()
 			.setTitle(AllFrontLoginEnum::LOGIN_USER_WANT_DISCONNECTED)
+			.setButtonValidateTitle(Some("FRONTUI_LOGOUT_ACTION"))
+			.setValidateStyle(DialogActionStyle::Danger)
 			.setOnValidate(user_disconnected(hooks::use_navigate(), toasterInner.clone(), clientStateDisconnect.clone(), dialogManager.clone(), true));
 
 		dialogManager.open(dialogContent);
@@ -135,17 +137,17 @@ pub fn Home() -> impl IntoView
 	let moduleActionsInnerModuleView = moduleActions.clone();
 	view! {
 		<div class="home_body">
-			<div class="header">
-				<div class="left">
+			<header class="header">
+				<nav class="left" aria-labelledby="quick-links-title">
+					<span id="quick-links-title" class="visually_hidden"><TranslateText key="FRONTUI_QUICK_LINKS"/></span>
 					{move || {
 						return ModuleHolder::getSingleton().with(|binding| {
 							let tmp = binding.links_get();
 							tmp.draw(editMode,moduleActionsInnerModuleView.clone(),tmp.id_get()).run()
 						});
 					}}
-				</div>
+				</nav>
 				<div class="right">
-					<i class="iconoir-key" on:click=disconnectFn></i>
 					{move || {
 						let editModeValidateFn = editModeValidateFn.clone();
 						let editModeCancelFn = editModeCancelFn.clone();
@@ -154,20 +156,39 @@ pub fn Home() -> impl IntoView
 						if editMode.get()
 						{
 							view!{
-								<i class="iconoir-plus-circle" on:click=editModeAddModuleFn></i>
-								<i class="iconoir-check button_ok" on:click=editModeValidateFn></i>
-								<i class="iconoir-xmark button_danger" on:click=editModeCancelFn></i>
+								<div class="header_actions_group">
+									<button type="button" class="icon_button" on:click=editModeAddModuleFn>
+										<i class="iconoir-plus-circle" aria-hidden="true"></i>
+										<span class="visually_hidden"><TranslateText key="FRONTUI_HOME_ADD_ACTION"/></span>
+									</button>
+									<button type="button" class="icon_button icon_button--success" on:click=editModeValidateFn>
+										<i class="iconoir-check" aria-hidden="true"></i>
+										<span class="visually_hidden"><TranslateText key="FRONTUI_HOME_SAVE_ACTION"/></span>
+									</button>
+									<button type="button" class="icon_button icon_button--danger" on:click=editModeCancelFn>
+										<i class="iconoir-xmark" aria-hidden="true"></i>
+										<span class="visually_hidden"><TranslateText key="FRONTUI_HOME_CANCEL_ACTION"/></span>
+									</button>
+								</div>
 							}.into_any()
 						}
 						else
 						{
-							view!{<i class="iconoir-edit-pencil" on:click=editModeActivateFn></i>}.into_any()
+							view!{
+								<button type="button" class="icon_button" on:click=editModeActivateFn>
+									<i class="iconoir-edit-pencil" aria-hidden="true"></i>
+									<span class="visually_hidden"><TranslateText key="FRONTUI_HOME_EDIT_ACTION"/></span>
+								</button>
+							}.into_any()
 						}
 					}}
+					<button type="button" class="icon_button icon_button--warning" on:click=disconnectFn>
+						<i class="iconoir-key" aria-hidden="true"></i>
+						<span class="visually_hidden"><TranslateText key="FRONTUI_LOGOUT_ACTION"/></span>
+					</button>
 				</div>
-				<hr style="clear: both;"/>
-			</div>
-			<div class="modules">
+			</header>
+			<main class="modules">
 				<For
 					each=move || ModuleHolder::getSingleton().with(|holder| holder.blocks_view())
 					key=|(id,_)| id.clone()
@@ -182,7 +203,7 @@ pub fn Home() -> impl IntoView
 						        }
 						    }
 						/>
-			</div>
+			</main>
 		</div>
 	}
 }
@@ -212,6 +233,8 @@ fn editMode_cancel(
 
 		let dialogContent = DialogData::new()
 			.setTitle(AllFrontUIEnum::HOME_CHANGE_CANCEL)
+			.setButtonValidateTitle(Some("FRONTUI_HOME_CANCEL_ACTION"))
+			.setValidateStyle(DialogActionStyle::Warning)
 			.setOnValidate(move |_| {
 				let editModeInnerValidate = editModeInnerValidate.clone();
 				let toasterInnerValidate = toasterInnerValidate.clone();
@@ -244,6 +267,7 @@ fn editMode_validate(
 
 		let dialogContent = DialogData::new()
 			.setTitle(AllFrontUIEnum::HOME_CHANGE_OK)
+			.setButtonValidateTitle(Some("FRONTUI_HOME_SAVE_ACTION"))
 			.setOnValidate(move |_| {
 				let editModeInnerValidate = editModeInnerValidate.clone();
 				let toasterInnerValidate = toasterInnerValidate.clone();

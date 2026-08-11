@@ -1,15 +1,15 @@
 use leptoaster::{expect_toaster};
-use leptos::prelude::{ElementChild, GetUntracked, GlobalAttributes, IntoAny, Transition};
+use leptos::ev::SubmitEvent;
+use leptos::prelude::{AriaAttributes, ElementChild, GetUntracked, GlobalAttributes, IntoAny};
 use leptos::prelude::BindAttribute;
-use leptos::prelude::{signal, ClassAttribute, Get, OnAttribute, RenderHtml};
+use leptos::prelude::{signal, ClassAttribute, OnAttribute, RenderHtml};
 use leptos::{island, view, IntoView};
 use leptos::reactive::spawn_local_scoped;
 use leptos_router::components::A;
 use leptos_router::*;
 use crate::front::utils::all_front_enum::AllFrontLoginEnum;
-use crate::front::utils::fluent::FluentManager::FluentManager;
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
-use crate::front::utils::translate::Translate;
+use crate::front::utils::translate::{Translate, TranslateText};
 use crate::front::utils::users_data::ClientCryptoContext;
 use crate::HWebTrace;
 
@@ -18,7 +18,8 @@ pub fn Inscription() -> impl IntoView {
 	let login = signal("".to_string());
 	let pwd = signal("".to_string());
 
-	let submit = move |_| {
+	let submit = move |event: SubmitEvent| {
+		event.prevent_default();
 		let navigate = hooks::use_navigate();
 		let login = login.0.get_untracked().clone();
 		let pwd = pwd.0.get_untracked().clone();
@@ -43,29 +44,31 @@ pub fn Inscription() -> impl IntoView {
 		});
 	};
 
-	let submitTranslate = FluentManager::getAsResourceParamsLess("pageRoot_form_submit_signup");
-
 	view! {
-		<div class="centered_box">
-			<img src="/webhome.png" alt="webhome logo" class="logo" style="width: 100px;"/>
-			<h1><Translate key="pageRoot_title_signup"/></h1>
-			<div class="login_box">
-				<label for="inscription-login"><Translate key="pageRoot_form_login"/></label><input id="inscription-login" type="text" name="login" autocomplete="username" bind:value=login/>
-				<label for="inscription-pwd"><Translate key="pageRoot_form_pwd"/></label><input id="inscription-pwd" type="password" name="pwd" autocomplete="new-password" bind:value=pwd/>
-				<Transition fallback=move || view! { <span/> }.into_any()>
-					{move || {
-						let submit = submit.clone();
-						submitTranslate.get().map(|translated|{
-							view! {<input type="button" on:click=submit value=translated />}
-						})
-					}}
-				</Transition>
-			</div>
-			<A href="/"><Translate key="menu_home"/></A>
+		<div class="page_layout">
+			<main class="auth_page">
+				<section class="centered_box auth_card" aria-labelledby="inscription-title">
+					<img src="/webhome.png" alt="WebHome" class="auth_logo" width="88" height="88"/>
+					<h1 id="inscription-title"><Translate key="pageRoot_title_signup"/></h1>
+					<form class="login_box" on:submit=submit>
+						<div class="auth_field">
+							<label for="inscription-login"><Translate key="pageRoot_form_login"/></label>
+							<input id="inscription-login" type="text" name="login" autocomplete="username" bind:value=login/>
+						</div>
+						<div class="auth_field">
+							<label for="inscription-pwd"><Translate key="pageRoot_form_pwd"/></label>
+							<input id="inscription-pwd" type="password" name="pwd" autocomplete="new-password" bind:value=pwd/>
+						</div>
+						<div class="auth_actions">
+							<button class="auth_submit" type="submit"><TranslateText key="pageRoot_form_submit_signup"/></button>
+						</div>
+					</form>
+					<div class="auth_secondary"><A href="/"><Translate key="menu_home"/></A></div>
+				</section>
+			</main>
+			<footer class="site_footer">
+				<Translate key="pageRoot_foot"/>
+			</footer>
 		</div>
-
-		<footer>
-			<Translate key="pageRoot_foot"/>
-		</footer>
 	}.into_any()
 }

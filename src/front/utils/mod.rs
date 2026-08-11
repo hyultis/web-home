@@ -1,4 +1,4 @@
-use leptos::prelude::ElementChild;
+use leptos::prelude::{ClassAttribute, ElementChild};
 use leptos::prelude::{AnyView, IntoAny};
 use leptos::view;
 
@@ -23,6 +23,6 @@ pub fn draw_title_if_present(title: String) -> AnyView
 	}
 	else
 	{
-		view!{<h2>{title}</h2>}.into_any()
+		view!{<h2 class="module_title">{title}</h2>}.into_any()
 	}
 }

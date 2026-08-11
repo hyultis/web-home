@@ -5,7 +5,7 @@ use leptoaster::ToasterContext;
 use leptos::ev::Targeted;
 use leptos::prelude::{OnTargetAttribute, ViewFn};
 use leptos::prelude::{ElementChild, Update};
-use leptos::prelude::{AnyView, ArcRwSignal, IntoAny, PropAttribute, RwSignal, StyleAttribute};
+use leptos::prelude::{AnyView, ArcRwSignal, ClassAttribute, IntoAny, PropAttribute, RwSignal, StyleAttribute};
 use leptos::view;
 use time::UtcDateTime;
 use serde::{Deserialize, Serialize};
@@ -279,7 +279,7 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
 
 		let TranslateKey = self.TranslateKey.clone();
 		view!{
-			<label for={TranslateKey.clone()}>
+			<label class="module_config_field">
 				<Translate key={TranslateKey.clone()}/>
 				{self.drawInput()}
 			</label>
@@ -308,6 +308,7 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
 			FieldHelperType::TEXT => {
 				view!{
 						<input type="text"
+							class="module_config_input"
 							style={style}
 							name={TranslateKey.clone()}
 							prop:value={getFn}
@@ -317,6 +318,7 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
 			FieldHelperType::PASSWORD => {
 				view!{
 						<input type="password"
+							class="module_config_input"
 							style={style}
 							name={TranslateKey.clone()}
 							prop:value={getFn}
@@ -326,6 +328,7 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
 			FieldHelperType::NUMBER(min, max) => {
 				view!{
 						<input type="number" min={min} max={max}
+							class="module_config_input"
 							style={style}
 							name={TranslateKey.clone()}
 							prop:value={getFn}

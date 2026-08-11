@@ -1,0 +1,161 @@
+.page_layout
+{
+	min-height: 100vh;
+	min-height: 100dvh;
+	display: grid;
+	grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.auth_page,
+.error_page
+{
+	display: grid;
+	place-items: center;
+	padding: clamp(var(--space-4), 4vw, var(--space-6));
+}
+
+.centered_box
+{
+	width: min(100%, 30rem);
+	margin: auto;
+}
+
+.auth_card,
+.error_card
+{
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-overlay);
+	background: var(--color-surface-1);
+	box-shadow: var(--shadow-overlay);
+	padding: var(--space-6);
+}
+
+.auth_logo
+{
+	display: block;
+	width: 5.5rem;
+	height: auto;
+	margin: 0 auto var(--space-4);
+}
+
+.auth_description
+{
+	max-width: 34rem;
+	margin: 0 auto var(--space-4);
+	color: var(--color-text-muted);
+	text-align: center;
+}
+
+.auth_card h1,
+.error_card h1
+{
+	margin: 0;
+	text-align: center;
+}
+
+.login_box
+{
+	display: grid;
+	gap: var(--space-4);
+	margin-top: var(--space-5);
+}
+
+.auth_field
+{
+	display: grid;
+	gap: var(--space-1);
+}
+
+.auth_field label
+{
+	color: var(--color-text-muted);
+	font-size: var(--font-size-sm);
+	font-weight: var(--font-weight-semibold);
+}
+
+.auth_field input
+{
+	width: 100%;
+}
+
+.auth_actions
+{
+	display: flex;
+	justify-content: stretch;
+}
+
+.auth_submit
+{
+	width: 100%;
+	margin: 0;
+}
+
+.auth_secondary
+{
+	margin-top: var(--space-4);
+	text-align: center;
+}
+
+.auth_secondary a
+{
+	display: inline-flex;
+	align-items: center;
+	min-height: var(--control-height);
+	color: var(--color-accent);
+	font-weight: var(--font-weight-semibold);
+	padding: var(--space-1) var(--space-2);
+}
+
+.site_footer
+{
+	padding: var(--space-4);
+	color: var(--color-text-muted);
+	font-size: var(--font-size-sm);
+	text-align: center;
+}
+
+.site_footer a
+{
+	color: var(--color-accent);
+}
+
+.error_card
+{
+	text-align: center;
+}
+
+.error_code
+{
+	margin-bottom: var(--space-2);
+	color: var(--color-focus);
+	font-size: var(--font-size-sm);
+	font-weight: var(--font-weight-bold);
+	letter-spacing: 0.2em;
+}
+
+.error_card p
+{
+	margin-top: var(--space-4);
+	color: var(--color-text-muted);
+}
+
+.error_card a
+{
+	color: var(--color-accent);
+	font-weight: var(--font-weight-semibold);
+}
+
+@media (max-width: 40rem)
+{
+	.auth_page,
+	.error_page
+	{
+		place-items: start center;
+	}
+
+	.auth_card,
+	.error_card
+	{
+		padding: var(--space-5);
+	}
+}

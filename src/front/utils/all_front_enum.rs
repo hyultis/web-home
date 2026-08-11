@@ -35,7 +35,6 @@ pub enum AllFrontUIEnum
 {
 	VALID,
 	CLOSE,
-	MUST_NOT_EMPTY,
 	INVALID_URL,
 	UPDATE,
 	REFRESH,

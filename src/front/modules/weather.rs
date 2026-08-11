@@ -121,7 +121,7 @@ impl Backable for Weather
 		Weather::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, _: ModuleID) -> ViewFn
+	fn draw(&self, editMode: RwSignal<bool>, _moduleActions: ModuleActionFn, _: ModuleID) -> ViewFn
 	{
 		let contentInner = self.weatherContent.clone();
 		let updateInner = self._update.clone();
@@ -141,8 +141,8 @@ impl Backable for Weather
 	fn refresh(
 		&self,
 		moduleActions: ModuleActionFn,
-		moduleId: ModuleID,
-		toaster: ToasterContext,
+		_moduleId: ModuleID,
+		_toaster: ToasterContext,
 	) -> Option<BoxFuture>
 	{
 		let config = self.config.clone();
@@ -572,7 +572,7 @@ fn json_read_hourly(result: &mut WeatherApiResult, json: &Value)
 			finalData.precipitation.push(precipitation_probability[i]);
 
 			let hour = dateTime.hour();
-			if (hour < 8 || hour > 22)
+			if (!weatherHour_isDisplayed(hour))
 			{
 				continue;
 			}
@@ -583,11 +583,11 @@ fn json_read_hourly(result: &mut WeatherApiResult, json: &Value)
 		{
 			let mut defaultWind = vec![];
 			let mut defaultCodes = vec![];
-			if (hour >= 8 || hour <= 23)
+			if (weatherHour_isDisplayed(hour))
 			{
 				defaultWind = vec![wind_speed_10m[i]]
 			}
-			if (hour >= 8 || hour <= 23)
+			if (weatherHour_isDisplayed(hour))
 			{
 				defaultCodes = vec![code[i]]
 			}
@@ -611,6 +611,26 @@ fn json_read_hourly(result: &mut WeatherApiResult, json: &Value)
 		.collect::<Vec<WeatherApiResultOneDay>>();
 	beforeOrder.sort_by_key(|x| x.day);
 	result.days = beforeOrder;
+}
+
+fn weatherHour_isDisplayed(hour: u8) -> bool
+{
+	return hour>=8 && hour<=22;
+}
+
+#[cfg(test)]
+mod weatherHour_tests
+{
+	use super::weatherHour_isDisplayed;
+
+	#[test]
+	fn displayedRange_isInclusiveFromEightToTwentyTwo()
+	{
+		assert!(!weatherHour_isDisplayed(7));
+		assert!(weatherHour_isDisplayed(8));
+		assert!(weatherHour_isDisplayed(22));
+		assert!(!weatherHour_isDisplayed(23));
+	}
 }
 
 fn json_read_hourly_units(result: &mut WeatherApiResult, json: &Value)
@@ -701,7 +721,7 @@ fn WeatherDraw(
 				let mut titleF = FieldHelper::new(&config,&update,"MODULE_TITLE_CONF",
 		                                  |d| d.get().title,
 		                                  |ev,inner| inner.title = ev.target().value());
-				titleF.setFullSize(true);
+				titleF.setFullSize();
 				let latitudeF = FieldHelper::new(&config,&update,"MODULE_WEATHER_POSITION",
 		                                  |d| d.get().latitude.to_string(),
 		                                  |ev,inner| inner.latitude = ev.target().value().parse::<f64>().unwrap_or(0.0));

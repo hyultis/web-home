@@ -177,6 +177,14 @@ An empty, malformed or non-integer list fails closed and disables IMAP proxy con
 
 `trace_front_log` enables bounded browser-to-server development traces. It is always forced off when WebHome runs with `ENV=PROD`, even if `site.json` contains `true`.
 
+## Translations
+
+The English and French Fluent books live in `static/translates/EN/main.flt` and `static/translates/FR/main.flt`. They are immutable runtime assets: changing either file requires building and deploying a new WebHome release. Every UI key must exist in both books with the same parameter names.
+
+`Translate` deliberately supports HTML authored directly in these local Fluent files. This markup is part of the translated display and must be reviewed like a Leptos template. Ordinary dynamic parameters are always HTML-escaped before that result reaches `inner_html`; do not place a Fluent parameter inside an HTML tag or attribute. Components and other Leptos structure belong in the Rust view, not in a translation parameter. Use `TranslateText` when angle brackets or other content must remain literal text.
+
+Before publishing translation changes, run the SSR tests, the WASM check, and the full Leptos build documented in the verification gates above. The tests parse both books, enforce key and parameter parity, and require every key containing markup to be explicitly reviewed.
+
 ## Third-party browser assets
 
 WebHome loads [Iconoir 7.11.1](https://github.com/iconoir-icons/iconoir/releases/tag/v7.11.1), licensed under MIT, from this fixed jsDelivr URL:

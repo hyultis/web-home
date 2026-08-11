@@ -24,17 +24,10 @@ impl Display for LoginStatusErrors
 	}
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SaltReturn
-{
-	SALT(String),
-	ERROR(String)
-}
-
 impl FromServerFnError for LoginStatusErrors {
 	type Encoder = JsonEncoding;
 
-	fn from_server_fn_error(value: ServerFnErrorErr) -> Self {
+	fn from_server_fn_error(_value: ServerFnErrorErr) -> Self {
 		LoginStatusErrors::SERVER_ERROR
 	}
 }

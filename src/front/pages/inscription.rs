@@ -1,6 +1,5 @@
-use std::sync::Arc;
 use leptoaster::{expect_toaster};
-use leptos::prelude::{ElementChild, GetUntracked, IntoAny, Transition};
+use leptos::prelude::{ElementChild, GetUntracked, GlobalAttributes, IntoAny, Transition};
 use leptos::prelude::BindAttribute;
 use leptos::prelude::{signal, ClassAttribute, Get, OnAttribute, RenderHtml};
 use leptos::{island, view, IntoView};
@@ -13,11 +12,6 @@ use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
 use crate::front::utils::translate::Translate;
 use crate::front::utils::users_data::ClientCryptoContext;
 use crate::HWebTrace;
-
-#[derive(Clone)]
-struct StoredNavigateFn {
-	pub navigate: Arc<dyn Fn(&str, NavigateOptions)>,
-}
 
 #[island]
 pub fn Inscription() -> impl IntoView {
@@ -56,8 +50,8 @@ pub fn Inscription() -> impl IntoView {
 			<img src="/webhome.png" alt="webhome logo" class="logo" style="width: 100px;"/>
 			<h1><Translate key="pageRoot_title_signup"/></h1>
 			<div class="login_box">
-				<label for="login"><Translate key="pageRoot_form_login"/></label><input type="text" name="login" bind:value=login/>
-				<label for="pwd"><Translate key="pageRoot_form_pwd"/></label><input type="password" name="pwd" autocomplete="new-password" bind:value=pwd/>
+				<label for="inscription-login"><Translate key="pageRoot_form_login"/></label><input id="inscription-login" type="text" name="login" autocomplete="username" bind:value=login/>
+				<label for="inscription-pwd"><Translate key="pageRoot_form_pwd"/></label><input id="inscription-pwd" type="password" name="pwd" autocomplete="new-password" bind:value=pwd/>
 				<Transition fallback=move || view! { <span/> }.into_any()>
 					{move || {
 						let submit = submit.clone();
@@ -67,7 +61,7 @@ pub fn Inscription() -> impl IntoView {
 					}}
 				</Transition>
 			</div>
-			<A href="/">"retour"</A>
+			<A href="/"><Translate key="menu_home"/></A>
 		</div>
 
 		<footer>

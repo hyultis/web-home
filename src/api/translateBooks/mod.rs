@@ -1,7 +1,7 @@
 #[cfg(feature = "ssr")]
-pub mod translateBook;
+mod translateBook;
 #[cfg(feature = "ssr")]
-pub mod translateManager;
+mod translateManager;
 
 use leptos::server;
 use leptos::server_fn::ServerFnError;

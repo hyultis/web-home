@@ -491,9 +491,9 @@ impl ModuleHolder
 
 		let mut apiReturn = API_return_apply::default();
 
-		let apiReturnModules = match API_modules_update(moduleToUpdate, overwrite).await
+		match API_modules_update(moduleToUpdate, overwrite).await
 		{
-			Ok(r) => r,
+			Ok(_) => {},
 			Err(err) => {
 				Self::network_error_apply(&mut apiReturn, err);
 				return apiReturn;
@@ -743,42 +743,6 @@ impl ModuleHolder
 	// START MODULE REMOVE ZONE ---
 	////////////////////////////////////////
 
-	/// try to get the module from the server,
-	/// but only if its the most recent version.
-	/// if the local version is the most recent, the module is updated onto the server
-	pub async fn module_getOrUpdate(
-		&mut self,
-		login: String,
-		moduleId: ModuleID,
-	) -> Option<AllFrontErrorEnum>
-	{
-		return None;
-		/*let Some(oneModule) = self._blocks.get_mut(&moduleId)
-		else
-		{
-			return None;
-		};
-
-		if(oneModule.inner().cache_mustUpdate())
-		{
-			let mut exportedModule = oneModule.export();
-			exportedModule.name = moduleId.clone();
-			return Self::inner_update(login, exportedModule).await;
-		}
-
-		return Self::inner_retrieve(
-			login.clone(),
-			moduleId.clone(),
-			oneModule,
-			|module, moduleContent| {
-
-				if(moduleContent.timestamp>module.inner().cache_getUpdate().get_untracked().get()) {
-					module.import(moduleContent);
-				}
-			},
-		).await;*/
-	}
-
 	pub(super) fn module_refresh(epoch: ModuleHolderEpoch, modulesId: Vec<ModuleID>, toaster: ToasterContext)
 	{
 		let refreshTask = Self::getSingleton().with_untracked(|holder| {
@@ -856,29 +820,6 @@ impl ModuleHolder
 
 		crons.insert(moduleId, PausableStocker::new(timeMillisecond, tick));
 
-	}
-
-	/// This function is used to update the module on the server.
-	/// It will encrypt the content of the module before sending it to the server.
-	/// It will return an error if the module is outdated or if the server returns an error.
-	pub async fn module_update(&mut self, login: String, moduleId: ModuleID)
-	                           -> Option<AllFrontErrorEnum>
-	{
-		return None;
-		/*let Some(oneModule) = self._blocks.get(&moduleId)
-		else
-		{
-			return None;
-		};
-
-		if (!oneModule.inner().cache_mustUpdate())
-		{
-			return None;
-		}
-
-		let mut module = oneModule.export();
-		module.name = moduleId.clone();
-		return Self::inner_update(login, module).await;*/
 	}
 
 	pub fn links_get(&self) -> &LinksHolder

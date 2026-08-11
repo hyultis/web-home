@@ -1,4 +1,3 @@
-use std::sync::atomic::AtomicBool;
 use leptoaster::{expect_toaster, provide_toaster, Toaster};
 use leptos::view;
 use leptos::IntoView;
@@ -8,7 +7,7 @@ use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title}
 use leptos_router::components::{Route, Router, Routes, A};
 use leptos_router::{hooks, path};
 use leptos_use::use_locales;
-use crate::api::{ALLOW_REGISTRATION, IS_TRACE_FRONT_LOG};
+use crate::api::runtimeConfig_set;
 use crate::front::pages::home::Home;
 use crate::front::pages::connection::Connection;
 use crate::front::pages::inscription::Inscription;
@@ -56,8 +55,7 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 	provide_toaster();
 	toasterOwner_provide();
 
-	let _ = IS_TRACE_FRONT_LOG.set(AtomicBool::new(traceFrontLog));
-	let _ = ALLOW_REGISTRATION.set(AtomicBool::new(allowRegistration));
+	runtimeConfig_set(traceFrontLog,allowRegistration);
 
 	let dialog_manager = DialogManager::new();
 	provide_context(dialog_manager.clone());
@@ -146,7 +144,8 @@ pub fn Page404() -> impl IntoView {
 	view!{
 		<h2><Translate key="page404_title"/></h2>
 		<article>
-			<Translate key="page404_content" ><A href="/"><Translate key="menu_home"/></A></Translate>
+			<Translate key="page404_content"/> {" "}
+			<A href="/"><Translate key="menu_home"/></A>{"."}
 		</article>
 	}
 }

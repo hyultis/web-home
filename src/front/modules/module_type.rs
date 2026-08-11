@@ -24,6 +24,20 @@ pub enum ModuleType
 	WEATHER(Weather),
 }
 
+impl ModuleTypeDiscriminants
+{
+	pub(crate) fn translateKey_get(&self) -> &'static str
+	{
+		return match self
+		{
+			Self::RSS => "MODULE_TYPE_RSS",
+			Self::TODO => "MODULE_TYPE_TODO",
+			Self::MAIL => "MODULE_TYPE_MAIL",
+			Self::WEATHER => "MODULE_TYPE_WEATHER",
+		};
+	}
+}
+
 impl ModuleType {
 	pub fn intoBackable(&self) -> Box<&dyn Backable> {
 		match self {

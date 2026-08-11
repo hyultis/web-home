@@ -55,6 +55,7 @@ pub struct imap_connector
 
 impl imap_connector
 {
+	#[cfg(any(feature="ssr",test))]
 	pub fn isGmail(&self) -> bool
 	{
 		let host = self.host.trim_end_matches('.').to_ascii_lowercase();
@@ -267,11 +268,13 @@ impl Default for ImapMailContentType
 
 impl ImapMailContentType
 {
+	#[cfg(any(feature="ssr",test))]
 	pub fn is_none(&self) -> bool
 	{
 		matches!(self, Self::None)
 	}
 
+	#[cfg(any(feature="ssr",test))]
 	pub fn is_not_html(&self) -> bool
 	{
 		!matches!(self, Self::Html(_))

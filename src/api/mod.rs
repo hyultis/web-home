@@ -16,3 +16,9 @@ pub trait IsToastable: ToString {
 
 pub static IS_TRACE_FRONT_LOG: OnceLock<AtomicBool> = OnceLock::new();
 pub static ALLOW_REGISTRATION: OnceLock<AtomicBool> = OnceLock::new();
+
+pub(crate) fn runtimeConfig_set(traceFrontLog: bool,allowRegistration: bool)
+{
+	let _ = IS_TRACE_FRONT_LOG.set(AtomicBool::new(traceFrontLog));
+	let _ = ALLOW_REGISTRATION.set(AtomicBool::new(allowRegistration));
+}

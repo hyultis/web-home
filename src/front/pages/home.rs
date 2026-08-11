@@ -5,6 +5,7 @@ use crate::front::modules::module_holder::{ModuleHolder, ModuleHolderEpoch};
 use crate::front::utils::all_front_enum::{AllFrontErrorEnum, AllFrontLoginEnum, AllFrontUIEnum};
 use crate::front::utils::dialog::{DialogData, DialogManager};
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
+use crate::front::utils::translate::{Translate, TranslateText};
 use crate::front::utils::users_data::{ClientCryptoContext, ClientState};
 use crate::{HWebTrace};
 use leptoaster::{expect_toaster, ToasterContext};
@@ -281,14 +282,15 @@ fn editMode_AddBlock(dialogManager: DialogManager, lifecycleEpoch: ModuleHolderE
 				view!{
 					<div>
 						<label>
-							<span>Type</span>
+							<span><Translate key="FRONTUI_MODULE_TYPE"/></span>
 							<select on:change:target=move |ev| {
 							      innerSelectedType.set(ev.target().value().parse().unwrap_or_default());
 							    }
 							    prop:value=move || innerSelectedType.get().to_string()>
 								{move ||{
-									ModuleTypeDiscriminants::iter().map(|x| {
-										view!{<option value={x.to_string()}>{x.to_string()}</option>}.into_any()
+									ModuleTypeDiscriminants::iter().map(|moduleType| {
+										let value = moduleType.to_string();
+										view!{<option value={value}><TranslateText key={moduleType.translateKey_get()}/></option>}.into_any()
 									}).collect_view()
 								}}
 							</select>

@@ -19,7 +19,7 @@ use crate::front::utils::contentDownloader::download_attachment;
 use crate::front::utils::dialog::{DialogData, DialogManager};
 use crate::front::utils::draw_title_if_present;
 use crate::front::utils::toaster_helpers::{toaster_api, toastingErr};
-use crate::front::utils::translate::Translate;
+use crate::front::utils::translate::{Translate, TranslateText};
 use crate::HWebTrace;
 
 #[derive(Serialize,Deserialize,Debug)]
@@ -576,11 +576,11 @@ impl Mail
 		let mut titleF = FieldHelper::new(&getBoxsMailConfig,&update,"MODULE_TITLE_CONF",
 		                                  |d| d.get().title,
 		                                  |ev,inner| inner.title = ev.target().value());
-		titleF.setFullSize(true);
+		titleF.setFullSize();
 		let mut mailAsTagF = FieldHelper::new(&getBoxsMailConfig,&update,"MODULE_MAIL_ASTAG",
 		                                  |d| d.get().mailAsTag,
 		                                  |ev,inner| inner.mailAsTag = ev.target().value());
-		mailAsTagF.setFullSize(true);
+		mailAsTagF.setFullSize();
 		let hostF = FieldHelper::new(&getBoxsMailConfig,&update,"MODULE_MAIL_HOST",
 		                                  |d| d.get().imap.host,
 		                                  |ev,inner| inner.imap.host = ev.target().value());
@@ -802,7 +802,7 @@ impl Mail
 														downloadAttachement(attachment,toasterInner.clone());
 													}
 												}
-											}><i class="iconoir-doc-magnifying-glass"/>{" "}<Translate key="MODULE_MAIL_NO_SUBJECT"/></span>}}.into_any(),
+											}><i class="iconoir-doc-magnifying-glass"/>{" "}<TranslateText key="MODULE_MAIL_NO_SUBJECT"/></span>}}.into_any(),
 										Some(filename) => {
 											let attachmentMailContent = attachmentMailContent.clone();
 											view!{{" "}<span class="attachement"  on:click={
@@ -1006,7 +1006,7 @@ impl Backable for Mail
 		RefreshTime::MINUTES(30)
 	}
 
-	fn refresh(&self, moduleActions: ModuleActionFn, moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
+	fn refresh(&self, moduleActions: ModuleActionFn, _moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
 		let config = self.config.clone();
 		let mailsCache = self.mailsClientCache.clone();
 		let tmp = Self::sync(toaster, mailsCache, config, moduleActions);

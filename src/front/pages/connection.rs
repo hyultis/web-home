@@ -1,5 +1,5 @@
 use leptoaster::{expect_toaster};
-use leptos::prelude::{BindAttribute, ClassAttribute, IntoAny, Transition};
+use leptos::prelude::{BindAttribute, ClassAttribute, GlobalAttributes, IntoAny, Transition};
 use leptos::prelude::{signal, ElementChild, Get};
 use leptos::prelude::{OnAttribute, RenderHtml};
 use leptos::{island, view, IntoView};
@@ -66,8 +66,8 @@ pub fn Connection() -> impl IntoView {
 
 
 			<div class="login_box">
-				<label for="login"><Translate key="pageRoot_form_login"/></label><input type="text" name="login" bind:value=login/>
-				<label for="pwd"><Translate key="pageRoot_form_pwd"/></label><input type="password" name="pwd" bind:value=pwd/>
+				<label for="connection-login"><Translate key="pageRoot_form_login"/></label><input id="connection-login" type="text" name="login" autocomplete="username" bind:value=login/>
+				<label for="connection-pwd"><Translate key="pageRoot_form_pwd"/></label><input id="connection-pwd" type="password" name="pwd" autocomplete="current-password" bind:value=pwd/>
 				<Transition fallback=move || view! { <span/> }.into_any()>
 					{move || {
 						submitTranslate.get().map(|translated|{
@@ -90,5 +90,28 @@ pub fn Connection() -> impl IntoView {
 		<footer>
 			<Translate key="pageRoot_foot"/>
 		</footer>
+	}
+}
+
+#[cfg(test)]
+mod authenticationForm_contractTests
+{
+	const CONNECTION_SOURCE: &str = include_str!("connection.rs");
+	const INSCRIPTION_SOURCE: &str = include_str!("inscription.rs");
+
+	fn assertFieldContract(source: &str, fieldId: &str, autocomplete: &str)
+	{
+		assert!(source.contains(&format!("for=\"{}\"",fieldId)));
+		assert!(source.contains(&format!("id=\"{}\"",fieldId)));
+		assert!(source.contains(&format!("autocomplete=\"{}\"",autocomplete)));
+	}
+
+	#[test]
+	fn authenticationFields_haveLabelsAndAutocompleteHints()
+	{
+		assertFieldContract(CONNECTION_SOURCE,"connection-login","username");
+		assertFieldContract(CONNECTION_SOURCE,"connection-pwd","current-password");
+		assertFieldContract(INSCRIPTION_SOURCE,"inscription-login","username");
+		assertFieldContract(INSCRIPTION_SOURCE,"inscription-pwd","new-password");
 	}
 }

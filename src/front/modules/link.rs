@@ -6,9 +6,10 @@ use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::utils::dialog::{DialogData, DialogManager};
 use crate::front::utils::SafeExternalUrl;
-use crate::front::utils::toaster_helpers::{toastingErr, toastingParams};
+use crate::front::utils::toaster_helpers::toastingErr;
+use crate::front::utils::translate::Translate;
 use crate::HWebTrace;
-use leptoaster::{expect_toaster, ToastLevel, ToasterContext};
+use leptoaster::{expect_toaster, ToasterContext};
 use leptos::ev::MouseEvent;
 use leptos::html::{Div, I};
 use leptos::prelude::{
@@ -23,9 +24,7 @@ use leptos_use::{
 	UseMouseInElementReturn,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::ops::DerefMut;
-use std::sync::Arc;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Link
@@ -117,13 +116,13 @@ impl LinksHolder
 		let mut config = UseDraggableOptions::default();
 		let draggedOriginPositionInner = draggedOriginPosition.clone();
 		let somethingIsDraggingInner = somethingIsDragging.clone();
-		config = config.on_start(move |d| {
+		config = config.on_start(move |_| {
 			draggedOriginPositionInner.set(Some(pos));
 			somethingIsDraggingInner.set(true);
 			true
 		});
 		let somethingIsDraggingInner = somethingIsDragging.clone();
-		config = config.on_end(move |d| {
+		config = config.on_end(move |_| {
 			somethingIsDraggingInner.set(false);
 		});
 
@@ -171,7 +170,7 @@ impl LinksHolder
 
 			let dialogContent =
 				DialogData::new()
-					.setTitle("MODULE_RSS_DEL")
+					.setTitle("MODULE_LINK_DEL")
 					.setOnValidate(move |_| {
 						if (!moduleActions.lifecycle_isActive())
 						{
@@ -210,7 +209,7 @@ impl LinksHolder
 			let moduleActions = moduleActions.clone();
 
 			let dialogContent = DialogData::new()
-				.setTitle("MODULE_RSS_ADD")
+				.setTitle("MODULE_LINK_ADD")
 				.setBody(move || {
 					let innerLabel = RwSignal::new("".to_string());
 					let innerUrl = RwSignal::new("".to_string());
@@ -225,12 +224,12 @@ impl LinksHolder
 					view! {
 						<div>
 							<label>
-								<span>Label</span>
-								<input type="text" placeholder="Label" bind:value=innerLabel/>
+								<span><Translate key="MODULE_LINK_LABEL"/></span>
+								<input type="text" bind:value=innerLabel/>
 							</label>
 							<label>
-								<span>Url</span>
-								<input type="text" placeholder="Url" bind:value=innerUrl/>
+								<span><Translate key="MODULE_LINK_URL"/></span>
+								<input type="text" bind:value=innerUrl/>
 							</label>
 						</div>
 					}
@@ -247,33 +246,15 @@ impl LinksHolder
 
 					if (url.is_empty())
 					{
-						let mut params = HashMap::new();
-						params.insert("input".to_string(), "url".to_string());
-
 						moduleActions.task_spawn(async move {
-							toastingParams(
-								toaster.clone(),
-								AllFrontUIEnum::MUST_NOT_EMPTY,
-								ToastLevel::Error,
-								Arc::new(params),
-							)
-							.await;
+							toastingErr(&toaster, "MODULE_LINK_URL_MUST_NOT_EMPTY").await;
 						});
 						return false;
 					};
 					if (label.is_empty())
 					{
-						let mut params = HashMap::new();
-						params.insert("input".to_string(), "label".to_string());
-
 						moduleActions.task_spawn(async move {
-							toastingParams(
-								toaster.clone(),
-								AllFrontUIEnum::MUST_NOT_EMPTY,
-								ToastLevel::Error,
-								Arc::new(params),
-							)
-							.await;
+							toastingErr(&toaster, "MODULE_LINK_LABEL_MUST_NOT_EMPTY").await;
 						});
 						return false;
 					};
@@ -299,7 +280,7 @@ impl LinksHolder
 						.iter()
 						.enumerate()
 						.filter(|(_, link)| link.label == label)
-						.map(|(pos, link)| pos)
+						.map(|(pos, _)| pos)
 						.next()
 					{
 						links.remove(pos);
@@ -371,9 +352,9 @@ impl Backable for LinksHolder
 
 	fn refresh(
 		&self,
-		moduleActions: ModuleActionFn,
-		moduleId: ModuleID,
-		toaster: ToasterContext,
+		_moduleActions: ModuleActionFn,
+		_moduleId: ModuleID,
+		_toaster: ToasterContext,
 	) -> Option<BoxFuture>
 	{
 		return None;
@@ -414,7 +395,7 @@ impl Backable for LinksHolder
 		return other.timestamp > self._update.get_untracked().get();
 	}
 
-	fn newFromModuleContent(from: &ModuleContent) -> Option<Self>
+	fn newFromModuleContent(_from: &ModuleContent) -> Option<Self>
 	{
 		Some(Self::new())
 	}
@@ -529,7 +510,7 @@ fn LinksDraw(
 					})
 				}
 			}
-			{move || editMode.get().then(|| view!{<div class="button add" on:click=addLinkFn.clone()><i class="iconoir-plus-circle"></i>add</div>})}
+			{move || editMode.get().then(|| view!{<div class="button add" on:click=addLinkFn.clone()><i class="iconoir-plus-circle"></i><Translate key="MODULE_LINK_ADD_ACTION"/></div>})}
 			</div>
 		}.into_any()
 }

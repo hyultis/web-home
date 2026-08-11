@@ -13,6 +13,7 @@ use crate::front::utils::all_front_enum::AllFrontLoginEnum;
 use crate::global_security::{generate_salt_raw, hash};
 
 const COOKIE_MAX_AGE: i64 = 24 * 3600 * 1000;
+#[cfg(any(not(feature="ssr"),test))]
 const CLIENT_CRYPTO_STORAGE_KEY: &str = "webhome-crypto";
 const LEGACY_CRYPTO_COOKIE_NAME: &str = "webhome-crypto";
 const LEGACY_CRYPTO_COOKIE_PATH: &str = "/home";
@@ -41,9 +42,13 @@ pub(crate) enum ClientCryptoError
 	DECRYPTION,
 	INVALID_UTF8,
 	SERIALIZATION,
+	#[cfg(not(feature="ssr"))]
 	STORAGE_UNAVAILABLE,
+	#[cfg(not(feature="ssr"))]
 	STORAGE_READ,
+	#[cfg(not(feature="ssr"))]
 	STORAGE_WRITE,
+	#[cfg(not(feature="ssr"))]
 	LEGACY_COOKIE_WRITE,
 }
 
@@ -571,6 +576,7 @@ impl ClientState
 		return scopedClearResult.and(rootClearResult);
 	}
 
+	#[cfg(any(not(feature="ssr"),test))]
 	fn legacyCookie_expiration_get(name: &str, path: &str) -> String
 	{
 		return format!("{}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path={}; SameSite=Strict; Secure", name, path);

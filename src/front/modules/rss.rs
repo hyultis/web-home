@@ -160,7 +160,7 @@ impl Backable for Rss
 		Rss::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, _: ModuleID) -> ViewFn
+	fn draw(&self, editMode: RwSignal<bool>, _moduleActions: ModuleActionFn, _: ModuleID) -> ViewFn
 	{
 		let configInner = self.config.clone();
 		let contentInner = self.rssContent.clone();
@@ -176,7 +176,7 @@ impl Backable for Rss
 		return RefreshTime::MINUTES(10);
 	}
 
-	fn refresh(&self,moduleActions: ModuleActionFn, moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
+	fn refresh(&self,moduleActions: ModuleActionFn, _moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
 		let config = self.config.clone();
 		let rssContent = self.rssContent.clone();
 		let tmp = Self::sync(toaster,rssContent,config,moduleActions);
@@ -244,11 +244,11 @@ fn RssDraw(config: ArcRwSignal<RssConfig>,
 				let mut titleF = FieldHelper::new(&config,&update,"MODULE_TITLE_CONF",
 					|d| d.get().title,
 					|ev,inner| inner.title = ev.target().value());
-				titleF.setFullSize(true);
+				titleF.setFullSize();
 				let mut linkF = FieldHelper::new(&config,&update,"MODULE_RSS_LINK",
 					|d| d.get().link,
 					|ev,inner| inner.link = ev.target().value());
-				linkF.setFullSize(true);
+				linkF.setFullSize();
 				let maxLineF = FieldHelper::new(&config,&update,"MODULE_RSS_MAXLINE",
 					|d| d.get().maxline.to_string(),
 					|ev,inner| inner.maxline = ev.target().value().parse::<u8>().unwrap_or(10));

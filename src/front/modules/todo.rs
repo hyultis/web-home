@@ -90,10 +90,7 @@ impl Backable for Todo
 		RefreshTime::MINUTES(1)
 	}
 
-	fn refresh(&self,moduleActions: ModuleActionFn, moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
-
-		let cacheSended = self._sended.clone();
-		let cacheUpdate = self._update.clone();
+	fn refresh(&self,moduleActions: ModuleActionFn, moduleId: ModuleID, _toaster: ToasterContext) -> Option<BoxFuture> {
 		return Some(Box::pin(async move {
 			(moduleActions.clone().getFn)((moduleId.clone()));
 		}));
@@ -148,9 +145,9 @@ impl Backable for Todo
 fn TodoDraw(contentTocheck: ArcRwSignal<String>, cache: ArcRwSignal<Cache>, moduleActions: ModuleActionFn, moduleId: ModuleID) -> impl IntoView
 {
 	let contentWatcher = contentTocheck.clone();
-	let newWatcher = watch_debounced(
+	let _newWatcher = watch_debounced(
 		move || contentWatcher.get(),
-		move |a, b, _| {
+		move |_, _, _| {
 			(moduleActions.clone().updateFn)((moduleId.clone()));
 		},
 		5000.0,

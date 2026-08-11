@@ -10,7 +10,6 @@ pub mod components;
 #[cfg(feature = "ssr")]
 use Htrace::HTrace;
 
-use leptos::prelude::ServerFnError;
 use leptos::server;
 use components::LoginStatusErrors;
 
@@ -65,10 +64,4 @@ pub async fn API_user_logout() -> Result<(), LoginStatusErrors>
 			Err(LoginStatusErrors::SERVER_ERROR)
 		},
 	};
-}
-
-#[server]
-pub async fn API_user_getLayout() -> Result<Option<String>, ServerFnError>
-{
-	return Ok(None);
 }

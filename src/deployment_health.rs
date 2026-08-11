@@ -27,7 +27,7 @@ mod tests
 	use axum::Router;
 	use tower::ServiceExt;
 
-	use crate::api::login::session::SessionCookie;
+	use web_home::server::sessionLayer_get;
 	use super::DeploymentHealth;
 
 	#[test]
@@ -41,7 +41,7 @@ mod tests
 		runtime.block_on(async {
 			let router = Router::new()
 				.route("/application", get(|| async { StatusCode::NO_CONTENT }))
-				.layer(SessionCookie::layer_get())
+				.layer(sessionLayer_get())
 				.route(DeploymentHealth::PATH, get(DeploymentHealth::response_get));
 			let response = router.oneshot(
 				Request::builder().uri(DeploymentHealth::PATH).body(Body::empty()).unwrap()

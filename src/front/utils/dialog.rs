@@ -7,12 +7,12 @@ use leptos::{component, view, IntoView};
 use leptos_use::{use_css_var, use_timeout_fn, UseTimeoutFnReturn};
 use std::sync::Arc;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
-use crate::front::utils::translate::Translate;
+use crate::front::utils::translate::TranslateText;
 
 #[component]
 pub fn DialogHost(manager: DialogManager) -> impl IntoView
 {
-	let (color, set_color) = use_css_var("--animationduration");
+	let (color, _) = use_css_var("--animationduration");
 	let duration = Signal::derive(move || {
 		let value = color.get();
 		parse_css_time_to_secs(&value)
@@ -21,7 +21,7 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 	let fnManager = manager.clone();
 	let UseTimeoutFnReturn {
 		start,
-		stop,
+		stop: _,
 		is_pending,
 		..
 	} = use_timeout_fn(
@@ -66,7 +66,7 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 									view!({data.title.chars().next().map(|c| &data.title[c.len_utf8()..]).unwrap_or("MODULE_MAIL_NO_SUBJECT")}).into_any()
 								}
 								else {
-									view!(<Translate key={data.title}/>).into_any()
+									view!(<TranslateText key={data.title}/>).into_any()
 								}
 					}</h2>
 							<p class="dialog-content">{
@@ -77,14 +77,14 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 								{
 									if let Some(button) = data.button_validate_title.clone()
 									{
-										view!{<button class="validate" on:click=validateFn.clone()><Translate key={button}/></button>}.into_any()
+										view!{<button class="validate" on:click=validateFn.clone()><TranslateText key={button}/></button>}.into_any()
 									}
 									else {view!{}.into_any()}
 								}
 								{
 									if let Some(button) = data.button_close_title.clone()
 									{
-										view!{<button class="close" on:click=closeFn.clone()><Translate key={button}/></button>}.into_any()
+										view!{<button class="close" on:click=closeFn.clone()><TranslateText key={button}/></button>}.into_any()
 									}
 									else {view!{}.into_any()}
 								}

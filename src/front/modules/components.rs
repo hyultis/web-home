@@ -151,9 +151,14 @@ pub enum DISTANT_TIME_RESULT
 pub fn distant_time(timestamp: i64) -> DISTANT_TIME_RESULT
 {
 	let now = UtcDateTime::now().unix_timestamp();
+	return distant_time_from(timestamp,now);
+}
+
+fn distant_time_from(timestamp: i64, now: i64) -> DISTANT_TIME_RESULT
+{
 	let distance = now-timestamp;
 
-	let ifpast = distance<0;
+	let ifpast = distance>=0;
 	let mut distance = distance.abs();
 	let mut key = ORDERED_TIME.get(0).unwrap_or(&(0,"YEAR")).1.to_string();
 
@@ -168,6 +173,40 @@ pub fn distant_time(timestamp: i64) -> DISTANT_TIME_RESULT
 		true => DISTANT_TIME_RESULT::PAST(distance as u64,format!("DISTANT_TIME_RESULT_{}",key)),
 		false => DISTANT_TIME_RESULT::FUTUR(distance as u64,format!("DISTANT_TIME_RESULT_{}",key)),
 	};
+}
+
+#[cfg(test)]
+mod distantTime_tests
+{
+	use super::{distant_time_from, DISTANT_TIME_RESULT};
+
+	#[test]
+	fn timestampBeforeNow_isPast()
+	{
+		match distant_time_from(999_880,1_000_000)
+		{
+			DISTANT_TIME_RESULT::PAST(value,key) =>
+			{
+				assert_eq!(value,2);
+				assert_eq!(key,"DISTANT_TIME_RESULT_MIN");
+			},
+			DISTANT_TIME_RESULT::FUTUR(_,_) => panic!("a timestamp before now must be in the past"),
+		}
+	}
+
+	#[test]
+	fn timestampAfterNow_isFuture()
+	{
+		match distant_time_from(1_000_120,1_000_000)
+		{
+			DISTANT_TIME_RESULT::FUTUR(value,key) =>
+			{
+				assert_eq!(value,2);
+				assert_eq!(key,"DISTANT_TIME_RESULT_MIN");
+			},
+			DISTANT_TIME_RESULT::PAST(_,_) => panic!("a timestamp after now must be in the future"),
+		}
+	}
 }
 
 pub fn distant_time_simpler(timestamp: i64) -> AnyView
@@ -221,7 +260,7 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
 		self.inputType = inputType;
 	}
 
-	pub fn setFullSize(&mut self,isFullSize: bool)
+	pub fn setFullSize(&mut self)
 	{
 		self.style = "display:block;width:100%".to_string();
 	}

@@ -15,7 +15,7 @@ pageRoot_form_submit_signup = Create my account
 
 #page 404
 page404_title = Page not found
-page404_content = Sorry, this page could not be found. You can go to { $children }.
+page404_content = Sorry, this page could not be found. You can go to
 menu_home = Back to home
 
 #login and sign
@@ -43,7 +43,6 @@ FRONTERROR_MODULE_NOTEXIST = The module does not exist
 #front utility
 FRONTUI_VALID = Validate
 FRONTUI_CLOSE = Close
-FRONTUI_MUST_NOT_EMPTY = { $input } must not be empty
 FRONTUI_INVALID_URL = Invalid URL: only HTTP and HTTPS are allowed
 FRONTUI_UPDATE = Save
 FRONTUI_REFRESH = Refresh
@@ -52,6 +51,7 @@ FRONTUI_NOTITLE = Untitled
 FRONTUI_HOME_CHANGE_OK = Save changes?
 FRONTUI_HOME_CHANGE_CANCEL = Cancel changes?
 FRONTUI_HOME_CHANGE_NEW = Type of the new module?
+FRONTUI_MODULE_TYPE = Module type:
 
 #time
 DISTANT_TIME_RESULT_SEC = s
@@ -65,8 +65,19 @@ DISTANT_TIME_RESULT_YEAR = Y
 MODULE_TITLE_CONF = Title:
 
 #module link
-MODULE_RSS_DEL = Delete a link?
-MODULE_RSS_ADD = Add a link
+MODULE_LINK_DEL = Delete a link?
+MODULE_LINK_ADD = Add a link
+MODULE_LINK_LABEL = Label:
+MODULE_LINK_URL = URL:
+MODULE_LINK_ADD_ACTION = Add
+MODULE_LINK_URL_MUST_NOT_EMPTY = URL must not be empty
+MODULE_LINK_LABEL_MUST_NOT_EMPTY = Label must not be empty
+
+#module types
+MODULE_TYPE_RSS = RSS
+MODULE_TYPE_TODO = Notes
+MODULE_TYPE_MAIL = Email
+MODULE_TYPE_WEATHER = Weather
 
 #module rss
 MODULE_RSS_LINK = RSS link:

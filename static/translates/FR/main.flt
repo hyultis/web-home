@@ -15,7 +15,7 @@ pageRoot_form_submit_signup = Crée mon compte
 
 #page 404
 page404_title = Page introuvable
-page404_content = Désoler, cette page est introuvable. vous pouvez allez sur { $children }.
+page404_content = Désoler, cette page est introuvable. vous pouvez allez sur
 menu_home = Retour a l'accueil
 
 #login and sign
@@ -43,7 +43,6 @@ FRONTERROR_MODULE_NOTEXIST = Le module n'existe pas
 #front utility
 FRONTUI_VALID = Valider
 FRONTUI_CLOSE = Fermer
-FRONTUI_MUST_NOT_EMPTY = { $input } ne doit pas être vide
 FRONTUI_INVALID_URL = URL invalide : seuls HTTP et HTTPS sont autorisés
 FRONTUI_UPDATE = Sauvegarder
 FRONTUI_REFRESH = Recharger
@@ -52,6 +51,7 @@ FRONTUI_NOTITLE = Sans titre
 FRONTUI_HOME_CHANGE_OK = Enregistrer les changements ?
 FRONTUI_HOME_CHANGE_CANCEL = Annuler les changements ?
 FRONTUI_HOME_CHANGE_NEW = Type du nouveau module ?
+FRONTUI_MODULE_TYPE = Type de module :
 
 #time
 DISTANT_TIME_RESULT_SEC = s
@@ -65,8 +65,19 @@ DISTANT_TIME_RESULT_YEAR = Y
 MODULE_TITLE_CONF = Titre:
 
 #module link
-MODULE_RSS_DEL = Supprimer un lien ?
-MODULE_RSS_ADD = Ajouter un lien
+MODULE_LINK_DEL = Supprimer un lien ?
+MODULE_LINK_ADD = Ajouter un lien
+MODULE_LINK_LABEL = Libellé :
+MODULE_LINK_URL = URL :
+MODULE_LINK_ADD_ACTION = Ajouter
+MODULE_LINK_URL_MUST_NOT_EMPTY = L'URL ne doit pas être vide
+MODULE_LINK_LABEL_MUST_NOT_EMPTY = Le libellé ne doit pas être vide
+
+#module types
+MODULE_TYPE_RSS = RSS
+MODULE_TYPE_TODO = Notes
+MODULE_TYPE_MAIL = E-mails
+MODULE_TYPE_WEATHER = Météo
 
 #module rss
 MODULE_RSS_LINK = Lien RSS:

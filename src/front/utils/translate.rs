@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use leptos::{component, view, IntoView};
-use leptos::children::ChildrenFn;
 use leptos::html::InnerHtmlAttribute;
 use leptos::prelude::{Get, IntoAny};
 use leptos::suspense::Transition;
@@ -21,60 +20,41 @@ pub fn TranslateCurrentLang() -> impl IntoView {
 #[component]
 pub fn Translate(#[prop(into)] key: String,
                  #[prop(optional)]
-                 params: HashMap<String,String>,
-                 #[prop(optional)]
-                 children: Option<ChildrenFn>) -> impl IntoView {
+                 params: HashMap<String,String>) -> impl IntoView {
 
-	if let Some(children) = children {
-		return view!{
-			<TranslateFn key=move || key.clone() params=params children=children/>
-		}.into_any()
-	}
-
-	return view!{
+	view!{
 		<TranslateFn key=move || key.clone() params=params/>
-	}.into_any();
+	}
+}
+
+#[component]
+pub fn TranslateText(#[prop(into)] key: String,
+                     #[prop(optional)]
+                     params: HashMap<String,String>) -> impl IntoView {
+	let resourceKey = key.clone();
+	let translate = FluentManager::getAsResource(move || resourceKey.clone(),params);
+
+	view! {
+		<Transition fallback=move || format!("{}_fallback",key)>
+			{move || translate.get()}
+		</Transition>
+	}
 }
 
 #[component]
 pub fn TranslateFn(
 	key: impl Fn() -> String + Send + Sync + Clone + 'static,
     #[prop(optional)]
-	mut params: HashMap<String,String>,
-	#[prop(optional)]
-	children: Option<ChildrenFn>) -> impl IntoView {
+	params: HashMap<String,String>) -> impl IntoView {
 
-	let splitted= "{--$chidren--}";
-
-	if(children.is_some())
-	{
-		params.insert("children".to_string(),splitted.to_string());
-	}
-
-	let translate = FluentManager::getAsResource(key.clone(),params);
+	let translate = FluentManager::getAsHtmlResource(key.clone(),params);
 
 	let altkey = key.clone();
 	view! {
 		<Transition fallback=move || view! { <span>{format!("{}_fallback",altkey.clone()())}</span> }.into_any()>
 			{move || translate.get().map(|translated|{
-					if let Some((prefix,suffix)) = translated.split_once(splitted)
-					{
-						let prefix = prefix.to_string();
-						let suffix = suffix.to_string();
-						if let Some(children) = &children
-						{
-							view! { <span inner_html={prefix}/>{children()}<span inner_html={suffix}/> }.into_any()
-						}
-						else
-						{
-							view! { <span inner_html={prefix}/><span inner_html={suffix}/> }.into_any()
-						}
-					}
-					else
-					{
-						// first "" is important to fix the hydration bug from fallback
-						view! { <span inner_html={translated}/> }.into_any()
-					}
+					// The span is important to keep the hydrated view aligned with the fallback.
+					view! { <span inner_html={translated}/> }.into_any()
 				})
 			}
 		</Transition>

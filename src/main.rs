@@ -1,29 +1,28 @@
 #![allow(unused_parens)]
 #![allow(non_snake_case)]
-#![allow(dead_code)]
-#![allow(unused_variables)]
 #![allow(non_camel_case_types)]
 
-use std::sync::atomic::AtomicBool;
 use axum::middleware;
 use Hconfig::IO::json::WrapperJson;
 use Hconfig::tinyjson::JsonValue;
 use Htrace::HTraceError;
 use web_home::entry::AppProps;
-use crate::api::{ALLOW_REGISTRATION, IS_TRACE_FRONT_LOG};
-use crate::api::proxys::proxy_cache::CACHE_DIR;
+use web_home::global_security::generate_salt;
+use web_home::server::{
+	runtimeConfig_set,
+	sessionErrorActivity_renew,
+	sessionLayer_get,
+	traceFrontLog_enabled,
+	PROXY_CACHE_DIR,
+};
 #[cfg(feature = "ssr")]
 use crate::browser_content_security::BrowserContentSecurity;
 #[cfg(feature = "ssr")]
 use crate::deployment_health::DeploymentHealth;
-use crate::global_security::generate_salt;
-
-mod api;
 #[cfg(feature = "ssr")]
 mod browser_content_security;
 #[cfg(feature = "ssr")]
 mod deployment_health;
-pub mod global_security;
 
 #[cfg(feature = "ssr")]
 #[tokio::main]
@@ -59,8 +58,24 @@ async fn main() {
 	let _ = fs::create_dir("./config");
 	let _ = fs::create_dir("./config/users");
 	let _ = fs::create_dir("./dynamic");
-	let _ = fs::create_dir(CACHE_DIR);
+	let _ = fs::create_dir(PROXY_CACHE_DIR);
 	let _ = fs::remove_dir_all("./dynamic/traces");
+
+	let mut global_context = Context::default();
+	global_context.module_add("cmd",CommandLine::new(CommandLineConfig::default()));
+	global_context.module_add("file", File::new(FileConfig{
+		path: "./dynamic/traces".to_string(),
+		bySrc: true,
+		byThreadId: false,
+		..Default::default()
+
+	}));
+	global_context.level_setMin(Some(Level::DEBUG));
+	if(conf.leptos_options.env==Env::PROD)
+	{
+		global_context.level_setMin(Some(Level::NOTICE));
+	}
+	HTracer::globalContext_set(global_context);
 
 	HConfigManager::singleton().confPath_set("./config");
 	HConfigManager::singleton()
@@ -79,7 +94,7 @@ async fn main() {
 		helper::preFillConfig(config,"imap_allowed_ports",vec![JsonValue::Number(993.0)]);
 		if let Some(JsonValue::Boolean(raw)) = config.value_get("trace_front_log")
 		{
-			trace_front_log = crate::api::Htrace::TraceRuntimePolicy::enabled_get(raw, production);
+			trace_front_log = traceFrontLog_enabled(raw,production);
 		}
 		if let Some(JsonValue::Boolean(raw)) = config.value_get("allow_registration")
 		{
@@ -88,47 +103,27 @@ async fn main() {
 		HTraceError!(config.file_save());
 	}
 
-	let mut global_context = Context::default();
-	global_context.module_add("cmd",CommandLine::new(CommandLineConfig::default()));
-	global_context.module_add("file", File::new(FileConfig{
-		path: "./dynamic/traces".to_string(),
-		bySrc: true,
-		byThreadId: false,
-		..Default::default()
-
-	}));
-	global_context.level_setMin(Some(Level::DEBUG));
-	if(conf.leptos_options.env==Env::PROD)
-	{
-		global_context.level_setMin(Some(Level::NOTICE));
-	}
-	HTracer::globalContext_set(global_context);
-
-
 	HTrace!((Level::DEBUG) "leptos option env : {:?}",conf.leptos_options.env);
 	HTrace!((Level::DEBUG) "is IS_TRACE_FRONT_LOG ? : {:?}",trace_front_log);
 	HTrace!((Level::DEBUG) "is ALLOW_REGISTRATION ? : {:?}",allow_registration);
-	let _ = IS_TRACE_FRONT_LOG.set(AtomicBool::new(trace_front_log));
-	let _ = ALLOW_REGISTRATION.set(AtomicBool::new(allow_registration));
+	runtimeConfig_set(trace_front_log,allow_registration);
 
 	//conf.leptos_options.site_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 3000);
     let addr = conf.leptos_options.site_addr;
     let leptos_options = conf.leptos_options.clone();
 
 	//session management
-	let session_layer = crate::api::login::session::SessionCookie::layer_get();
+	let session_layer = sessionLayer_get();
 
-	let leptos_options_inner_app = leptos_options.clone();
-    let app = Router::new()
-        .leptos_routes(&leptos_options, generate_route_list(move || {
-	        let leptos_options = leptos_options_inner_app.clone();
-	        App(AppProps { traceFrontLog: trace_front_log, allowRegistration: allow_registration })
+	let app = Router::new()
+		.leptos_routes(&leptos_options, generate_route_list(move || {
+			App(AppProps { traceFrontLog: trace_front_log, allowRegistration: allow_registration })
         }), {
             let leptos_options = leptos_options.clone();
             move || shell((leptos_options.clone(),trace_front_log,allow_registration))
         })
 	    .fallback(leptos_axum::file_and_error_handler(move |lo|shell((lo,trace_front_log,allow_registration))))
-	    .layer(middleware::from_fn(crate::api::login::session::SessionCookie::serverErrorActivity_renew))
+	    .layer(middleware::from_fn(sessionErrorActivity_renew))
 	    .layer(session_layer)
 	    .route(DeploymentHealth::PATH, get(DeploymentHealth::response_get))
 	    .route(
@@ -194,4 +189,30 @@ pub fn main() {
 	// no client-side main function
 	// unless we want this to work with e.g., Trunk for pure client-side testing
 	// see lib.rs for hydration function instead
+}
+
+#[cfg(test)]
+mod crateOwnership_contractTests
+{
+	const MAIN_SOURCE: &str = include_str!("main.rs");
+
+	#[test]
+	fn binaryImportsLibraryDomainsWithoutRedeclaringThem()
+	{
+		assert!(!MAIN_SOURCE.lines().any(|line| line.trim() == "mod api;"));
+		assert!(!MAIN_SOURCE.lines().any(|line| line.trim() == "pub mod global_security;"));
+		assert!(MAIN_SOURCE.contains("use web_home::global_security::generate_salt;"));
+		assert!(MAIN_SOURCE.contains("use web_home::server::{"));
+	}
+
+	#[test]
+	fn startupInitializesHtraceBeforeFirstTrace()
+	{
+		let initializationPosition = MAIN_SOURCE.find("HTracer::globalContext_set(global_context);").unwrap();
+		let firstErrorTracePosition = MAIN_SOURCE.find("HTraceError!(").unwrap();
+		let firstTracePosition = MAIN_SOURCE.find("HTrace!((").unwrap();
+
+		assert!(initializationPosition < firstErrorTracePosition);
+		assert!(initializationPosition < firstTracePosition);
+	}
 }

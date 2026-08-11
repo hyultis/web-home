@@ -190,12 +190,23 @@ mod inner
 	#[derive(Deserialize, Serialize)]
 	struct RssCacheRecord
 	{
+		sourceKey: String,
 		content: String,
 		metadata: RssCacheMetadata,
 	}
 
 	impl RssCacheRecord
 	{
+		fn new(sourceKey: String, content: String, metadata: RssCacheMetadata) -> Self
+		{
+			return Self { sourceKey, content, metadata };
+		}
+
+		fn source_is(&self, expectedKey: &str) -> bool
+		{
+			return self.sourceKey == expectedKey;
+		}
+
 		fn clientResult_get(&self, clientVersion: Option<u64>) -> RssProxyResult
 		{
 			if (clientVersion == Some(self.metadata.contentVersion))
@@ -281,15 +292,16 @@ mod inner
 					let previousVersion = cachedRecord.as_ref()
 						.map(|record| record.metadata.contentVersion)
 						.unwrap_or(0);
-					RssCacheRecord {
+					RssCacheRecord::new(
+						self.cacheKey.clone(),
 						content,
-						metadata: RssCacheMetadata {
+						RssCacheMetadata {
 							contentVersion: now.max(previousVersion.saturating_add(1)),
 							etag,
 							lastModified,
 							validatedAt: now,
 						},
-					}
+					)
 				},
 			};
 			self.cacheRecord_save(&record);
@@ -310,16 +322,23 @@ mod inner
 				},
 				Err(error) => return Err(error.into()),
 			};
-			return match serde_json::from_slice(&raw)
+			let record: RssCacheRecord = match serde_json::from_slice(&raw)
 			{
-				Ok(record) => Ok(Some(record)),
+				Ok(record) => record,
 				Err(error) =>
 				{
 					HTrace!("[RSS proxy] Ignoring an incompatible cache entry: {}", error);
 					self.cache.remove(&self.cacheKey)?;
-					Ok(None)
+					return Ok(None);
 				},
 			};
+			if (!record.source_is(&self.cacheKey))
+			{
+				HTrace!("[RSS proxy] Removing a cache entry with mismatched provenance");
+				self.cache.remove(&self.cacheKey)?;
+				return Ok(None);
+			}
+			return Ok(Some(record));
 		}
 
 		fn cacheRecord_save(&self, record: &RssCacheRecord)
@@ -367,7 +386,7 @@ mod inner
 				}
 
 				let response = request.send().await?;
-				if (!response.status().is_redirection())
+				if (!Self::response_isRedirect(response.status()))
 				{
 					break response;
 				}
@@ -404,6 +423,11 @@ mod inner
 			}
 			let content = String::from_utf8(body.content_get()).map_err(|_| proxys_return::SERVER_ERROR)?;
 			return Ok(RssFetchResult::Updated { content, etag, lastModified });
+		}
+
+		fn response_isRedirect(status: reqwest::StatusCode) -> bool
+		{
+			return status.is_redirection() && status != reqwest::StatusCode::NOT_MODIFIED;
 		}
 
 		fn validator_get(value: Option<&reqwest::header::HeaderValue>) -> Option<String>
@@ -595,10 +619,11 @@ mod inner
 		#[test]
 		fn cacheRecord_notModifiedDependsOnContentVersion()
 		{
-			let record = RssCacheRecord {
-				content: "rss".to_string(),
-				metadata: RssCacheMetadata { contentVersion: 42, ..Default::default() },
-			};
+			let record = RssCacheRecord::new(
+				"feed-key".to_string(),
+				"rss".to_string(),
+				RssCacheMetadata { contentVersion: 42, ..Default::default() },
+			);
 			assert!(matches!(record.clientResult_get(Some(42)), RssProxyResult::NotModified));
 			assert!(matches!(
 				record.clientResult_get(Some(41)),
@@ -614,35 +639,59 @@ mod inner
 		}
 
 		#[test]
+		fn responseStatus_notModifiedIsNotRedirect()
+		{
+			assert!(!RssProxy::response_isRedirect(StatusCode::NOT_MODIFIED));
+			assert!(RssProxy::response_isRedirect(StatusCode::TEMPORARY_REDIRECT));
+		}
+
+		#[test]
 		fn cacheRecord_serializationPreservesValidators()
 		{
-			let record = RssCacheRecord {
-				content: "rss".to_string(),
-				metadata: RssCacheMetadata {
+			let record = RssCacheRecord::new(
+				"feed-key".to_string(),
+				"rss".to_string(),
+				RssCacheMetadata {
 					contentVersion: 42,
 					etag: Some("\"version\"".to_string()),
 					lastModified: Some("Sat, 08 Aug 2026 12:00:00 GMT".to_string()),
 					validatedAt: 84,
 				},
-			};
+			);
 			let raw = serde_json::to_vec(&record).unwrap();
 			let restored: RssCacheRecord = serde_json::from_slice(&raw).unwrap();
+			assert!(restored.source_is("feed-key"));
 			assert_eq!(restored.metadata.etag.as_deref(), Some("\"version\""));
 			assert_eq!(restored.metadata.lastModified.as_deref(), Some("Sat, 08 Aug 2026 12:00:00 GMT"));
 		}
 
 		#[test]
+		fn cacheRecord_requiresMatchingProvenance()
+		{
+			let legacyRaw = br#"{"content":"rss","metadata":{"contentVersion":42,"validatedAt":84}}"#;
+			assert!(serde_json::from_slice::<RssCacheRecord>(legacyRaw).is_err());
+
+			let record = RssCacheRecord::new(
+				"other-feed-key".to_string(),
+				"rss".to_string(),
+				RssCacheMetadata::default(),
+			);
+			assert!(!record.source_is("feed-key"));
+		}
+
+		#[test]
 		fn cacheRecord_revalidationKeepsContentVersionAndBody()
 		{
-			let record = RssCacheRecord {
-				content: "cached RSS body".to_string(),
-				metadata: RssCacheMetadata {
+			let record = RssCacheRecord::new(
+				"feed-key".to_string(),
+				"cached RSS body".to_string(),
+				RssCacheMetadata {
 					contentVersion: 42,
 					etag: Some("\"old\"".to_string()),
 					lastModified: None,
 					validatedAt: 1,
 				},
-			}.revalidated_get(84, Some("\"new\"".to_string()), None);
+			).revalidated_get(84, Some("\"new\"".to_string()), None);
 			assert_eq!(record.content, "cached RSS body");
 			assert_eq!(record.metadata.contentVersion, 42);
 			assert_eq!(record.metadata.validatedAt, 84);

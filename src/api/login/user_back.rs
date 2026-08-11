@@ -103,6 +103,13 @@ impl AuthenticatedUser
 		return user.ok_or(UserBackHelperError::LoginError(LoginStatusErrors::USER_DISCONNECTED));
 	}
 
+	pub(super) async fn session_isAuthenticated(session: &Session) -> Result<bool, UserBackHelperError>
+	{
+		let user = session.get::<Self>(Self::SESSION_KEY).await
+			.map_err(|err| UserBackHelperError::SessionError(err.to_string()))?;
+		return Ok(user.is_some());
+	}
+
 	async fn establish(session: &Session, identity: UserConfigIdentity) -> Result<(), UserBackHelperError>
 	{
 		session.cycle_id().await
@@ -530,7 +537,7 @@ mod tests
 	use axum::http::header::{ACCEPT, CONTENT_TYPE, COOKIE, SET_COOKIE};
 	use axum::http::{Request, Response, StatusCode};
 	use axum::routing::{get, post};
-	use axum::Router;
+	use axum::{middleware, Router};
 	use leptos::server_fn::codec::{Json, PostUrl};
 	use leptos::server_fn::{ContentType, ServerFn};
 	use serde::de::DeserializeOwned;
@@ -539,6 +546,7 @@ mod tests
 
 	use crate::api::modules::components::{ModuleContent, ModuleID};
 	use crate::api::modules::{ApiModuleRetrieve, ApiModuleUpdate, ModuleApiError, ModuleReturnRetrieve};
+	use crate::api::login::session::SessionCookie;
 	use crate::api::Htrace::ApiHtraceLog;
 	use crate::api::proxys::imap::ApiProxysImapListbox;
 	use crate::api::proxys::imap_components::imap_connector;
@@ -630,7 +638,8 @@ mod tests
 				.route(ApiHtraceLog::PATH, post(leptos_axum::handle_server_fns))
 				.route(ApiProxysWget::PATH, post(leptos_axum::handle_server_fns))
 				.route(ApiProxysImapListbox::PATH, post(leptos_axum::handle_server_fns))
-				.layer(tower_sessions::SessionManagerLayer::new(MemoryStore::default()));
+				.layer(middleware::from_fn(SessionCookie::serverErrorActivity_renew))
+				.layer(SessionCookie::layer_get());
 		}
 
 		fn serverRequest_get(path: &str, body: String, cookie: Option<&str>) -> Request<Body>
@@ -904,6 +913,7 @@ mod tests
 
 			let anonymousRss = ModuleAuthorizationTest::proxy_wget(&router, None, "http://127.0.0.1/feed").await;
 			assert_eq!(anonymousRss.status(), StatusCode::INTERNAL_SERVER_ERROR);
+			assert!(anonymousRss.headers().get(SET_COOKIE).is_none());
 			assert_eq!(
 				ModuleAuthorizationTest::responseJson_get::<proxys_return>(anonymousRss).await,
 				proxys_return::AUTH_REQUIRED,
@@ -921,6 +931,10 @@ mod tests
 
 			let cookie = ModuleAuthorizationTest::cookie_get(&router, 13).await;
 			let authenticatedRss = ModuleAuthorizationTest::proxy_wget(&router, Some(&cookie), "http://127.0.0.1/feed").await;
+			assert_eq!(authenticatedRss.status(), StatusCode::INTERNAL_SERVER_ERROR);
+			let renewedCookie = authenticatedRss.headers().get(SET_COOKIE).unwrap().to_str().unwrap();
+			assert_eq!(renewedCookie.split(';').next().unwrap(), cookie);
+			assert!(renewedCookie.contains("Max-Age=86400"));
 			assert_eq!(
 				ModuleAuthorizationTest::responseJson_get::<proxys_return>(authenticatedRss).await,
 				proxys_return::DESTINATION_FORBIDDEN,

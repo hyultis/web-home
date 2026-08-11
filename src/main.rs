@@ -128,6 +128,7 @@ async fn main() {
             move || shell((leptos_options.clone(),trace_front_log,allow_registration))
         })
 	    .fallback(leptos_axum::file_and_error_handler(move |lo|shell((lo,trace_front_log,allow_registration))))
+	    .layer(middleware::from_fn(crate::api::login::session::SessionCookie::serverErrorActivity_renew))
 	    .layer(session_layer)
 	    .route(DeploymentHealth::PATH, get(DeploymentHealth::response_get))
 	    .route(

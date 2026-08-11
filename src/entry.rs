@@ -14,7 +14,7 @@ use crate::front::pages::connection::Connection;
 use crate::front::pages::inscription::Inscription;
 use crate::front::utils::dialog::{DialogHost, DialogManager};
 use crate::front::utils::all_front_enum::AllFrontErrorEnum;
-use crate::front::utils::toaster_helpers::toastingErr;
+use crate::front::utils::toaster_helpers::{toasterOwner_provide, toastingErr};
 use crate::front::utils::translate::Translate;
 use crate::front::utils::users_data::ClientState;
 
@@ -54,6 +54,7 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 	// Provides context that manages stylesheets, titles, meta tags, etc.
 	provide_meta_context();
 	provide_toaster();
+	toasterOwner_provide();
 
 	let _ = IS_TRACE_FRONT_LOG.set(AtomicBool::new(traceFrontLog));
 	let _ = ALLOW_REGISTRATION.set(AtomicBool::new(allowRegistration));

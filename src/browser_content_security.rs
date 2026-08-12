@@ -358,7 +358,11 @@ mod tests
 	{
 		// Route generation performs the same executor initialization as the production router.
 		let _ = leptos_axum::generate_route_list(|| "test");
-		let options = leptos::prelude::get_configuration(Some("Cargo.toml")).unwrap().leptos_options;
+		let mut options = leptos::prelude::get_configuration(Some("Cargo.toml")).unwrap().leptos_options;
+		let hashPath = std::env::temp_dir().join(format!("webhome-shell-hash-{}.txt",std::process::id()));
+		std::fs::write(&hashPath,"js: test-js-hash\nwasm: test-wasm-hash\ncss: test-css-hash\n").unwrap();
+		options.hash_files = true;
+		options.hash_file = hashPath.to_string_lossy().into_owned().into();
 		let contentSecurity = BrowserContentSecurity::new(&options,std::env::var_os("LEPTOS_WATCH").is_some());
 		let handler = leptos_axum::render_app_to_stream_in_order_with_context(
 			|| {},
@@ -373,6 +377,7 @@ mod tests
 		let nonceEnd = policy[nonceStart..].find('\'').unwrap() + nonceStart;
 		let nonce = &policy[nonceStart..nonceEnd];
 		let body = String::from_utf8(to_bytes(response.into_body(),2 * 1024 * 1024).await.unwrap().to_vec()).unwrap();
+		std::fs::remove_file(hashPath).unwrap();
 
 		let inlineScriptTags = inlineScriptTags_get(&body);
 		assert!(!inlineScriptTags.is_empty(),"Leptos shell does not contain an inline hydration script");
@@ -391,6 +396,15 @@ mod tests
 		assert!(body.contains("sha384-luECWXGw+Rk0LDPKZ8m2vuzYJnGiJfFabF16BAqKVf7rdp1/jvaViZ+BFXFuaD5H"));
 		assert!(body.contains("crossorigin=\"anonymous\"") || body.contains("crossorigin=anonymous"));
 		assert!(!body.contains("iconoir@main"));
+		assert!(body.contains("/pkg/webhome.test-css-hash.css"));
+		assert!(body.contains("/pkg/webhome.test-js-hash.js"));
+		assert!(body.contains("/pkg/webhome.test-wasm-hash.wasm"));
+		assert!(!body.contains("/pkg/webhome.css"));
+		assert!(!body.contains("/pkg/webhome.js"));
+		assert!(!body.contains("/pkg/webhome.wasm"));
+		let assetMonitorPosition = body.find("asset_version_monitor.js").unwrap();
+		let hydrationAssetPosition = body.find("/pkg/webhome.test-js-hash.js").unwrap();
+		assert!(assetMonitorPosition < hydrationAssetPosition,"asset version monitor must wrap fetch before hydration starts");
 	}
 
 	fn inlineScriptTags_get(body: &str) -> Vec<&str>

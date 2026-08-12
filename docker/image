@@ -27,6 +27,7 @@ RUN cargo leptos build \
 
 RUN mkdir -p /runtime/static && \
     install -m 0755 "target/release/${BUILDNAME}" /runtime/leptosapp && \
+    install -m 0644 target/release/hash.txt /runtime/hash.txt && \
     cp -a target/site /runtime/site && \
     cp -a static/translates /runtime/static/translates
 
@@ -50,6 +51,8 @@ ENV LEPTOS_ENV="PROD"
 ENV LEPTOS_OUTPUT_NAME="webhome"
 ENV LEPTOS_SITE_ADDR="0.0.0.0:3002"
 ENV LEPTOS_SITE_ROOT=./site
+ENV LEPTOS_HASH_FILES="true"
+ENV LEPTOS_HASH_FILE_NAME="hash.txt"
 
 USER webhome:webhome
 

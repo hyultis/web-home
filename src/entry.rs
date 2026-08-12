@@ -3,7 +3,7 @@ use leptos::view;
 use leptos::IntoView;
 use leptos::prelude::*;
 use leptos::reactive::spawn_local_scoped;
-use leptos_meta::{provide_meta_context, Html, Link, Meta, MetaTags, Stylesheet, Title};
+use leptos_meta::{provide_meta_context, HashedStylesheet, Html, Link, Meta, MetaTags, Title};
 use leptos_router::components::{Route, Router, Routes, A};
 use leptos_router::{hooks, path};
 use leptos_use::use_locales;
@@ -37,7 +37,9 @@ pub fn shell((options,trace_front_log,allowRegistration): (LeptosOptions, bool, 
 				<meta lang="fr" name="description" content="Webhome"/>
 				<meta lang="en" name="description" content="Webhome"/>
 				<AutoReload options=options.clone() />
-				<HydrationScripts options islands=true/>
+				<HashedStylesheet options=options.clone() id="leptos"/>
+				<script src="asset_version_monitor.js"></script>
+				<HydrationScripts options=options islands=true/>
 				<MetaTags/>
 				<script type="module" src="setUpWorkers.js"></script>
 			</head>
@@ -107,9 +109,6 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 	view! {
 		<Html {..} lang=move || documentLangState.lang_get().to_ascii_lowercase()/>
 
-		// injects a stylesheet into the document <head>
-		// id=leptos means cargo-leptos will hot-reload this stylesheet
-		<Stylesheet id="leptos" href="/pkg/webhome.css"/>
 		<Link
 			id="iconoir"
 			rel="stylesheet"

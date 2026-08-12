@@ -8,8 +8,11 @@ use leptos::prelude::{use_context, AriaAttributes, CollectView, GlobalAttributes
 use leptos::prelude::{ClassAttribute, ElementChild, GetUntracked, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, Get, IntoAny, OnAttribute, RwSignal, Set};
 use leptos::{component, view, IntoView};
+use leptos_use::{use_event_listener, use_window};
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
+#[cfg(feature="hydrate")]
+use wasm_bindgen::JsCast;
 use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::api::proxys::imap::{API_proxys_imap_getMailContent, API_proxys_imap_listbox, API_proxys_imap_setMailSee, API_proxys_imap_sync};
 use crate::api::proxys::imap_components::{imap_connector, Attachment, BoxName, ImapMailboxSync, ImapMailboxSyncState, ImapMail, ImapMailContentType, ImapMailKey, ImapSyncRequest};
@@ -174,6 +177,131 @@ impl MailTag
 	fn style(&self) -> String
 	{
 		return format!("--mail-tag-color:{}",self.color);
+	}
+}
+
+#[cfg_attr(not(feature="hydrate"), allow(dead_code))]
+const MAIL_OVERLAY_GAP_PIXELS: f64 = 4.0;
+#[cfg_attr(not(feature="hydrate"), allow(dead_code))]
+const MAIL_OVERLAY_MARGIN_PIXELS: f64 = 8.0;
+#[cfg_attr(not(feature="hydrate"), allow(dead_code))]
+const MAIL_OVERLAY_PREFERRED_SPACE_PIXELS: f64 = 96.0;
+
+#[cfg_attr(not(feature="hydrate"), allow(dead_code))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MailOverlaySide
+{
+	Below,
+	Above,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct MailOverlayPlacement
+{
+	left: f64,
+	width: f64,
+	side: MailOverlaySide,
+	offset: f64,
+	maxHeight: f64,
+}
+
+impl MailOverlayPlacement
+{
+	#[cfg_attr(not(feature="hydrate"), allow(dead_code))]
+	fn calculate(anchorTop: f64, anchorBottom: f64, containerLeft: f64, containerRight: f64, viewportWidth: f64, viewportHeight: f64) -> Option<Self>
+	{
+		if (![anchorTop,anchorBottom,containerLeft,containerRight,viewportWidth,viewportHeight]
+			.into_iter().all(f64::is_finite))
+		{
+			return None;
+		}
+		let left = containerLeft.max(MAIL_OVERLAY_MARGIN_PIXELS);
+		let right = containerRight.min(viewportWidth - MAIL_OVERLAY_MARGIN_PIXELS);
+		let width = right - left;
+		if (width <= 0.0 || viewportHeight <= MAIL_OVERLAY_MARGIN_PIXELS * 2.0)
+		{
+			return None;
+		}
+
+		let belowOffset = anchorBottom + MAIL_OVERLAY_GAP_PIXELS;
+		let belowSpace = (viewportHeight - MAIL_OVERLAY_MARGIN_PIXELS - belowOffset).max(0.0);
+		let aboveSpace = (anchorTop - MAIL_OVERLAY_GAP_PIXELS - MAIL_OVERLAY_MARGIN_PIXELS).max(0.0);
+		let (side,offset,maxHeight) = if (belowSpace >= MAIL_OVERLAY_PREFERRED_SPACE_PIXELS || belowSpace >= aboveSpace)
+		{
+			(MailOverlaySide::Below,belowOffset.max(MAIL_OVERLAY_MARGIN_PIXELS),belowSpace)
+		}
+		else
+		{
+			(
+				MailOverlaySide::Above,
+				(viewportHeight - anchorTop + MAIL_OVERLAY_GAP_PIXELS).max(MAIL_OVERLAY_MARGIN_PIXELS),
+				aboveSpace,
+			)
+		};
+		if (maxHeight <= 0.0)
+		{
+			return None;
+		}
+
+		return Some(Self {left,width,side,offset,maxHeight});
+	}
+
+	#[cfg(feature="hydrate")]
+	fn from_event_target(target: Option<web_sys::EventTarget>) -> Option<Self>
+	{
+		let target = target?.dyn_into::<web_sys::Element>().ok()?;
+		let container = target.closest(".module_rss_upper").ok().flatten()?;
+		let anchorRect = target.get_bounding_client_rect();
+		let containerRect = container.get_bounding_client_rect();
+		let window = web_sys::window()?;
+		let viewportWidth = window.inner_width().ok()?.as_f64()?;
+		let viewportHeight = window.inner_height().ok()?.as_f64()?;
+		return Self::calculate(
+			anchorRect.top(),
+			anchorRect.bottom(),
+			containerRect.left(),
+			containerRect.right(),
+			viewportWidth,
+			viewportHeight,
+		);
+	}
+
+	#[cfg(not(feature="hydrate"))]
+	fn from_event_target(_: Option<web_sys::EventTarget>) -> Option<Self>
+	{
+		return None;
+	}
+
+	fn style(&self) -> String
+	{
+		let verticalPosition = match self.side
+		{
+			MailOverlaySide::Below => format!("top:{:.1}px;bottom:auto",self.offset),
+			MailOverlaySide::Above => format!("top:auto;bottom:{:.1}px",self.offset),
+		};
+		return format!(
+			"{};left:{:.1}px;width:{:.1}px;max-height:{:.1}px",
+			verticalPosition,
+			self.left,
+			self.width,
+			self.maxHeight,
+		);
+	}
+}
+
+#[derive(Clone, Debug)]
+struct MailOverlayState
+{
+	mail: ImapMail,
+	placement: MailOverlayPlacement,
+}
+
+impl MailOverlayState
+{
+	fn from_event_target(mail: ImapMail, target: Option<web_sys::EventTarget>) -> Option<Self>
+	{
+		return MailOverlayPlacement::from_event_target(target)
+			.map(|placement| Self {mail,placement});
 	}
 }
 
@@ -976,11 +1104,13 @@ impl Mail
 		mailContentRaw.update(move |mailContent| mailContent.sync_apply(mailboxes));
 	}
 
-	fn utils_mailOverlay(mail: &ImapMail) -> AnyView
+	fn utils_mailOverlay(state: &MailOverlayState) -> AnyView
 	{
+		let mail = &state.mail;
+		let style = state.placement.style();
 
 		return view!{
-			<div class="alttext module_mail_overlay" role="tooltip">
+			<div class="alttext module_mail_overlay" role="tooltip" style={style}>
 				<span><Translate key="MODULE_MAIL_FROM"/>{" "}{mail.from.clone()}</span><br/>
 				<span><Translate key="MODULE_MAIL_TO"/>{" "}{mail.to.clone()}</span><br/>
 				<span><Translate key="MODULE_MAIL_DATE"/>{" "}{
@@ -1112,8 +1242,14 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 		return view!{}.into_any();
 	};
 	let toaster = expect_toaster();
-	let mailOverlayHovered = RwSignal::new(None::<ImapMail>);
-	let mailOverlayFocused = RwSignal::new(None::<ImapMail>);
+	let mailOverlayHovered = RwSignal::new(None::<MailOverlayState>);
+	let mailOverlayFocused = RwSignal::new(None::<MailOverlayState>);
+	let overlayHoveredResize = mailOverlayHovered;
+	let overlayFocusedResize = mailOverlayFocused;
+	let _overlayResizeCleanup = use_event_listener(use_window(), leptos::ev::resize, move |_| {
+		overlayHoveredResize.set(None);
+		overlayFocusedResize.set(None);
+	});
 
 	let mailConfigView = config.clone();
 	let configUpdateView = update.clone();
@@ -1147,7 +1283,10 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 				let mailTagIsActive = mailConfig.mail_tag_is_active();
 				view!{
 					{draw_title_if_present(mailConfig.title.clone())}
-					<div class="module_rss_upper">{
+					<div class="module_rss_upper" on:scroll={move |_| {
+						mailOverlayHovered.set(None);
+						mailOverlayFocused.set(None);
+					}}>{
 							let markVueCacheInner = mailsCache.clone();
 							let mails = mailsCache.get().mailsData.clone();
 							let mut mailsContent = mails.into_iter().collect::<Vec<_>>();
@@ -1172,7 +1311,11 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 									let mailOverlayMouse = mail.clone();
 									let mailOverlayFocus = mail.clone();
 									view!{
-										<tr class="module_mail_row">
+										<tr
+											class="module_mail_row"
+											on:mouseenter={move |event| mailOverlayHovered.set(MailOverlayState::from_event_target(mailOverlayMouse.clone(),event.current_target()))}
+											on:mouseleave={move |_| mailOverlayHovered.set(None)}
+										>
 											<td class="module_mail_date">{distant_time_simpler(mail.date)}</td>
 											{
 												if(mailTagIsActive)
@@ -1196,13 +1339,11 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 											}
 							<td
 								class="module_mail_subject"
-								on:mouseenter={move |_| mailOverlayHovered.set(Some(mailOverlayMouse.clone()))}
-								on:mouseleave={move |_| mailOverlayHovered.set(None)}
 							>
 								<button
 									type="button"
 									class="module_mail_subject_button"
-									on:focus={move |_| mailOverlayFocused.set(Some(mailOverlayFocus.clone()))}
+									on:focus={move |event| mailOverlayFocused.set(MailOverlayState::from_event_target(mailOverlayFocus.clone(),event.current_target()))}
 									on:blur={move |_| mailOverlayFocused.set(None)}
 									on:click={move |_| viewContentFn.clone()(mailKeyView.clone(),mailView.clone())}
 								>
@@ -1254,7 +1395,7 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 				</div>
 				{move || mailOverlayFocused.get()
 					.or_else(|| mailOverlayHovered.get())
-					.map(|mail| Mail::utils_mailOverlay(&mail))}
+					.map(|state| Mail::utils_mailOverlay(&state))}
 			}.into_any()
 			}
 	}}}.into_any()
@@ -1265,7 +1406,7 @@ mod tests
 {
 	use std::collections::HashMap;
 
-	use super::{MailConfig, MailContentFrame, MailSenderAddress, MailSyncIdentity, MailTag, MailsContent};
+	use super::{MailConfig, MailContentFrame, MailOverlayPlacement, MailOverlaySide, MailSenderAddress, MailSyncIdentity, MailTag, MailsContent};
 	use crate::api::proxys::imap_components::{Attributs, BoxName, imap_connector, imap_connector_extra, ImapMailboxSync, ImapMail, ImapMailContentType, ImapMailKey};
 
 	fn config_with_suffix(suffix: &str) -> MailConfig
@@ -1283,6 +1424,39 @@ mod tests
 			to: to.to_string(),
 			..Default::default()
 		};
+	}
+
+	#[test]
+	fn mailOverlayPlacement_prefersSpaceBelowTheActiveRow()
+	{
+		let placement = MailOverlayPlacement::calculate(100.0,132.0,40.0,440.0,800.0,700.0).unwrap();
+
+		assert_eq!(placement.side,MailOverlaySide::Below);
+		assert_eq!(placement.offset,136.0);
+		assert_eq!(placement.left,40.0);
+		assert_eq!(placement.width,400.0);
+		assert_eq!(placement.maxHeight,556.0);
+		assert!(placement.style().contains("top:136.0px;bottom:auto"));
+	}
+
+	#[test]
+	fn mailOverlayPlacement_movesAboveALowRowWithoutCoveringIt()
+	{
+		let placement = MailOverlayPlacement::calculate(640.0,672.0,40.0,440.0,800.0,700.0).unwrap();
+
+		assert_eq!(placement.side,MailOverlaySide::Above);
+		assert_eq!(placement.offset,64.0);
+		assert_eq!(placement.maxHeight,628.0);
+		assert!(placement.style().contains("top:auto;bottom:64.0px"));
+	}
+
+	#[test]
+	fn mailOverlayPlacement_clampsNarrowModulesToTheViewport()
+	{
+		let placement = MailOverlayPlacement::calculate(40.0,72.0,-20.0,70.0,320.0,500.0).unwrap();
+
+		assert_eq!(placement.left,8.0);
+		assert_eq!(placement.width,62.0);
 	}
 
 	fn mailKey_get(boxName: &str, uidValidity: u32, uid: u32) -> ImapMailKey

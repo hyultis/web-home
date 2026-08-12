@@ -1,6 +1,6 @@
 [package]
 name = "web-home"
-version = "0.5.0"
+version = "1.0.0"
 edition = "2024"
 
 [lib]
@@ -20,7 +20,7 @@ tower-http = { version = "0.6", features = ["fs"], optional = true }
 tower-sessions = "0.15"
 wasm-bindgen = "=0.2.112"
 # lock to wasm-bindgen version
-web-sys = { version = "=0.3.89", features = ["BlobPropertyBag", "Document", "Element", "HtmlDocument", "HtmlElement", "NodeList", "Storage", "Window"] }
+web-sys = { version = "=0.3.89", features = ["BlobPropertyBag", "Document", "DomRect", "Element", "HtmlDocument", "HtmlElement", "NodeList", "Storage", "Window"] }
 wasm-bindgen-futures = "0.4.54"
 js-sys = "0.3.81"
 # end of locked stuff
@@ -146,6 +146,10 @@ lib-default-features = false
 #
 # Optional. Defaults to "release".
 lib-profile-release = "wasm-release"
+
+# Give each generated browser asset a content-derived name. The matching
+# hash.txt file must stay next to the server binary at runtime.
+hash-files = true
 
 #fix for getrandom backend setup from https://github.com/bevyengine/bevy/issues/20476#issuecomment-3173383130
 [target.'cfg(all(target_family = "wasm", any(target_os = "unknown", target_os = "none")))'.dependencies]

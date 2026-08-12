@@ -16,9 +16,13 @@ use web_home::server::{
 	PROXY_CACHE_DIR,
 };
 #[cfg(feature = "ssr")]
+use crate::browser_asset_delivery::BrowserAssetDelivery;
+#[cfg(feature = "ssr")]
 use crate::browser_content_security::BrowserContentSecurity;
 #[cfg(feature = "ssr")]
 use crate::deployment_health::DeploymentHealth;
+#[cfg(feature = "ssr")]
+mod browser_asset_delivery;
 #[cfg(feature = "ssr")]
 mod browser_content_security;
 #[cfg(feature = "ssr")]
@@ -115,6 +119,7 @@ async fn main() {
 		&leptos_options,
 		std::env::var_os("LEPTOS_WATCH").is_some(),
 	);
+	let browserAssetDelivery = BrowserAssetDelivery::new(&leptos_options);
 
 	//session management
 	let session_layer = sessionLayer_get();
@@ -135,6 +140,10 @@ async fn main() {
 		    post(BrowserContentSecurity::report_receive)
 			    .layer(DefaultBodyLimit::max(BrowserContentSecurity::REPORT_BODY_MAXIMUM_BYTES)),
 	    )
+	    .layer(middleware::from_fn_with_state(
+		browserAssetDelivery,
+		BrowserAssetDelivery::headers_apply,
+	    ))
 	    .layer(middleware::from_fn(helper::tracing_request))
 	    .layer(middleware::from_fn_with_state(
 		browserContentSecurity,

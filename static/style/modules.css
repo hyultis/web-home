@@ -306,11 +306,13 @@
 	background: var(--color-surface-3);
 }
 
-.module_rss_age,
-.module_mail_date
+.module_rss_table td.module_rss_age,
+.module_rss_table td.module_mail_date
 {
-	width: 3.5rem;
-	color: var(--color-text-muted);
+	width: 2em;
+	padding-right: 0.15rem;
+	padding-left: 0.15rem;
+	color: var(--color-accent);
 	font-family: var(--font-family-mono);
 	font-size: var(--font-size-xs);
 	white-space: nowrap;
@@ -452,12 +454,9 @@
 .module_mail_overlay
 {
 	display: block;
-	top: var(--space-3);
-	right: var(--space-3);
-	left: var(--space-3);
+	position: fixed;
+	right: auto;
 	z-index: 30;
-	width: auto;
-	max-height: calc(100% - (var(--space-3) * 2));
 	overflow: auto;
 	pointer-events: none;
 }

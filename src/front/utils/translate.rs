@@ -7,6 +7,13 @@ use leptos::prelude::ElementChild;
 use crate::front::utils::fluent::FluentManager::FluentManager;
 use crate::front::utils::users_data::ClientState;
 
+fn translationHydratable_get(translation: Option<String>) -> Option<String>
+{
+	// Preserve the Option<String> view type without ever producing the empty-view
+	// placeholder: SSR may already have emitted the translated text.
+	return Some(translation.unwrap_or_default());
+}
+
 #[component]
 pub fn TranslateCurrentLang() -> impl IntoView {
 	let clientState = ClientState::expect();
@@ -36,8 +43,23 @@ pub fn TranslateText(#[prop(into)] key: String,
 
 	view! {
 		<Transition fallback=move || format!("{}_fallback",key)>
-			{move || translate.get()}
+			// Never return None here: the SSR response may already contain the
+			// translation while the client Resource is not hydrated yet.
+			{move || translationHydratable_get(translate.get())}
 		</Transition>
+	}
+}
+
+#[cfg(test)]
+mod tests
+{
+	use super::translationHydratable_get;
+
+	#[test]
+	fn textTranslation_neverBecomesEmptyViewDuringHydration()
+	{
+		assert_eq!(translationHydratable_get(None),Some(String::new()));
+		assert_eq!(translationHydratable_get(Some("Translated".to_string())),Some("Translated".to_string()));
 	}
 }
 

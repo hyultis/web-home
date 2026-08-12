@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use leptoaster::ToasterContext;
-use leptos::prelude::{ArcRwSignal, Owner, Set, Update, WithUntracked};
+use leptos::prelude::{ArcRwSignal, Owner, Set, Update, With, WithUntracked};
 use leptos::reactive::spawn_local_scoped_with_cancellation;
 use crate::api::modules::{API_module_remove, API_module_retrieve, API_modules_retrieve, API_modules_update, ModuleApiError, ModuleReturnRetrieve};
 use crate::api::modules::components::{ApiModulesID, ModuleContent, ModuleID};
@@ -52,7 +52,7 @@ mod tests
 	use std::sync::atomic::{AtomicBool, Ordering};
 
 	use crate::api::modules::ModuleApiError;
-	use crate::api::modules::components::ModuleID;
+	use crate::api::modules::components::{ModuleContent, ModuleID};
 	use crate::front::modules::components::{API_return_apply, PausableStocker};
 	use crate::front::modules::module_actions::ModuleActionFn;
 	use crate::front::modules::module_positions::ModulePositions;
@@ -168,6 +168,41 @@ mod tests
 			assert_eq!(holder._blockNb, 21);
 
 			holder.lifecycle_close_inner().unwrap().cleanup();
+		});
+		parentOwner.cleanup();
+	}
+
+	#[test]
+	fn blocksView_ordersModulesFromTopToBottomThenLeftToRight()
+	{
+		let parentOwner = Owner::new();
+		parentOwner.with(|| {
+			let mut holder = ModuleHolder::new();
+			for (id,position,depth) in [
+				("lower",[0,100],0),
+				("upper-right",[200,0],0),
+				("upper-left-b",[0,0],2),
+				("upper-left-a",[0,0],1),
+			]
+			{
+				let moduleId = ModuleID {id: id.to_string()};
+				let moduleContent = ModuleContent {
+					id: moduleId.clone(),
+					pos: position,
+					depth,
+					..Default::default()
+				};
+				holder._blocks.insert(
+					moduleId,
+					ArcRwSignal::new(ModulePositions::newFromModuleContent(moduleContent,ModuleType::TODO(Todo::new()))),
+				);
+			}
+
+			let orderedIds = holder.blocks_view().into_iter()
+				.map(|(id,_)| id.id)
+				.collect::<Vec<_>>();
+
+			assert_eq!(orderedIds,["upper-left-a","upper-left-b","upper-right","lower"]);
 		});
 		parentOwner.cleanup();
 	}
@@ -838,10 +873,16 @@ impl ModuleHolder
 	}
 
 	pub fn blocks_view(&self) -> Vec<(ModuleID, ArcRwSignal<ModulePositions<ModuleType>>)> {
-		self._blocks
+		let mut blocks = self._blocks
 			.iter()
 			.map(|(id, module)| (id.clone(), module.clone()))
-			.collect()
+			.collect::<Vec<_>>();
+		blocks.sort_by(|(leftId,leftModule),(rightId,rightModule)| {
+			let leftOrder = leftModule.with(|module| module.visual_order_get());
+			let rightOrder = rightModule.with(|module| module.visual_order_get());
+			return leftOrder.cmp(&rightOrder).then_with(|| leftId.cmp(rightId));
+		});
+		return blocks;
 	}
 
 	pub(crate) fn blocks_insert(&mut self, epoch: ModuleHolderEpoch, newmodule: ModulePositions<ModuleType>)

@@ -2,7 +2,7 @@ use leptos::ev::KeyboardEvent;
 use leptos::html::Div;
 use leptos::prelude::{AriaAttributes, ElementChild, GlobalAttributes, IntoAny, NodeRef, NodeRefAttribute};
 use leptos::prelude::OnAttribute;
-use leptos::prelude::{AnyView, ClassAttribute, Signal, Update};
+use leptos::prelude::{AnyView, ClassAttribute, Effect, Signal, Update};
 use leptos::prelude::{Get, GetUntracked, RwSignal, Set};
 use leptos::{component, view, IntoView};
 use leptos_use::{use_css_var, use_timeout_fn, UseTimeoutFnReturn};
@@ -25,6 +25,15 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 		parse_css_time_to_secs(&value)
 	});
 	let dialogRef = NodeRef::<Div>::new();
+	let focusManager = manager.clone();
+	Effect::new(move |wasOpen: Option<bool>| {
+		let isOpen = focusManager.dialog.get().is_some();
+		if (dialogFocus_initialMustApply(isOpen,wasOpen))
+		{
+			dialogFocus_initial(dialogRef);
+		}
+		return isOpen;
+	});
 
 	let fnManager = manager.clone();
 	let UseTimeoutFnReturn {
@@ -90,7 +99,6 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 							aria-modal="true"
 							aria-labelledby="webhome-dialog-title"
 							tabindex="-1"
-							autofocus=true
 							on:click=|e| e.stop_propagation()
 						>
 							<h2 id="webhome-dialog-title">{
@@ -388,14 +396,18 @@ fn dialogFocus_restore(_: &DialogFocusReturn)
 {
 }
 
-#[cfg(feature="hydrate")]
-fn dialogFocus_trap(event: &KeyboardEvent, dialogRef: NodeRef<Div>)
+fn dialogFocus_initialMustApply(isOpen: bool, wasOpen: Option<bool>) -> bool
 {
-	let Some(dialog) = dialogRef.get_untracked() else {return};
+	return isOpen && wasOpen != Some(true);
+}
+
+#[cfg(feature="hydrate")]
+fn dialogFocusableElements_get(dialog: &HtmlElement) -> Vec<HtmlElement>
+{
 	let Ok(nodes) = dialog.query_selector_all(concat!(
 		"a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),",
 		"textarea:not([disabled]),[tabindex]:not([tabindex=\"-1\"]):not([aria-disabled=\"true\"])"
-	)) else {return};
+	)) else {return Vec::new()};
 	let mut focusableElements = Vec::new();
 	for index in 0..nodes.length()
 	{
@@ -404,8 +416,32 @@ fn dialogFocus_trap(event: &KeyboardEvent, dialogRef: NodeRef<Div>)
 			focusableElements.push(element);
 		}
 	}
+	return focusableElements;
+}
 
+#[cfg(feature="hydrate")]
+fn dialogFocus_initial(dialogRef: NodeRef<Div>)
+{
+	leptos::leptos_dom::helpers::request_animation_frame(move || {
+		let Some(dialog) = dialogRef.get_untracked() else {return};
+		let dialogElement: HtmlElement = dialog.unchecked_into();
+		let focusableElements = dialogFocusableElements_get(&dialogElement);
+		let target = focusableElements.first().unwrap_or(&dialogElement);
+		let _ = target.focus();
+	});
+}
+
+#[cfg(not(feature="hydrate"))]
+fn dialogFocus_initial(_: NodeRef<Div>)
+{
+}
+
+#[cfg(feature="hydrate")]
+fn dialogFocus_trap(event: &KeyboardEvent, dialogRef: NodeRef<Div>)
+{
+	let Some(dialog) = dialogRef.get_untracked() else {return};
 	let dialogElement: HtmlElement = dialog.unchecked_into();
+	let focusableElements = dialogFocusableElements_get(&dialogElement);
 	let activeElement = web_sys::window()
 		.and_then(|window| window.document())
 		.and_then(|document| document.active_element())
@@ -443,7 +479,7 @@ fn dialogFocus_trap(_: &KeyboardEvent, _: NodeRef<Div>)
 #[cfg(test)]
 mod tests
 {
-	use super::{DialogActionStyle, DialogData, DialogManager};
+	use super::{dialogFocus_initialMustApply, DialogActionStyle, DialogData, DialogManager};
 	use leptos::prelude::{GetUntracked, Owner};
 	use std::sync::Arc;
 	use std::sync::atomic::{AtomicBool, Ordering};
@@ -489,6 +525,16 @@ mod tests
 		assert_eq!(DialogActionStyle::Success.class_get(),"validate");
 		assert_eq!(DialogActionStyle::Warning.class_get(),"validate validate_warning");
 		assert_eq!(DialogActionStyle::Danger.class_get(),"validate validate_danger");
+	}
+
+	#[test]
+	fn dialogInitialFocus_runsOnlyWhenDialogBecomesOpen()
+	{
+		assert!(!dialogFocus_initialMustApply(false,None));
+		assert!(dialogFocus_initialMustApply(true,None));
+		assert!(dialogFocus_initialMustApply(true,Some(false)));
+		assert!(!dialogFocus_initialMustApply(true,Some(true)));
+		assert!(!dialogFocus_initialMustApply(false,Some(true)));
 	}
 }
 

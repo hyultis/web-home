@@ -46,6 +46,12 @@ impl<module: moduleContent> ModulePositions<module>
 		self._depth.set(depth);
 	}
 
+	pub(super) fn visual_order_get(&self) -> (i32,i32,u32)
+	{
+		let position = self._pos.get();
+		return (position[1],position[0],self._depth.get());
+	}
+
 	pub fn inner(&self) -> &module
 	{
 		return &self._module;

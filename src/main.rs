@@ -111,6 +111,10 @@ async fn main() {
 	//conf.leptos_options.site_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 3000);
     let addr = conf.leptos_options.site_addr;
     let leptos_options = conf.leptos_options.clone();
+	let browserContentSecurity = BrowserContentSecurity::new(
+		&leptos_options,
+		std::env::var_os("LEPTOS_WATCH").is_some(),
+	);
 
 	//session management
 	let session_layer = sessionLayer_get();
@@ -132,7 +136,10 @@ async fn main() {
 			    .layer(DefaultBodyLimit::max(BrowserContentSecurity::REPORT_BODY_MAXIMUM_BYTES)),
 	    )
 	    .layer(middleware::from_fn(helper::tracing_request))
-	    .layer(middleware::from_fn(BrowserContentSecurity::headers_apply))
+	    .layer(middleware::from_fn_with_state(
+		browserContentSecurity,
+		BrowserContentSecurity::headers_apply,
+	    ))
         .with_state(leptos_options);
 
     // to run our app

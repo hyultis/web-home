@@ -4,7 +4,7 @@ use std::sync::Arc;
 use gloo_timers::callback::Timeout;
 use leptoaster::{expect_toaster, ToasterContext};
 use leptos::children::ViewFn;
-use leptos::prelude::{use_context, AriaAttributes, CollectView, StyleAttribute, Write};
+use leptos::prelude::{use_context, AriaAttributes, CollectView, GlobalAttributes, StyleAttribute, Write};
 use leptos::prelude::{ClassAttribute, ElementChild, GetUntracked, Update};
 use leptos::prelude::{AnyView, ArcRwSignal, Get, IntoAny, OnAttribute, RwSignal, Set};
 use leptos::{component, view, IntoView};
@@ -980,7 +980,7 @@ impl Mail
 	{
 
 		return view!{
-			<div class="alttext">
+			<div class="alttext module_mail_overlay" role="tooltip">
 				<span><Translate key="MODULE_MAIL_FROM"/>{" "}{mail.from.clone()}</span><br/>
 				<span><Translate key="MODULE_MAIL_TO"/>{" "}{mail.to.clone()}</span><br/>
 				<span><Translate key="MODULE_MAIL_DATE"/>{" "}{
@@ -1112,6 +1112,8 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 		return view!{}.into_any();
 	};
 	let toaster = expect_toaster();
+	let mailOverlayHovered = RwSignal::new(None::<ImapMail>);
+	let mailOverlayFocused = RwSignal::new(None::<ImapMail>);
 
 	let mailConfigView = config.clone();
 	let configUpdateView = update.clone();
@@ -1167,6 +1169,8 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 									let markVueCacheInner = markVueCacheInner.clone();
 									let mailTag = if(mailTagIsActive) {mailConfig.mail_tag(&mail)} else {None};
 									let mailSubject = mail.subject.clone().filter(|subject| !subject.is_empty());
+									let mailOverlayMouse = mail.clone();
+									let mailOverlayFocus = mail.clone();
 									view!{
 										<tr class="module_mail_row">
 											<td class="module_mail_date">{distant_time_simpler(mail.date)}</td>
@@ -1190,8 +1194,18 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 												}
 												else {view!{}.into_any()}
 											}
-							<td class="module_mail_subject alttext_upper">
-								<button type="button" class="module_mail_subject_button" on:click={move |_| viewContentFn.clone()(mailKeyView.clone(),mailView.clone())}>
+							<td
+								class="module_mail_subject"
+								on:mouseenter={move |_| mailOverlayHovered.set(Some(mailOverlayMouse.clone()))}
+								on:mouseleave={move |_| mailOverlayHovered.set(None)}
+							>
+								<button
+									type="button"
+									class="module_mail_subject_button"
+									on:focus={move |_| mailOverlayFocused.set(Some(mailOverlayFocus.clone()))}
+									on:blur={move |_| mailOverlayFocused.set(None)}
+									on:click={move |_| viewContentFn.clone()(mailKeyView.clone(),mailView.clone())}
+								>
 									{
 										if let Some(subject) = mailSubject
 										{
@@ -1204,7 +1218,6 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 									}
 									<span class="visually_hidden">{" - "}<TranslateText key="MODULE_MAIL_OPEN_ACTION"/></span>
 								</button>
-								{Mail::utils_mailOverlay(&mail)}
 							</td>
 							<td class="module_mail_status">{
 								if(mail.confirmVue)
@@ -1238,7 +1251,11 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 								}).collect_view()}</tbody></table>}.into_any()
 							}
 						}
-				</div>}.into_any()
+				</div>
+				{move || mailOverlayFocused.get()
+					.or_else(|| mailOverlayHovered.get())
+					.map(|mail| Mail::utils_mailOverlay(&mail))}
+			}.into_any()
 			}
 	}}}.into_any()
 }

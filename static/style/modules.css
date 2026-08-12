@@ -449,10 +449,17 @@
 	transform: none;
 }
 
-.module_mail_subject .alttext
+.module_mail_overlay
 {
-	right: auto;
-	left: 0;
+	display: block;
+	top: var(--space-3);
+	right: var(--space-3);
+	left: var(--space-3);
+	z-index: 30;
+	width: auto;
+	max-height: calc(100% - (var(--space-3) * 2));
+	overflow: auto;
+	pointer-events: none;
 }
 
 .module_mail_status_button

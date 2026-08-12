@@ -3,9 +3,10 @@ use std::sync::Arc;
 use gloo_timers::callback::Interval;
 use leptoaster::ToasterContext;
 use leptos::ev::Targeted;
+use leptos::html::Input;
 use leptos::prelude::{OnTargetAttribute, ViewFn};
 use leptos::prelude::{ElementChild, Update};
-use leptos::prelude::{AnyView, ArcRwSignal, ClassAttribute, IntoAny, PropAttribute, RwSignal, StyleAttribute};
+use leptos::prelude::{AnyView, ArcRwSignal, ClassAttribute, Effect, Get, IntoAny, NodeRef, NodeRefAttribute, RwSignal, StyleAttribute, untrack};
 use leptos::view;
 use time::UtcDateTime;
 use serde::{Deserialize, Serialize};
@@ -290,7 +291,20 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
 	{
 		let data = self.field.clone();
 		let getField = self.getField.clone();
-		let getFn = move || getField(data.clone());
+		let initialValue = untrack({
+			let data = data.clone();
+			let getField = getField.clone();
+			move || getField(data)
+		});
+		let inputRef = NodeRef::<Input>::new();
+		Effect::new(move || {
+			let value = getField(data.clone());
+			let Some(input) = inputRef.get() else {return;};
+			if(input.value() != value)
+			{
+				input.set_value(&value);
+			}
+		});
 
 		let data = self.field.clone();
 		let cache = self.update.clone();
@@ -311,7 +325,8 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
 							class="module_config_input"
 							style={style}
 							name={TranslateKey.clone()}
-							prop:value={getFn}
+							value={initialValue}
+							node_ref=inputRef
 							on:input:target={updateFn} />
 				}.into_any()
 			}
@@ -321,7 +336,8 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
 							class="module_config_input"
 							style={style}
 							name={TranslateKey.clone()}
-							prop:value={getFn}
+							value={initialValue}
+							node_ref=inputRef
 							on:input:target={updateFn} />
 				}.into_any()
 			}
@@ -331,11 +347,46 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
 							class="module_config_input"
 							style={style}
 							name={TranslateKey.clone()}
-							prop:value={getFn}
+							value={initialValue}
+							node_ref=inputRef
 							on:input:target={updateFn} />
 				}.into_any()
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod fieldHelper_tests
+{
+	use super::{Cache, FieldHelper};
+	use leptos::prelude::{ArcRwSignal, Get, Owner, RenderHtml};
+
+	#[derive(Clone)]
+	struct TestField
+	{
+		value: String,
+	}
+
+	#[test]
+	fn fieldInput_rendersInitialValueInSsrHtml()
+	{
+		let owner = Owner::new();
+		let html = owner.with(|| {
+			let field = ArcRwSignal::new(TestField {value: "before middle after".to_string()});
+			let cache = ArcRwSignal::new(Cache::default());
+			let helper = FieldHelper::new(
+				&field,
+				&cache,
+				"TEST_FIELD",
+				|field| field.get().value,
+				|_,_| {},
+			);
+			return helper.drawInput().to_html();
+		});
+		owner.cleanup();
+
+		assert!(html.contains("value=\"before middle after\""),"initial field value is absent from SSR HTML: {html}");
 	}
 }
 

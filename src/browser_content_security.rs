@@ -1,19 +1,29 @@
 use axum::body::Bytes;
-use axum::extract::Request;
+use axum::extract::{Request,State};
 use axum::http::{HeaderMap,HeaderValue,StatusCode};
 use axum::middleware::Next;
 use axum::response::Response;
 use Htrace::components::level::Level;
 use Htrace::HTrace;
+use leptos::config::ReloadWSProtocol;
 use leptos::nonce::Nonce;
+use leptos::prelude::{Env,LeptosOptions};
 use serde::Deserialize;
 use std::sync::{LazyLock,Mutex};
 use std::time::{Duration,Instant};
 use url::Url;
 
+#[derive(Clone)]
 pub(super) struct BrowserContentSecurity
 {
-	nonce: Nonce,
+	liveReload: Option<BrowserContentSecurityLiveReload>,
+}
+
+#[derive(Clone)]
+struct BrowserContentSecurityLiveReload
+{
+	protocol: &'static str,
+	port: u32,
 }
 
 impl BrowserContentSecurity
@@ -23,15 +33,32 @@ impl BrowserContentSecurity
 	const REPORTING_ENDPOINTS: &'static str = "webhome-csp=\"/csp-report\"";
 	const REPORT_LOG_MAXIMUM_PER_MINUTE: u16 = 64;
 
+	pub(super) fn new(options: &LeptosOptions,watchEnabled: bool) -> Self
+	{
+		let port = options.reload_external_port.unwrap_or(options.reload_port);
+		let liveReload = (options.env == Env::DEV && watchEnabled && port > 0 && port <= u16::MAX as u32)
+			.then(|| BrowserContentSecurityLiveReload {
+				protocol: match options.reload_ws_protocol
+				{
+					ReloadWSProtocol::WS => "ws",
+					ReloadWSProtocol::WSS => "wss",
+				},
+				port,
+			});
+		return Self {liveReload};
+	}
+
 	pub(super) async fn headers_apply(
+		State(contentSecurity): State<Self>,
 		mut request: Request,
 		next: Next,
 	) -> Response
 	{
-		let contentSecurity = Self::new();
-		request.extensions_mut().insert(contentSecurity.nonce.clone());
+		let nonce = Nonce::new();
+		let policyHeader = contentSecurity.policyHeader_get(&nonce,request.headers());
+		request.extensions_mut().insert(nonce);
 		let mut response = next.run(request).await;
-		contentSecurity.headers_insert(response.headers_mut());
+		contentSecurity.headers_insert(response.headers_mut(),policyHeader);
 
 		return response;
 	}
@@ -73,17 +100,12 @@ impl BrowserContentSecurity
 		return path == Self::REPORT_PATH;
 	}
 
-	fn new() -> Self
-	{
-		return Self {nonce: Nonce::new()};
-	}
-
-	fn headers_insert(&self,headers: &mut HeaderMap)
+	fn headers_insert(&self,headers: &mut HeaderMap,policyHeader: HeaderValue)
 	{
 		use http::header::*;
 
 		headers.insert(X_FRAME_OPTIONS,HeaderValue::from_static("DENY"));
-		headers.insert(CONTENT_SECURITY_POLICY,self.policyHeader_get());
+		headers.insert(CONTENT_SECURITY_POLICY,policyHeader);
 		headers.insert(
 			HeaderName::from_static("reporting-endpoints"),
 			HeaderValue::from_static(Self::REPORTING_ENDPOINTS),
@@ -93,13 +115,16 @@ impl BrowserContentSecurity
 		headers.insert(REFERRER_POLICY,HeaderValue::from_static("no-referrer"));
 	}
 
-	fn policyHeader_get(&self) -> HeaderValue
+	fn policyHeader_get(&self,nonce: &Nonce,requestHeaders: &HeaderMap) -> HeaderValue
 	{
+		let liveReloadSource = self.liveReloadSource_get(requestHeaders)
+			.map(|source| format!(" {source}"))
+			.unwrap_or_default();
 		let policy = format!(
 			concat!(
 				"default-src 'none'; ",
 				"base-uri 'none'; ",
-				"connect-src 'self' https://api.open-meteo.com; ",
+				"connect-src 'self' https://api.open-meteo.com{}; ",
 				"font-src 'none'; ",
 				"form-action 'self'; ",
 				"frame-ancestors 'none'; ",
@@ -115,9 +140,29 @@ impl BrowserContentSecurity
 				"report-uri /csp-report; ",
 				"report-to webhome-csp",
 			),
-			self.nonce,
+			liveReloadSource,
+			nonce,
 		);
-		return HeaderValue::from_str(&policy).expect("generated CSP report-only header must be valid");
+		return HeaderValue::from_str(&policy).expect("generated CSP header must be valid");
+	}
+
+	fn liveReloadSource_get(&self,requestHeaders: &HeaderMap) -> Option<String>
+	{
+		use http::header::HOST;
+
+		let liveReload = self.liveReload.as_ref()?;
+		let rawAuthority = requestHeaders.get(HOST)?.to_str().ok()?;
+		if (rawAuthority.contains('@'))
+		{
+			return None;
+		}
+		let authority = rawAuthority.parse::<http::uri::Authority>().ok()?;
+		let host = authority.host();
+		if (host.is_empty())
+		{
+			return None;
+		}
+		return Some(format!("{}://{}:{}",liveReload.protocol,host,liveReload.port));
 	}
 
 	fn reportContentType_isAccepted(headers: &HeaderMap) -> bool
@@ -287,15 +332,18 @@ mod tests
 	use axum::middleware;
 	use axum::routing::get;
 	use axum::Router;
+	use leptos::config::ReloadWSProtocol;
 	use leptos::nonce::Nonce;
+	use leptos::prelude::{Env,LeptosOptions};
 	use tower::ServiceExt;
 
 	#[tokio::test]
 	async fn middlewareAddsEnforcedPolicyUsingRequestNonce()
 	{
+		let contentSecurity = contentSecurity_get(Env::PROD,false);
 		let router = Router::new()
 			.route("/",get(|Extension(nonce): Extension<Nonce>| async move {nonce.to_string()}))
-			.layer(middleware::from_fn(BrowserContentSecurity::headers_apply));
+			.layer(middleware::from_fn_with_state(contentSecurity,BrowserContentSecurity::headers_apply));
 		let response = router.oneshot(Request::builder().uri("/").body(Body::empty()).unwrap()).await.unwrap();
 		assert_eq!(response.headers().get("reporting-endpoints").unwrap(),"webhome-csp=\"/csp-report\"");
 		assert!(response.headers().get("content-security-policy-report-only").is_none());
@@ -311,34 +359,67 @@ mod tests
 		// Route generation performs the same executor initialization as the production router.
 		let _ = leptos_axum::generate_route_list(|| "test");
 		let options = leptos::prelude::get_configuration(Some("Cargo.toml")).unwrap().leptos_options;
+		let contentSecurity = BrowserContentSecurity::new(&options,std::env::var_os("LEPTOS_WATCH").is_some());
 		let handler = leptos_axum::render_app_to_stream_in_order_with_context(
 			|| {},
 			move || web_home::entry::shell((options.clone(),false,false)),
 		);
 		let router = Router::new()
 			.route("/",get(handler))
-			.layer(middleware::from_fn(BrowserContentSecurity::headers_apply));
-		let response = router.oneshot(Request::builder().uri("/").body(Body::empty()).unwrap()).await.unwrap();
+			.layer(middleware::from_fn_with_state(contentSecurity,BrowserContentSecurity::headers_apply));
+		let response = router.oneshot(Request::builder().uri("/").header("host","127.0.0.1:3002").body(Body::empty()).unwrap()).await.unwrap();
 		let policy = response.headers().get("content-security-policy").unwrap().to_str().unwrap().to_string();
 		let nonceStart = policy.find("'nonce-").unwrap() + "'nonce-".len();
 		let nonceEnd = policy[nonceStart..].find('\'').unwrap() + nonceStart;
 		let nonce = &policy[nonceStart..nonceEnd];
 		let body = String::from_utf8(to_bytes(response.into_body(),2 * 1024 * 1024).await.unwrap().to_vec()).unwrap();
 
-		assert!(
-			body.contains(&format!("nonce=\"{nonce}\"")) || body.contains(&format!("nonce={nonce}")),
-			"Leptos inline hydration script does not use the CSP response nonce",
-		);
+		let inlineScriptTags = inlineScriptTags_get(&body);
+		assert!(!inlineScriptTags.is_empty(),"Leptos shell does not contain an inline hydration script");
+		for tag in inlineScriptTags
+		{
+			assert!(
+				tag.contains(&format!("nonce=\"{nonce}\"")) || tag.contains(&format!("nonce={nonce}")),
+				"Leptos inline script does not use the CSP response nonce: {tag}",
+			);
+		}
+		if (std::env::var_os("LEPTOS_WATCH").is_some())
+		{
+			assert!(body.contains("/live_reload"),"LEPTOS_WATCH does not render AutoReload");
+		}
 		assert!(body.contains("https://cdn.jsdelivr.net/npm/iconoir@7.11.1/css/iconoir.css"));
 		assert!(body.contains("sha384-luECWXGw+Rk0LDPKZ8m2vuzYJnGiJfFabF16BAqKVf7rdp1/jvaViZ+BFXFuaD5H"));
 		assert!(body.contains("crossorigin=\"anonymous\"") || body.contains("crossorigin=anonymous"));
 		assert!(!body.contains("iconoir@main"));
 	}
 
+	fn inlineScriptTags_get(body: &str) -> Vec<&str>
+	{
+		let mut tags = Vec::new();
+		let mut remaining = body;
+		while let Some(start) = remaining.find("<script")
+		{
+			remaining = &remaining[start..];
+			let Some(end) = remaining.find('>')
+			else
+			{
+				break;
+			};
+			let tag = &remaining[..=end];
+			if (!tag.contains("src="))
+			{
+				tags.push(tag);
+			}
+			remaining = &remaining[end + 1..];
+		}
+		return tags;
+	}
+
 	#[test]
 	fn enforcedPolicyContainsRequiredBoundariesAndNonce()
 	{
-		let policy = BrowserContentSecurity::new().policyHeader_get();
+		let contentSecurity = contentSecurity_get(Env::PROD,true);
+		let policy = policy_get(&contentSecurity,"home.example");
 		let policy = policy.to_str().unwrap();
 
 		for directive in [
@@ -355,6 +436,83 @@ mod tests
 			assert!(policy.contains(directive),"missing CSP directive: {directive}");
 		}
 		assert!(!policy.contains("'unsafe-eval'"));
+		assert!(!policy.contains("ws://"));
+		assert!(!policy.contains("wss://"));
+	}
+
+	#[test]
+	fn developmentWatchAllowsOnlyConfiguredReloadOrigin()
+	{
+		let contentSecurity = contentSecurity_get(Env::DEV,true);
+		let policy = policy_get(&contentSecurity,"127.0.0.1:3002");
+		let policy = policy.to_str().unwrap();
+
+		assert!(policy.contains("connect-src 'self' https://api.open-meteo.com ws://127.0.0.1:3011;"));
+		assert_eq!(policy.matches("ws://").count(),1);
+		assert!(!policy.contains("wss://"));
+	}
+
+	#[test]
+	fn developmentWithoutWatchDoesNotAllowReloadOrigin()
+	{
+		let contentSecurity = contentSecurity_get(Env::DEV,false);
+		let policy = policy_get(&contentSecurity,"127.0.0.1:3002");
+		let policy = policy.to_str().unwrap();
+
+		assert!(!policy.contains("ws://"));
+		assert!(!policy.contains("wss://"));
+	}
+
+	#[test]
+	fn developmentWatchUsesExternalPortAndWssConfiguration()
+	{
+		let mut options = leptosOptions_get(Env::DEV);
+		options.reload_external_port = Some(443);
+		options.reload_ws_protocol = ReloadWSProtocol::WSS;
+		let contentSecurity = BrowserContentSecurity::new(&options,true);
+		let policy = policy_get(&contentSecurity,"dev.example:8443");
+		let policy = policy.to_str().unwrap();
+
+		assert!(policy.contains("wss://dev.example:443"));
+		assert!(!policy.contains("ws://"));
+		assert!(!policy.contains(":3011"));
+	}
+
+	#[test]
+	fn developmentWatchFailsClosedWithoutValidRequestHost()
+	{
+		let contentSecurity = contentSecurity_get(Env::DEV,true);
+		let policyWithoutHost = contentSecurity.policyHeader_get(&Nonce::new(),&HeaderMap::new());
+		let policyWithUserInfo = policy_get(&contentSecurity,"user@dev.example:3002");
+
+		for policy in [policyWithoutHost,policyWithUserInfo]
+		{
+			let policy = policy.to_str().unwrap();
+			assert!(!policy.contains("ws://"));
+			assert!(!policy.contains("wss://"));
+		}
+	}
+
+	fn contentSecurity_get(environment: Env,watchEnabled: bool) -> BrowserContentSecurity
+	{
+		return BrowserContentSecurity::new(&leptosOptions_get(environment),watchEnabled);
+	}
+
+	fn leptosOptions_get(environment: Env) -> LeptosOptions
+	{
+		let mut options = leptos::prelude::get_configuration(Some("Cargo.toml")).unwrap().leptos_options;
+		options.env = environment;
+		options.reload_port = 3011;
+		options.reload_external_port = None;
+		options.reload_ws_protocol = ReloadWSProtocol::WS;
+		return options;
+	}
+
+	fn policy_get(contentSecurity: &BrowserContentSecurity,host: &'static str) -> HeaderValue
+	{
+		let mut headers = HeaderMap::new();
+		headers.insert("host",HeaderValue::from_static(host));
+		return contentSecurity.policyHeader_get(&Nonce::new(),&headers);
 	}
 
 	#[test]

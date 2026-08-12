@@ -91,7 +91,7 @@ pub fn Connection() -> impl IntoView {
 				<Translate key="pageRoot_foot"/>
 			</footer>
 		</div>
-	}
+	}.into_any()
 }
 
 #[cfg(test)]

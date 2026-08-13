@@ -7,6 +7,7 @@ use leptos::{island, view, IntoView};
 use leptos::reactive::spawn_local_scoped;
 use leptos_router::components::A;
 use leptos_router::hooks;
+use crate::api::login::components::AccountPreferencesError;
 use crate::front::utils::all_front_enum::{AllFrontErrorEnum, AllFrontLoginEnum};
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
 use crate::front::utils::translate::{Translate, TranslateText};
@@ -39,14 +40,26 @@ pub fn Connection() -> impl IntoView {
 				},
 			};
 			ModuleHolder::lifecycle_close();
-			if (clientState.login_apply(crypto).is_err())
+			let preferencesWarning = match clientState.login_apply(crypto).await
 			{
-				if (ClientCryptoContext::logout().await.is_some())
-				{
-					HWebTrace!("server session cleanup failed after local storage error");
-				}
-				toastingErr(&toaster, AllFrontErrorEnum::CRYPTO_STORAGE_FAILED).await;
-				return;
+				Ok(warning) => warning,
+				Err(error) => {
+					if (ClientCryptoContext::logout().await.is_some())
+					{
+						HWebTrace!("server session cleanup failed after account preferences error");
+					}
+					let storageClearFailed = clientState.local_clear().is_err();
+					toastingErr(&toaster,error).await;
+					if (storageClearFailed && error != AccountPreferencesError::STORAGE_FAILED)
+					{
+						toastingErr(&toaster,AllFrontErrorEnum::CRYPTO_STORAGE_FAILED).await;
+					}
+					return;
+				},
+			};
+			if let Some(warning) = preferencesWarning
+			{
+				toastingErr(&toaster,warning).await;
 			}
 			toastingSuccess(&toaster, AllFrontLoginEnum::LOGIN_USER_CONNECTED).await;
 			HWebTrace!("user logged");

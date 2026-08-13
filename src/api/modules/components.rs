@@ -173,7 +173,7 @@ impl ModuleContent
 	}
 
 	#[cfg(feature = "ssr")]
-	pub fn remove(mut config: Hconfig::HConfig::HConfig, name: ModuleID) -> bool
+	pub fn remove(config: &mut Hconfig::HConfig::HConfig, name: ModuleID) -> bool
 	{
 		use Hconfig::tinyjson::JsonValue;
 		let modulePath = Self::getModulePathNamed(&name.id);
@@ -201,6 +201,35 @@ impl ModuleContent
 		});
 
 		return returning;
+	}
+
+	#[cfg(feature = "ssr")]
+	pub(crate) fn retrieveAll(config: &Hconfig::HConfig::HConfig) -> Result<Vec<Self>, ModuleErrors>
+	{
+		use Hconfig::tinyjson::JsonValue;
+
+		let Some(JsonValue::Object(modules)) = config.value_get("modules") else {return Ok(Vec::new())};
+		let mut moduleIds = modules.keys().cloned().collect::<Vec<_>>();
+		moduleIds.sort();
+		let mut contents = Vec::with_capacity(moduleIds.len());
+		for moduleId in moduleIds
+		{
+			let mut content = Self::newFromName(&ModuleID {id: moduleId});
+			content.retrieve(config)?;
+			contents.push(content);
+		}
+		return Ok(contents);
+	}
+
+	#[cfg(feature = "ssr")]
+	pub(crate) fn encryptedContent_set(config: &mut Hconfig::HConfig::HConfig, id: &ModuleID, content: String) -> Result<(), ModuleErrors>
+	{
+		use Hconfig::tinyjson::JsonValue;
+
+		let modulePath = Self::getModulePathNamed(&id.id);
+		let Some(JsonValue::Object(_)) = config.value_get(&modulePath) else {return Err(ModuleErrors::Empty)};
+		config.value_set(&format!("{}/content",modulePath),JsonValue::String(content));
+		return Ok(());
 	}
 
 	#[cfg(feature = "ssr")]

@@ -173,6 +173,27 @@ mod tests
 	}
 
 	#[test]
+	fn networkSuspension_invalidatesInflightGeneration()
+	{
+		let parentOwner = Owner::new();
+		parentOwner.with(|| {
+			let mut holder = ModuleHolder::new();
+			let (epoch, _) = holder.lifecycle_open_inner();
+			let generation = holder.network_generation_get(epoch).unwrap();
+
+			holder.network_suspend_inner();
+			assert!(holder.network_generation_get(epoch).is_none());
+			assert!(!holder.network_generation_isActive(epoch,generation));
+
+			holder.network_resume_inner();
+			let resumedGeneration = holder.network_generation_get(epoch).unwrap();
+			assert_ne!(resumedGeneration,generation);
+			assert!(holder.network_generation_isActive(epoch,resumedGeneration));
+		});
+		parentOwner.cleanup();
+	}
+
+	#[test]
 	fn blocksView_ordersModulesFromTopToBottomThenLeftToRight()
 	{
 		let parentOwner = Owner::new();
@@ -218,6 +239,8 @@ pub struct ModuleHolder
 	_epochCounter: u64,
 	_activeEpoch: Option<ModuleHolderEpoch>,
 	_taskOwner: Option<Owner>,
+	_networkGeneration: u64,
+	_networkSuspended: bool,
 }
 
 impl ModuleHolder
@@ -240,6 +263,8 @@ impl ModuleHolder
 			_epochCounter: 0,
 			_activeEpoch: None,
 			_taskOwner: None,
+			_networkGeneration: 0,
+			_networkSuspended: false,
 		}
 	}
 
@@ -295,9 +320,52 @@ impl ModuleHolder
 		return Self::getSingleton().with_untracked(|holder| holder.lifecycle_epoch_isActive(epoch));
 	}
 
+	pub(crate) fn network_isActive(epoch: ModuleHolderEpoch) -> bool
+	{
+		return Self::getSingleton().with_untracked(|holder| holder.network_generation_get(epoch).is_some());
+	}
+
 	pub(crate) fn lifecycle_isOpen() -> bool
 	{
 		return Self::getSingleton().with_untracked(|holder| holder._activeEpoch.is_some());
+	}
+
+	pub(crate) fn network_suspend()
+	{
+		let _ = Self::getSingleton().try_update(|holder| holder.network_suspend_inner());
+	}
+
+	pub(crate) fn network_resume()
+	{
+		let _ = Self::getSingleton().try_update(|holder| holder.network_resume_inner());
+	}
+
+	fn network_suspend_inner(&mut self)
+	{
+		if (self._networkSuspended)
+		{
+			return;
+		}
+		self._networkGeneration = self._networkGeneration.checked_add(1)
+			.expect("ModuleHolder network generation exhausted");
+		self._networkSuspended = true;
+		for cron in self._crons.values_mut()
+		{
+			cron.pause();
+		}
+	}
+
+	fn network_resume_inner(&mut self)
+	{
+		if (!self._networkSuspended)
+		{
+			return;
+		}
+		self._networkSuspended = false;
+		for cron in self._crons.values_mut()
+		{
+			cron.resume();
+		}
 	}
 
 	fn lifecycle_open_inner(&mut self) -> (ModuleHolderEpoch, Option<Owner>)
@@ -314,6 +382,9 @@ impl ModuleHolder
 	fn lifecycle_close_inner(&mut self) -> Option<Owner>
 	{
 		self._activeEpoch = None;
+		self._networkGeneration = self._networkGeneration.checked_add(1)
+			.expect("ModuleHolder network generation exhausted");
+		self._networkSuspended = false;
 		let owner = self._taskOwner.take();
 		self._crons.clear();
 		self._moduleActions = None;
@@ -335,6 +406,22 @@ impl ModuleHolder
 	fn lifecycle_epoch_isActive(&self, epoch: ModuleHolderEpoch) -> bool
 	{
 		return self._activeEpoch == Some(epoch);
+	}
+
+	fn network_generation_get(&self, epoch: ModuleHolderEpoch) -> Option<u64>
+	{
+		if (!self.lifecycle_epoch_isActive(epoch) || self._networkSuspended)
+		{
+			return None;
+		}
+		return Some(self._networkGeneration);
+	}
+
+	fn network_generation_isActive(&self, epoch: ModuleHolderEpoch, generation: u64) -> bool
+	{
+		return self.lifecycle_epoch_isActive(epoch)
+			&& !self._networkSuspended
+			&& self._networkGeneration == generation;
 	}
 
 	fn lifecycle_owner_get(&self, epoch: ModuleHolderEpoch) -> Option<Owner>
@@ -369,13 +456,10 @@ impl ModuleHolder
 	pub(crate) fn network_deferredCall(moduleHolder: ArcRwSignal<ModuleHolder>, epoch: ModuleHolderEpoch, toaster: ToasterContext, apiCall: impl FnOnce(ArcRwSignal<ModuleHolder>) -> Option<ApiCall>, toastingSuccess: Option<AllFrontUIEnum>) -> impl Future<Output = ()>
 	{
 		async move {
-			if (!moduleHolder.with_untracked(|holder| holder.lifecycle_epoch_isActive(epoch)))
-			{
-				return;
-			}
+			let Some(networkGeneration) = moduleHolder.with_untracked(|holder| holder.network_generation_get(epoch)) else {return};
 			let Some(apiCall) = apiCall(moduleHolder.clone()) else {return;};
 			let mut apiResult = apiCall.await;
-			if (!moduleHolder.with_untracked(|holder| holder.lifecycle_epoch_isActive(epoch)))
+			if (!moduleHolder.with_untracked(|holder| holder.network_generation_isActive(epoch,networkGeneration)))
 			{
 				return;
 			}
@@ -395,7 +479,7 @@ impl ModuleHolder
 				if (!authenticationRequired || authenticationWasLocal)
 				{
 					toastingErr(&toaster, err).await;
-					if (!moduleHolder.with_untracked(|holder| holder.lifecycle_epoch_isActive(epoch)))
+					if (!moduleHolder.with_untracked(|holder| holder.network_generation_isActive(epoch,networkGeneration)))
 					{
 						return;
 					}
@@ -417,7 +501,7 @@ impl ModuleHolder
 				if let Some(toastingSuccess) = toastingSuccess
 				{
 					toaster_helpers::toastingSuccess(&toaster, toastingSuccess).await;
-					if (!moduleHolder.with_untracked(|holder| holder.lifecycle_epoch_isActive(epoch)))
+					if (!moduleHolder.with_untracked(|holder| holder.network_generation_isActive(epoch,networkGeneration)))
 					{
 						return;
 					}
@@ -462,6 +546,10 @@ impl ModuleHolder
 		};
 
 		return moduleHolder.with_untracked(|holder| {
+			if (holder._networkSuspended)
+			{
+				return None;
+			}
 			let preparedVar = match prepare(holder, &crypto)
 			{
 				Ok(preparedVar) => preparedVar,
@@ -791,6 +879,10 @@ impl ModuleHolder
 
 	fn module_refresh_prepare(&self, epoch: ModuleHolderEpoch, modulesId: Vec<ModuleID>, toaster: ToasterContext) -> Option<ModuleRefreshTask>
 	{
+		if (self._networkSuspended)
+		{
+			return None;
+		}
 		let owner = self.lifecycle_owner_get(epoch)?;
 		let mut allBoxedFuture = vec![];
 		for moduleId in modulesId

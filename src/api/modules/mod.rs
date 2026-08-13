@@ -32,6 +32,7 @@ impl ModuleApiError
 		return match error
 		{
 			UserBackHelperError::LoginError(_) => Self::AUTH_REQUIRED,
+			UserBackHelperError::CredentialRotationInProgress => Self::SERVER_ERROR,
 			error =>
 			{
 				HTrace!((Level::ERROR) "module API user resolution failed: {:?}", error);
@@ -75,14 +76,14 @@ pub async fn API_module_update(content: ModuleContent, overwrite:bool) -> Result
 {
 	use crate::api::login::user_back::AuthenticatedUser;
 	use crate::api::modules::components::ModuleErrors;
-	let authenticatedUser = AuthenticatedUser::current().await.map_err(ModuleApiError::fromUserBackError)?;
-	let mut config = authenticatedUser.userConfig_get().map_err(ModuleApiError::fromUserBackError)?;
+	let mut mutation = AuthenticatedUser::mutation_begin().await.map_err(ModuleApiError::fromUserBackError)?;
+	let config = mutation.config_getMut();
 	let mut content = content;
 
-	match content.update(&mut config,overwrite) {
+	match content.update(config,overwrite) {
 		Ok(_) => {}
 		Err(ModuleErrors::SavedIsNewer) => { // never send if overwrite is true
-			if content.retrieve(&config).is_ok() {
+			if content.retrieve(config).is_ok() {
 				return Ok(ModuleReturnUpdate::OUTDATED(content));
 			}
 		},
@@ -98,15 +99,15 @@ pub async fn API_modules_update(contents: Vec<ModuleContent>, overwrite:bool) ->
 {
 	use crate::api::login::user_back::AuthenticatedUser;
 	use crate::api::modules::components::ModuleErrors;
-	let authenticatedUser = AuthenticatedUser::current().await.map_err(ModuleApiError::fromUserBackError)?;
-	let mut config = authenticatedUser.userConfig_get().map_err(ModuleApiError::fromUserBackError)?;
+	let mut mutation = AuthenticatedUser::mutation_begin().await.map_err(ModuleApiError::fromUserBackError)?;
+	let config = mutation.config_getMut();
 	let mut returning = HashMap::new();
 
 	for mut content in contents {
-		match content.update(&mut config,overwrite) {
+		match content.update(config,overwrite) {
 			Ok(_) => {}
 			Err(ModuleErrors::SavedIsNewer) => { // never send if overwrite is true
-				if content.retrieve(&config).is_ok() {
+				if content.retrieve(config).is_ok() {
 					returning.insert(content.id.clone(), ModuleReturnUpdate::OUTDATED(content));
 				}
 			},
@@ -132,8 +133,7 @@ pub async fn API_module_retrieve(moduleData: ApiModulesID) -> Result<ModuleRetur
 	use crate::api::modules::components::ModuleErrors;
 	use Htrace::HTrace;
 
-	let authenticatedUser = AuthenticatedUser::current().await.map_err(ModuleApiError::fromUserBackError)?;
-	let config = authenticatedUser.userConfig_get().map_err(ModuleApiError::fromUserBackError)?;
+	let (_,config) = AuthenticatedUser::currentWithConfig().await.map_err(ModuleApiError::fromUserBackError)?;
 
 	let mut content = ModuleContent::newFromName(&moduleData.key);
 	match content.retrieve(&config) {
@@ -157,8 +157,7 @@ pub async fn API_modules_retrieve(modulesData: Vec<ApiModulesID>) -> Result<Hash
 {
 	use crate::api::login::user_back::AuthenticatedUser;
 	use crate::api::modules::components::ModuleErrors;
-	let authenticatedUser = AuthenticatedUser::current().await.map_err(ModuleApiError::fromUserBackError)?;
-	let config = authenticatedUser.userConfig_get().map_err(ModuleApiError::fromUserBackError)?;
+	let (_,config) = AuthenticatedUser::currentWithConfig().await.map_err(ModuleApiError::fromUserBackError)?;
 	let mut returning = HashMap::new();
 
 	for moduleData in modulesData.iter() {
@@ -185,8 +184,7 @@ pub async fn API_modules_retrieve(modulesData: Vec<ApiModulesID>) -> Result<Hash
 pub async fn API_module_retrieveMissingModule(#[server(default)] modules: Vec<ModuleID>) -> Result<HashMap<ModuleID,ModuleReturnRetrieve>, ModuleApiError>
 {
 	use crate::api::login::user_back::AuthenticatedUser;
-	let authenticatedUser = AuthenticatedUser::current().await.map_err(ModuleApiError::fromUserBackError)?;
-	let config = authenticatedUser.userConfig_get().map_err(ModuleApiError::fromUserBackError)?;
+	let (_,config) = AuthenticatedUser::currentWithConfig().await.map_err(ModuleApiError::fromUserBackError)?;
 
 	let missing_module = helper_retrieveMissingModule(&config,modules)?;
 	return Ok(missing_module);
@@ -198,10 +196,9 @@ pub async fn API_module_retrieveMissingModule(#[server(default)] modules: Vec<Mo
 pub async fn API_module_remove(moduleName: ModuleID) -> Result<(), ModuleApiError>
 {
 	use crate::api::login::user_back::AuthenticatedUser;
-	let authenticatedUser = AuthenticatedUser::current().await.map_err(ModuleApiError::fromUserBackError)?;
-	let config = authenticatedUser.userConfig_get().map_err(ModuleApiError::fromUserBackError)?;
+	let mut mutation = AuthenticatedUser::mutation_begin().await.map_err(ModuleApiError::fromUserBackError)?;
 
-	return match ModuleContent::remove(config, moduleName) {
+	return match ModuleContent::remove(mutation.config_getMut(), moduleName) {
 		true => Ok(()),
 		false => Err(ModuleApiError::NOT_FOUND)
 	};

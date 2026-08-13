@@ -84,6 +84,8 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 	view! {
 		{move || {
 			manager.dialog.get().map(|data| {
+				let closeEnabledData = data.clone();
+				let validateEnabledData = data.clone();
 				view! {
 					<div class={move || {
 							let mut closing = "";
@@ -117,14 +119,28 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 								{
 									if let Some(button) = data.button_close_title.clone()
 									{
-										view!{<button type="button" class="close" on:click=closeFn.clone()><TranslateText key={button}/></button>}.into_any()
+										view!{
+											<button
+												type="button"
+												class="close"
+												disabled=move || !closeEnabledData.canClose()
+												on:click=closeFn.clone()
+											><TranslateText key={button}/></button>
+										}.into_any()
 									}
 									else {view!{}.into_any()}
 								}
 								{
 									if let Some(button) = data.button_validate_title.clone()
 									{
-										view!{<button type="button" class={data.validate_style.class_get()} on:click=validateFn.clone()><TranslateText key={button}/></button>}.into_any()
+										view!{
+											<button
+												type="button"
+												class={data.validate_style.class_get()}
+												disabled=move || !validateEnabledData.canClose()
+												on:click=validateFn.clone()
+											><TranslateText key={button}/></button>
+										}.into_any()
 									}
 									else {view!{}.into_any()}
 								}
@@ -145,6 +161,7 @@ pub struct DialogData
 	// A dialog can outlive the reactive Owner that created it, so it must own its actions.
 	on_validate: Option<Arc<dyn Fn(()) -> bool + Send + Sync + 'static>>,
 	on_close: Option<Arc<dyn Fn(()) + Send + Sync + 'static>>,
+	can_close: Arc<dyn Fn() -> bool + Send + Sync + 'static>,
 	is_closing: bool,
 	is_larger: bool,
 	button_validate_title: Option<String>,
@@ -182,6 +199,7 @@ impl DialogData
 			body: Arc::new(move || view!{}.into_any()),
 			on_validate: None,
 			on_close: None,
+			can_close: Arc::new(|| true),
 			is_closing: false,
 			is_larger: false,
 			button_validate_title: Some(AllFrontUIEnum::VALID.to_string()),
@@ -217,12 +235,38 @@ impl DialogData
 		self
 	}
 
+	/// Prevents user-driven validation and closing while a dialog-owned operation is incomplete.
+	pub fn setCanClose(mut self, can_close: impl Fn() -> bool + Send + Sync + 'static) -> Self
+	{
+		self.can_close = Arc::new(can_close);
+		self
+	}
+
+	fn canClose(&self) -> bool
+	{
+		return (self.can_close)();
+	}
+
 	fn run_validate(&self) -> bool
 	{
+		if (!self.canClose())
+		{
+			return false;
+		}
 		return self.on_validate.as_ref().map(|callback| callback(())).unwrap_or(true);
 	}
 
-	fn run_close(&self)
+	fn run_close(&self) -> bool
+	{
+		if (!self.canClose())
+		{
+			return false;
+		}
+		self.run_closeForced();
+		return true;
+	}
+
+	fn run_closeForced(&self)
 	{
 		if let Some(callback) = &self.on_close
 		{
@@ -252,8 +296,10 @@ impl DialogData
 
 	/// Change the label of the close button (or hide it if `NONE`).
 	pub fn setButtonCloseTitle(mut self, button_close_title: Option<impl ToString>)
+		-> Self
 	{
 		self.button_close_title = button_close_title.map(|s| s.to_string());
+		self
 	}
 }
 
@@ -302,6 +348,10 @@ impl DialogManager
 
 	pub(crate) fn clear(&self)
 	{
+		if let Some(dialog) = self.dialog.get_untracked()
+		{
+			dialog.run_closeForced();
+		}
 		self.innerClose();
 	}
 
@@ -310,7 +360,10 @@ impl DialogManager
 	{
 		if let Some(dialog) = self.dialog.get_untracked()
 		{
-			dialog.run_close();
+			if (!dialog.run_close())
+			{
+				return;
+			}
 		}
 		self.innerAnimateClose(start);
 	}
@@ -508,15 +561,44 @@ mod tests
 	fn dialog_clear_dropsAccountScopedContentImmediately()
 	{
 		let owner = Owner::new();
+		let wasClosed = Arc::new(AtomicBool::new(false));
+		let wasClosedInner = wasClosed.clone();
 		owner.with(|| {
 			let manager = DialogManager::new();
-			manager.open(DialogData::new().setTitle("account-a-content"));
+			manager.open(DialogData::new()
+				.setTitle("account-a-content")
+				.setOnClose(move |_| wasClosedInner.store(true,Ordering::Relaxed)));
 			assert!(manager.dialog.get_untracked().is_some());
 
 			manager.clear();
 			assert!(manager.dialog.get_untracked().is_none());
 		});
 		owner.cleanup();
+		assert!(wasClosed.load(Ordering::Relaxed));
+	}
+
+	#[test]
+	fn dialogCloseGuard_blocksUserActionsButNotLifecycleClear()
+	{
+		let owner = Owner::new();
+		let wasClosed = Arc::new(AtomicBool::new(false));
+		let wasClosedInner = wasClosed.clone();
+		owner.with(|| {
+			let dialog = DialogData::new()
+				.setCanClose(|| false)
+				.setOnClose(move |_| wasClosedInner.store(true,Ordering::Relaxed));
+
+			assert!(!dialog.run_validate());
+			assert!(!dialog.run_close());
+			assert!(!wasClosed.load(Ordering::Relaxed));
+
+			let manager = DialogManager::new();
+			manager.open(dialog);
+			manager.clear();
+			assert!(manager.dialog.get_untracked().is_none());
+		});
+		owner.cleanup();
+		assert!(wasClosed.load(Ordering::Relaxed));
 	}
 
 	#[test]

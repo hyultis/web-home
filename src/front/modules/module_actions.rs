@@ -37,7 +37,7 @@ impl ModuleActionFn
 
 	pub(super) fn lifecycle_isActive(&self) -> bool
 	{
-		return ModuleHolder::lifecycle_isActive(self._epoch);
+		return ModuleHolder::network_isActive(self._epoch);
 	}
 
 	#[cfg(test)]

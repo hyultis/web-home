@@ -8,7 +8,8 @@ use leptos::prelude::{expect_context, Get, GetUntracked, RwSignal, Set, Signal, 
 use leptos_use::{use_cookie_with_options, SameSite, UseCookieOptions};
 use serde::{Deserialize, Serialize};
 
-use crate::api::login::{API_user_login, API_user_logout, API_user_salt, API_user_sign};
+use crate::api::login::{API_user_login, API_user_logout, API_user_passwordRotation_finalize, API_user_passwordRotation_prepare, API_user_preferences_get, API_user_preferences_set, API_user_salt, API_user_sign};
+use crate::api::login::components::{AccountPreferencesError, PasswordRotationContent, PasswordRotationError, PasswordRotationFinalize};
 use crate::front::utils::all_front_enum::AllFrontLoginEnum;
 use crate::global_security::{generate_salt_raw, hash};
 
@@ -111,6 +112,18 @@ impl ClientCryptoContext
 		return API_user_logout().await.err().map(AllFrontLoginEnum::fromLoginStatus);
 	}
 
+	fn fromPassword(password: String, credentialSalt: String) -> Self
+	{
+		return Self {
+			userSalt: Self::pwdHash(password,credentialSalt),
+		};
+	}
+
+	fn credential_get(&self) -> String
+	{
+		return hash(self.userSalt.clone());
+	}
+
 	pub(crate) fn encrypt(&self, plaintext: &str) -> Result<String, ClientCryptoError>
 	{
 		let salt = generate_salt_raw().map_err(|_| ClientCryptoError::RANDOM_GENERATION)?;
@@ -181,10 +194,50 @@ impl ClientCryptoContext
 	}
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+struct ClientCryptoPending
+{
+	crypto: ClientCryptoContext,
+	request: PasswordRotationFinalize,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct ClientCryptoStorageDocument
+{
+	version: u8,
+	active: ClientCryptoContext,
+	#[serde(default)]
+	pending: Option<ClientCryptoPending>,
+}
+
+impl ClientCryptoStorageDocument
+{
+	const VERSION: u8 = 1;
+
+	fn new(active: ClientCryptoContext, pending: Option<ClientCryptoPending>) -> Self
+	{
+		return Self {
+			version: Self::VERSION,
+			active,
+			pending,
+		};
+	}
+}
+
+#[cfg(any(not(feature="ssr"),test))]
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ClientCryptoStorageCompatibility
+{
+	Current(ClientCryptoStorageDocument),
+	Legacy(ClientCryptoContext),
+}
+
 #[derive(Clone)]
 struct ClientCryptoStorage
 {
 	value: RwSignal<Option<ClientCryptoContext>>,
+	pending: RwSignal<Option<ClientCryptoPending>>,
 	error: RwSignal<Option<ClientCryptoError>>,
 }
 
@@ -192,13 +245,15 @@ impl ClientCryptoStorage
 {
 	fn new() -> Self
 	{
-		let (value, error) = match Self::browser_read()
+		let (value, pending, error) = match Self::browser_read()
 		{
-			Ok(value) => (value, None),
-			Err(error) => (None, Some(error)),
+			Ok(Some(document)) => (Some(document.active),document.pending,None),
+			Ok(None) => (None,None,None),
+			Err(error) => (None,None,Some(error)),
 		};
 		return Self {
 			value: RwSignal::new(value),
+			pending: RwSignal::new(pending),
 			error: RwSignal::new(error),
 		};
 	}
@@ -218,14 +273,96 @@ impl ClientCryptoStorage
 		return self.error.get_untracked();
 	}
 
+	#[cfg(not(feature = "ssr"))]
+	fn browser_sync(&self)
+	{
+		match Self::browser_read()
+		{
+			Ok(Some(document)) => {
+				self.value.set(Some(document.active));
+				self.pending.set(document.pending);
+				self.error.set(None);
+			},
+			Ok(None) => {
+				self.value.set(None);
+				self.pending.set(None);
+				self.error.set(None);
+			},
+			Err(error) => self.error.set(Some(error)),
+		}
+	}
+
 	fn set(&self, crypto: ClientCryptoContext) -> Result<(), ClientCryptoError>
 	{
-		if let Err(error) = Self::browser_write(&crypto)
+		let document = ClientCryptoStorageDocument::new(crypto.clone(),None);
+		if let Err(error) = Self::browser_write(&document)
 		{
 			self.error.set(Some(error));
 			return Err(error);
 		}
 		self.value.set(Some(crypto));
+		self.pending.set(None);
+		self.error.set(None);
+		return Ok(());
+	}
+
+	fn pending_get(&self) -> Option<ClientCryptoPending>
+	{
+		return self.pending.get_untracked();
+	}
+
+	fn pending_isAvailable(&self) -> bool
+	{
+		return self.pending.get().is_some();
+	}
+
+	fn pending_set(&self, pending: ClientCryptoPending) -> Result<(), ClientCryptoError>
+	{
+		let active = self.value.get_untracked().ok_or(ClientCryptoError::INVALID_ENVELOPE)?;
+		let document = ClientCryptoStorageDocument::new(active,Some(pending.clone()));
+		if let Err(error) = Self::browser_write(&document)
+		{
+			self.error.set(Some(error));
+			return Err(error);
+		}
+		self.pending.set(Some(pending));
+		self.error.set(None);
+		return Ok(());
+	}
+
+	fn pending_clear(&self, rotationId: &str) -> Result<bool, ClientCryptoError>
+	{
+		if (self.pending.get_untracked().as_ref().map(|pending| pending.request.rotationId.as_str()) != Some(rotationId))
+		{
+			return Ok(false);
+		}
+		let active = self.value.get_untracked().ok_or(ClientCryptoError::INVALID_ENVELOPE)?;
+		let document = ClientCryptoStorageDocument::new(active,None);
+		if let Err(error) = Self::browser_write(&document)
+		{
+			self.error.set(Some(error));
+			return Err(error);
+		}
+		self.pending.set(None);
+		self.error.set(None);
+		return Ok(true);
+	}
+
+	fn pending_promote(&self, rotationId: &str) -> Result<(), ClientCryptoError>
+	{
+		let pending = self.pending.get_untracked().ok_or(ClientCryptoError::INVALID_ENVELOPE)?;
+		if (pending.request.rotationId != rotationId)
+		{
+			return Err(ClientCryptoError::INVALID_ENVELOPE);
+		}
+		let document = ClientCryptoStorageDocument::new(pending.crypto.clone(),None);
+		if let Err(error) = Self::browser_write(&document)
+		{
+			self.error.set(Some(error));
+			return Err(error);
+		}
+		self.value.set(Some(pending.crypto));
+		self.pending.set(None);
 		self.error.set(None);
 		return Ok(());
 	}
@@ -233,6 +370,7 @@ impl ClientCryptoStorage
 	fn clear(&self) -> Result<(), ClientCryptoError>
 	{
 		self.value.set(None);
+		self.pending.set(None);
 		if let Err(error) = Self::browser_remove()
 		{
 			self.error.set(Some(error));
@@ -243,13 +381,13 @@ impl ClientCryptoStorage
 	}
 
 	#[cfg(feature = "ssr")]
-	fn browser_read() -> Result<Option<ClientCryptoContext>, ClientCryptoError>
+	fn browser_read() -> Result<Option<ClientCryptoStorageDocument>, ClientCryptoError>
 	{
 		return Ok(None);
 	}
 
 	#[cfg(not(feature = "ssr"))]
-	fn browser_read() -> Result<Option<ClientCryptoContext>, ClientCryptoError>
+	fn browser_read() -> Result<Option<ClientCryptoStorageDocument>, ClientCryptoError>
 	{
 		let storage = web_sys::window()
 			.ok_or(ClientCryptoError::STORAGE_UNAVAILABLE)?
@@ -259,21 +397,26 @@ impl ClientCryptoStorage
 		let Some(serialized) = storage.get_item(CLIENT_CRYPTO_STORAGE_KEY)
 			.map_err(|_| ClientCryptoError::STORAGE_READ)?
 		else {return Ok(None)};
-		return serde_json::from_str(&serialized)
-			.map(Some)
-			.map_err(|_| ClientCryptoError::INVALID_ENVELOPE);
+		let compatibility = serde_json::from_str::<ClientCryptoStorageCompatibility>(&serialized)
+			.map_err(|_| ClientCryptoError::INVALID_ENVELOPE)?;
+		return match compatibility
+		{
+			ClientCryptoStorageCompatibility::Current(document) if document.version == ClientCryptoStorageDocument::VERSION => Ok(Some(document)),
+			ClientCryptoStorageCompatibility::Current(_) => Err(ClientCryptoError::INVALID_ENVELOPE),
+			ClientCryptoStorageCompatibility::Legacy(active) => Ok(Some(ClientCryptoStorageDocument::new(active,None))),
+		};
 	}
 
 	#[cfg(feature = "ssr")]
-	fn browser_write(_crypto: &ClientCryptoContext) -> Result<(), ClientCryptoError>
+	fn browser_write(_document: &ClientCryptoStorageDocument) -> Result<(), ClientCryptoError>
 	{
 		return Ok(());
 	}
 
 	#[cfg(not(feature = "ssr"))]
-	fn browser_write(crypto: &ClientCryptoContext) -> Result<(), ClientCryptoError>
+	fn browser_write(document: &ClientCryptoStorageDocument) -> Result<(), ClientCryptoError>
 	{
-		let serialized = serde_json::to_string(crypto).map_err(|_| ClientCryptoError::SERIALIZATION)?;
+		let serialized = serde_json::to_string(document).map_err(|_| ClientCryptoError::SERIALIZATION)?;
 		let storage = web_sys::window()
 			.ok_or(ClientCryptoError::STORAGE_UNAVAILABLE)?
 			.local_storage()
@@ -306,8 +449,198 @@ impl ClientCryptoStorage
 struct UserPreferences
 {
 	lang: String,
+	#[serde(default)]
+	primaryHue: PrimaryHue,
 	connected: bool,
 	updateVal: u128,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+struct PrimaryHue(u16);
+
+impl PrimaryHue
+{
+	const DEFAULT: u16 = 212;
+	const MAXIMUM: u16 = 359;
+
+	fn new(value: u16) -> Option<Self>
+	{
+		return (value <= Self::MAXIMUM).then_some(Self(value));
+	}
+
+	fn get(self) -> u16
+	{
+		return self.0;
+	}
+
+	fn fromUnsigned(value: u64) -> Self
+	{
+		return u16::try_from(value).ok().and_then(Self::new).unwrap_or_default();
+	}
+}
+
+impl Default for PrimaryHue
+{
+	fn default() -> Self
+	{
+		return Self(Self::DEFAULT);
+	}
+}
+
+impl<'de> Deserialize<'de> for PrimaryHue
+{
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		struct PrimaryHueVisitor;
+
+		impl<'de> serde::de::Visitor<'de> for PrimaryHueVisitor
+		{
+			type Value = PrimaryHue;
+
+			fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+			{
+				return formatter.write_str("an integer hue between 0 and 359");
+			}
+
+			fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+			where
+				E: serde::de::Error,
+			{
+				return Ok(PrimaryHue::fromUnsigned(value));
+			}
+
+			fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+			where
+				E: serde::de::Error,
+			{
+				return Ok(u64::try_from(value).map(PrimaryHue::fromUnsigned).unwrap_or_default());
+			}
+
+			fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+			where
+				E: serde::de::Error,
+			{
+				if (!value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > u64::MAX as f64)
+				{
+					return Ok(PrimaryHue::default());
+				}
+				return Ok(PrimaryHue::fromUnsigned(value as u64));
+			}
+
+			fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+			where
+				E: serde::de::Error,
+			{
+				return Ok(value.parse::<u64>().map(PrimaryHue::fromUnsigned).unwrap_or_default());
+			}
+
+			fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E>
+			where
+				E: serde::de::Error,
+			{
+				return Ok(PrimaryHue::default());
+			}
+
+			fn visit_none<E>(self) -> Result<Self::Value, E>
+			where
+				E: serde::de::Error,
+			{
+				return Ok(PrimaryHue::default());
+			}
+
+			fn visit_unit<E>(self) -> Result<Self::Value, E>
+			where
+				E: serde::de::Error,
+			{
+				return Ok(PrimaryHue::default());
+			}
+		}
+
+		return deserializer.deserialize_any(PrimaryHueVisitor);
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PreferencesPreview
+{
+	lang: String,
+	primaryHue: PrimaryHue,
+}
+
+impl PreferencesPreview
+{
+	fn fromPreferences(preferences: &UserPreferences) -> Self
+	{
+		return Self {
+			lang: UserPreferences::lang_normalized(&preferences.lang),
+			primaryHue: preferences.primaryHue,
+		};
+	}
+
+	fn lang_set(&mut self, lang: &str) -> bool
+	{
+		let Some(lang) = UserPreferences::lang_supported(lang) else {return false};
+		self.lang = lang;
+		return true;
+	}
+
+	fn primaryHue_set(&mut self, value: u16) -> bool
+	{
+		let Some(primaryHue) = PrimaryHue::new(value) else {return false};
+		self.primaryHue = primaryHue;
+		return true;
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct AccountPreferences
+{
+	version: u8,
+	lang: String,
+	primaryHue: PrimaryHue,
+}
+
+impl AccountPreferences
+{
+	const VERSION: u8 = 1;
+
+	fn fromUserPreferences(preferences: &UserPreferences) -> Self
+	{
+		return Self {
+			version: Self::VERSION,
+			lang: UserPreferences::lang_normalized(&preferences.lang),
+			primaryHue: preferences.primaryHue,
+		};
+	}
+
+	fn fromPreview(preview: &PreferencesPreview) -> Self
+	{
+		return Self {
+			version: Self::VERSION,
+			lang: UserPreferences::lang_normalized(&preview.lang),
+			primaryHue: preview.primaryHue,
+		};
+	}
+
+	fn deserialize(content: &str) -> Result<Self, AccountPreferencesError>
+	{
+		let mut preferences = serde_json::from_str::<Self>(content)
+			.map_err(|_| AccountPreferencesError::CONTENT_INVALID)?;
+		if (preferences.version != Self::VERSION)
+		{
+			return Err(AccountPreferencesError::CONTENT_INVALID);
+		}
+		preferences.lang = UserPreferences::lang_supported(&preferences.lang)
+			.ok_or(AccountPreferencesError::CONTENT_INVALID)?;
+		return Ok(preferences);
+	}
+
+	fn serialize(&self) -> Result<String, AccountPreferencesError>
+	{
+		return serde_json::to_string(self).map_err(|_| AccountPreferencesError::CONTENT_INVALID);
+	}
 }
 
 impl UserPreferences
@@ -321,8 +654,29 @@ impl UserPreferences
 
 	fn lang_set(&mut self, lang: impl Into<String>)
 	{
-		let lang = lang.into();
-		self.lang = lang.split('-').next().unwrap_or("EN").to_uppercase();
+		self.lang = Self::lang_normalized(&lang.into());
+	}
+
+	fn lang_supported(lang: &str) -> Option<String>
+	{
+		let lang = lang.split('-').next().unwrap_or("EN").to_uppercase();
+		return ["EN", "FR"].contains(&lang.as_str()).then_some(lang);
+	}
+
+	fn lang_normalized(lang: &str) -> String
+	{
+		return Self::lang_supported(lang).unwrap_or_else(|| "EN".to_string());
+	}
+
+	fn normalize(&mut self) -> bool
+	{
+		let lang = Self::lang_normalized(&self.lang);
+		if (lang == self.lang)
+		{
+			return false;
+		}
+		self.lang = lang;
+		return true;
 	}
 
 	fn valUpdate(&mut self)
@@ -346,6 +700,7 @@ impl Default for UserPreferences
 	{
 		return Self {
 			lang: "EN".to_string(),
+			primaryHue: PrimaryHue::default(),
 			connected: false,
 			updateVal: 0,
 		};
@@ -388,6 +743,7 @@ impl LegacyUserData
 		let _ = self.generatedId;
 		let preferences = UserPreferences {
 			lang: self.lang,
+			primaryHue: PrimaryHue::default(),
 			connected: crypto.is_some(),
 			updateVal: self.updateVal,
 		};
@@ -415,6 +771,8 @@ pub(crate) struct ClientState
 {
 	preferences: Signal<Option<UserPreferences>>,
 	setPreferences: WriteSignal<Option<UserPreferences>>,
+	preferencesPreview: RwSignal<Option<PreferencesPreview>>,
+	passwordRotationRunning: RwSignal<bool>,
 	crypto: ClientCryptoStorage,
 	legacyCrypto: Signal<Option<ClientCryptoContext>>,
 	setLegacyCrypto: WriteSignal<Option<ClientCryptoContext>>,
@@ -428,11 +786,23 @@ impl ClientState
 	{
 		let (preferences, setPreferences) = UserPreferences::cookie_signalGet();
 		let crypto = ClientCryptoStorage::new();
+		#[cfg(not(feature="ssr"))]
+		{
+			let storageCrypto = crypto.clone();
+			let _ = leptos_use::use_event_listener(leptos_use::use_window(),leptos::ev::storage,move |event| {
+				if (event.key().as_deref() == Some(CLIENT_CRYPTO_STORAGE_KEY) || event.key().is_none())
+				{
+					storageCrypto.browser_sync();
+				}
+			});
+		}
 		let (legacyCrypto, setLegacyCrypto) = ClientCryptoContext::legacyCookie_signalGet();
 		let (legacy, setLegacy) = LegacyUserData::cookie_signalGet();
 		return Self {
 			preferences,
 			setPreferences,
+			preferencesPreview: RwSignal::new(None),
+			passwordRotationRunning: RwSignal::new(false),
 			crypto,
 			legacyCrypto,
 			setLegacyCrypto,
@@ -460,7 +830,14 @@ impl ClientState
 			None => (None, None),
 		};
 
-		if (self.preferences.get_untracked().is_none())
+		if let Some(mut preferences) = self.preferences.get_untracked()
+		{
+			if (preferences.normalize())
+			{
+				self.setPreferences.set(Some(preferences));
+			}
+		}
+		else
 		{
 			self.setPreferences.set(Some(legacyPreferences.unwrap_or_else(|| UserPreferences::new(defaultLang))));
 		}
@@ -468,6 +845,13 @@ impl ClientState
 		let scopedCrypto = self.legacyCrypto.get_untracked();
 		if (!self.login_isConnected_untracked())
 		{
+			let mut preferences = self.preferences.get_untracked().unwrap_or_default();
+			if (preferences.primaryHue != PrimaryHue::default())
+			{
+				preferences.primaryHue = PrimaryHue::default();
+				preferences.valUpdate();
+				self.setPreferences.set(Some(preferences));
+			}
 			let clearResult = if (self.crypto.get().is_some() || self.crypto.error_get().is_some())
 			{
 				self.crypto.clear()
@@ -504,19 +888,48 @@ impl ClientState
 		return Ok(());
 	}
 
-	pub(crate) fn login_apply(&self, crypto: ClientCryptoContext) -> Result<(), ClientCryptoError>
+	pub(crate) async fn login_apply(&self, crypto: ClientCryptoContext) -> Result<Option<AccountPreferencesError>, AccountPreferencesError>
 	{
-		self.crypto.set(crypto)?;
+		let currentPreferences = self.preferences.get_untracked().unwrap_or_default();
+		let accountPreferencesResult = match API_user_preferences_get().await
+		{
+			Ok(Some(content)) => {
+				crypto.decrypt(&content)
+					.map_err(|_| AccountPreferencesError::CRYPTO_FAILED)
+					.and_then(|plaintext| AccountPreferences::deserialize(&plaintext))
+			},
+			Ok(None) => {
+				let accountPreferences = AccountPreferences::fromUserPreferences(&currentPreferences);
+				match accountPreferences.serialize()
+					.and_then(|plaintext| crypto.encrypt(&plaintext).map_err(|_| AccountPreferencesError::CRYPTO_FAILED))
+				{
+					Ok(content) => API_user_preferences_set(content).await.map(|_| accountPreferences),
+					Err(error) => Err(error),
+				}
+			},
+			Err(error) => Err(error),
+		};
+		let (accountPreferences,warning) = match accountPreferencesResult
+		{
+			Ok(accountPreferences) => (accountPreferences,None),
+			Err(AccountPreferencesError::AUTH_REQUIRED) => return Err(AccountPreferencesError::AUTH_REQUIRED),
+			Err(error) => (AccountPreferences::fromUserPreferences(&currentPreferences),Some(error)),
+		};
+
+		self.crypto.set(crypto).map_err(|_| AccountPreferencesError::STORAGE_FAILED)?;
 		if let Err(error) = self.legacyCookies_clear()
 		{
 			let _ = self.crypto.clear();
-			return Err(error);
+			let _ = error;
+			return Err(AccountPreferencesError::STORAGE_FAILED);
 		}
 		let mut preferences = self.preferences.get_untracked().unwrap_or_default();
+		preferences.lang = accountPreferences.lang;
+		preferences.primaryHue = accountPreferences.primaryHue;
 		preferences.connected = true;
 		preferences.valUpdate();
 		self.setPreferences.set(Some(preferences));
-		return Ok(());
+		return Ok(warning);
 	}
 
 	pub(crate) fn local_clear(&self) -> Result<(), ClientCryptoError>
@@ -524,8 +937,10 @@ impl ClientState
 		let clearResult = self.crypto.clear();
 		let legacyClearResult = self.legacyCookies_clear();
 		let mut preferences = self.preferences.get_untracked().unwrap_or_default();
+		preferences.primaryHue = PrimaryHue::default();
 		preferences.connected = false;
 		preferences.valUpdate();
+		self.preferencesPreview.set(None);
 		self.setPreferences.set(Some(preferences));
 		return clearResult.and(legacyClearResult);
 	}
@@ -557,14 +972,221 @@ impl ClientState
 		return self.crypto.get();
 	}
 
+	pub(crate) fn passwordRotation_pendingIsAvailable(&self) -> bool
+	{
+		return self.crypto.pending_isAvailable();
+	}
+
+	pub(crate) fn passwordRotation_pendingIsAvailable_untracked(&self) -> bool
+	{
+		return self.crypto.pending_get().is_some();
+	}
+
+	pub(crate) fn passwordRotation_runningIsActive(&self) -> bool
+	{
+		return self.passwordRotationRunning.get();
+	}
+
+	pub(crate) fn passwordRotation_runningIsActive_untracked(&self) -> bool
+	{
+		return self.passwordRotationRunning.get_untracked();
+	}
+
+	pub(crate) fn passwordRotation_runningSet(&self, running: bool)
+	{
+		self.passwordRotationRunning.set(running);
+	}
+
+	pub(crate) fn passwordRotation_canClose(&self) -> bool
+	{
+		return !self.passwordRotationRunning.get()
+			&& !self.crypto.pending_isAvailable();
+	}
+
+	pub(crate) async fn passwordRotation_change(&self, currentPassword: String, newPassword: String, confirmation: String) -> Result<(), PasswordRotationError>
+	{
+		if (!ClientCryptoContext::signPassword_isValid(&newPassword))
+		{
+			return Err(PasswordRotationError::NEW_TOO_SHORT);
+		}
+		if (newPassword != confirmation)
+		{
+			return Err(PasswordRotationError::CONFIRMATION_MISMATCH);
+		}
+		if (currentPassword == newPassword)
+		{
+			return Err(PasswordRotationError::UNCHANGED);
+		}
+
+		let activeCrypto = self.crypto.get().ok_or(PasswordRotationError::REAUTH_REQUIRED)?;
+		let snapshot = API_user_passwordRotation_prepare().await?;
+		let oldCrypto = ClientCryptoContext::fromPassword(currentPassword,snapshot.credentialSalt.clone());
+		let newCrypto = ClientCryptoContext::fromPassword(newPassword,snapshot.credentialSalt);
+		drop(confirmation);
+
+		if (oldCrypto != activeCrypto)
+		{
+			return Err(PasswordRotationError::CURRENT_INVALID);
+		}
+		if (newCrypto == oldCrypto)
+		{
+			return Err(PasswordRotationError::UNCHANGED);
+		}
+
+		let mut contents = Vec::with_capacity(snapshot.contents.len());
+		for content in snapshot.contents
+		{
+			let plaintext = oldCrypto.decrypt(&content.content)
+				.map_err(|_| PasswordRotationError::CONTENT_INVALID)?;
+			let encrypted = newCrypto.encrypt(&plaintext)
+				.map_err(|_| PasswordRotationError::CONTENT_INVALID)?;
+			contents.push(PasswordRotationContent {
+				id: content.id,
+				content: encrypted,
+			});
+		}
+
+		let request = PasswordRotationFinalize {
+			rotationId: snapshot.rotationId,
+			credentialVersion: snapshot.credentialVersion,
+			revision: snapshot.revision,
+			oldCredential: oldCrypto.credential_get(),
+			newCredential: newCrypto.credential_get(),
+			preferences: match snapshot.preferences
+			{
+				Some(content) => {
+					let plaintext = oldCrypto.decrypt(&content)
+						.map_err(|_| PasswordRotationError::CONTENT_INVALID)?;
+					Some(newCrypto.encrypt(&plaintext)
+						.map_err(|_| PasswordRotationError::CONTENT_INVALID)?)
+				},
+				None => None,
+			},
+			contents,
+		};
+		let pending = ClientCryptoPending {
+			crypto: newCrypto,
+			request,
+		};
+		self.crypto.pending_set(pending.clone()).map_err(|_| PasswordRotationError::STORAGE_FAILED)?;
+		return self.passwordRotation_finalizePending(pending).await;
+	}
+
+	pub(crate) async fn passwordRotation_resume(&self) -> Result<bool, PasswordRotationError>
+	{
+		let Some(pending) = self.crypto.pending_get() else {return Ok(false)};
+		self.passwordRotation_finalizePending(pending).await?;
+		return Ok(true);
+	}
+
+	async fn passwordRotation_finalizePending(&self, pending: ClientCryptoPending) -> Result<(), PasswordRotationError>
+	{
+		let rotationId = pending.request.rotationId.clone();
+		match API_user_passwordRotation_finalize(pending.request).await
+		{
+			Ok(()) => {
+				self.crypto.pending_promote(&rotationId).map_err(|_| PasswordRotationError::STORAGE_FAILED)?;
+				return Ok(());
+			},
+			Err(error) => {
+				if (Self::passwordRotation_errorIsDefinitive(error))
+				{
+					let _ = self.crypto.pending_clear(&rotationId).map_err(|_| PasswordRotationError::STORAGE_FAILED)?;
+				}
+				return Err(error);
+			},
+		}
+	}
+
+	fn passwordRotation_errorIsDefinitive(error: PasswordRotationError) -> bool
+	{
+		return matches!(error,
+			PasswordRotationError::REAUTH_REQUIRED
+			| PasswordRotationError::CURRENT_INVALID
+			| PasswordRotationError::NEW_TOO_SHORT
+			| PasswordRotationError::CONFIRMATION_MISMATCH
+			| PasswordRotationError::UNCHANGED
+			| PasswordRotationError::CONTENT_INVALID
+			| PasswordRotationError::CONFLICT
+		);
+	}
+
 	pub(crate) fn lang_get(&self) -> String
 	{
+		if let Some(preview) = self.preferencesPreview.get()
+		{
+			return preview.lang;
+		}
 		return self.preferences.get().map(|preferences| preferences.lang).unwrap_or_else(|| "EN".to_string());
 	}
 
 	pub(crate) fn lang_get_untracked(&self) -> String
 	{
+		if let Some(preview) = self.preferencesPreview.get_untracked()
+		{
+			return preview.lang;
+		}
 		return self.preferences.get_untracked().map(|preferences| preferences.lang).unwrap_or_else(|| "EN".to_string());
+	}
+
+	pub(crate) fn primaryHue_get(&self) -> u16
+	{
+		if let Some(preview) = self.preferencesPreview.get()
+		{
+			return preview.primaryHue.get();
+		}
+		return self.preferences.get().map(|preferences| preferences.primaryHue.get()).unwrap_or(PrimaryHue::DEFAULT);
+	}
+
+	pub(crate) fn preferencesPreview_begin(&self)
+	{
+		let preferences = self.preferences.get_untracked().unwrap_or_default();
+		self.preferencesPreview.set(Some(PreferencesPreview::fromPreferences(&preferences)));
+	}
+
+	pub(crate) fn preferencesPreview_langSet(&self, lang: &str) -> bool
+	{
+		let Some(mut preview) = self.preferencesPreview.get_untracked() else {return false};
+		if (!preview.lang_set(lang))
+		{
+			return false;
+		}
+		self.preferencesPreview.set(Some(preview));
+		return true;
+	}
+
+	pub(crate) fn preferencesPreview_primaryHueSet(&self, value: u16) -> bool
+	{
+		let Some(mut preview) = self.preferencesPreview.get_untracked() else {return false};
+		if (!preview.primaryHue_set(value))
+		{
+			return false;
+		}
+		self.preferencesPreview.set(Some(preview));
+		return true;
+	}
+
+	pub(crate) async fn preferencesPreview_commit(&self) -> Result<(), AccountPreferencesError>
+	{
+		let preview = self.preferencesPreview.get_untracked().ok_or(AccountPreferencesError::CONTENT_INVALID)?;
+		let crypto = self.crypto.get().ok_or(AccountPreferencesError::CRYPTO_FAILED)?;
+		let accountPreferences = AccountPreferences::fromPreview(&preview);
+		let plaintext = accountPreferences.serialize()?;
+		let content = crypto.encrypt(&plaintext).map_err(|_| AccountPreferencesError::CRYPTO_FAILED)?;
+		API_user_preferences_set(content).await?;
+
+		let mut preferences = self.preferences.get_untracked().unwrap_or_default();
+		preferences.lang = accountPreferences.lang;
+		preferences.primaryHue = accountPreferences.primaryHue;
+		preferences.valUpdate();
+		self.setPreferences.set(Some(preferences));
+		self.preferencesPreview.set(None);
+		return Ok(());
+	}
+
+	pub(crate) fn preferencesPreview_cancel(&self)
+	{
+		self.preferencesPreview.set(None);
 	}
 
 	fn legacyCookies_clear(&self) -> Result<(), ClientCryptoError>
@@ -606,7 +1228,10 @@ impl ClientState
 #[cfg(test)]
 mod tests
 {
-	use super::{ClientCryptoContext, ClientState, LegacyUserData, UserPreferences, CLIENT_CRYPTO_STORAGE_KEY, LEGACY_COOKIE_NAME, LEGACY_CRYPTO_COOKIE_NAME, LEGACY_CRYPTO_COOKIE_PATH, ROOT_COOKIE_PATH};
+	use leptos::prelude::{GetUntracked, Owner, Set};
+	use crate::api::login::components::{AccountPreferencesError, PasswordRotationContent, PasswordRotationFinalize};
+	use crate::api::modules::components::ModuleID;
+	use super::{AccountPreferences, ClientCryptoContext, ClientCryptoPending, ClientCryptoStorage, ClientCryptoStorageCompatibility, ClientState, LegacyUserData, PreferencesPreview, PrimaryHue, UserPreferences, CLIENT_CRYPTO_STORAGE_KEY, LEGACY_COOKIE_NAME, LEGACY_CRYPTO_COOKIE_NAME, LEGACY_CRYPTO_COOKIE_PATH, ROOT_COOKIE_PATH};
 
 	fn cookiePath_matches(cookiePath: &str, requestPath: &str) -> bool
 	{
@@ -637,6 +1262,7 @@ mod tests
 		let (preferences, crypto) = legacy.split();
 
 		assert_eq!(preferences.lang, "FR");
+		assert_eq!(preferences.primaryHue.get(), PrimaryHue::DEFAULT);
 		assert!(preferences.connected);
 		let crypto = crypto.unwrap();
 		assert_eq!(crypto.userSalt, "secret");
@@ -708,14 +1334,192 @@ mod tests
 	}
 
 	#[test]
+	fn cryptoStorage_readsLegacyDocumentAndKeepsPendingSeparateFromActive()
+	{
+		let legacy = r#"{"userSalt":"legacy-secret"}"#;
+		let ClientCryptoStorageCompatibility::Legacy(legacyCrypto) = serde_json::from_str(legacy).unwrap()
+		else {panic!("legacy crypto context was not recognized")};
+		assert_eq!(legacyCrypto.userSalt,"legacy-secret");
+		let current = r#"{"version":1,"active":{"userSalt":"current-secret"},"pending":null}"#;
+		let ClientCryptoStorageCompatibility::Current(currentDocument) = serde_json::from_str(current).unwrap()
+		else {panic!("versioned crypto document was not recognized")};
+		assert_eq!(currentDocument.version,1);
+		assert_eq!(currentDocument.active.userSalt,"current-secret");
+
+		let owner = Owner::new();
+		owner.with(|| {
+			let storage = ClientCryptoStorage::new();
+			let active = ClientCryptoContext {userSalt: "active-secret".to_string()};
+			let next = ClientCryptoContext {userSalt: "next-secret".to_string()};
+			storage.set(active.clone()).unwrap();
+			storage.pending_set(ClientCryptoPending {
+				crypto: next.clone(),
+				request: PasswordRotationFinalize {
+					rotationId: "test-rotation".to_string(),
+					credentialVersion: 0,
+					revision: "test-revision".to_string(),
+						oldCredential: "old-credential".to_string(),
+						newCredential: "new-credential".to_string(),
+						preferences: None,
+					contents: vec![PasswordRotationContent {
+						id: ModuleID {id: "module".to_string()},
+						content: "new-ciphertext".to_string(),
+					}],
+				},
+			}).unwrap();
+
+			assert_eq!(storage.get(),Some(active));
+			assert!(storage.pending_get().is_some());
+			assert!(!storage.pending_clear("another-rotation").unwrap());
+			assert!(storage.pending_get().is_some());
+			storage.pending_promote("test-rotation").unwrap();
+			assert_eq!(storage.get(),Some(next));
+			assert!(storage.pending_get().is_none());
+		});
+		owner.cleanup();
+	}
+
+	#[test]
+	fn passwordDerivedContexts_reencryptWithoutChangingPlaintext()
+	{
+		let oldCrypto = ClientCryptoContext::fromPassword("old password".to_string(),"credential salt".to_string());
+		let newCrypto = ClientCryptoContext::fromPassword("new password".to_string(),"credential salt".to_string());
+		let oldCiphertext = oldCrypto.encrypt("private module data").unwrap();
+		let plaintext = oldCrypto.decrypt(&oldCiphertext).unwrap();
+		let newCiphertext = newCrypto.encrypt(&plaintext).unwrap();
+
+		assert_ne!(oldCrypto,newCrypto);
+		assert_ne!(oldCrypto.credential_get(),newCrypto.credential_get());
+		assert_eq!(newCrypto.decrypt(&newCiphertext).unwrap(),"private module data");
+		assert!(oldCrypto.decrypt(&newCiphertext).is_err());
+	}
+
+	#[test]
+	fn accountPreferences_areVersionedAndEncryptedWithoutConnectionState()
+	{
+		let crypto = ClientCryptoContext::test_get();
+		let preferences = UserPreferences {
+			lang: "FR".to_string(),
+			primaryHue: PrimaryHue::new(42).unwrap(),
+			connected: true,
+			updateVal: 99,
+		};
+		let accountPreferences = AccountPreferences::fromUserPreferences(&preferences);
+		let plaintext = accountPreferences.serialize().unwrap();
+		let encrypted = crypto.encrypt(&plaintext).unwrap();
+
+		assert_ne!(encrypted,plaintext);
+		assert!(serde_json::from_str::<super::ClientCiphertext>(&encrypted).is_ok());
+		assert!(!plaintext.contains("connected"));
+		assert!(!plaintext.contains("updateVal"));
+		let decrypted = crypto.decrypt(&encrypted).unwrap();
+		assert_eq!(AccountPreferences::deserialize(&decrypted).unwrap(),accountPreferences);
+	}
+
+	#[test]
+	fn accountPreferences_rejectUnknownVersionAndLanguage()
+	{
+		assert_eq!(
+			AccountPreferences::deserialize(r#"{"version":2,"lang":"FR","primaryHue":42}"#),
+			Err(AccountPreferencesError::CONTENT_INVALID),
+		);
+		assert_eq!(
+			AccountPreferences::deserialize(r#"{"version":1,"lang":"DE","primaryHue":42}"#),
+			Err(AccountPreferencesError::CONTENT_INVALID),
+		);
+	}
+
+	#[test]
+	fn localLogout_resetsHueButKeepsLanguage()
+	{
+		let owner = Owner::new();
+		owner.with(|| {
+			let clientState = ClientState::new();
+			clientState.setPreferences.set(Some(UserPreferences {
+				lang: "FR".to_string(),
+				primaryHue: PrimaryHue::new(42).unwrap(),
+				connected: true,
+				updateVal: 3,
+			}));
+			clientState.preferencesPreview_begin();
+			clientState.crypto.set(ClientCryptoContext::test_get()).unwrap();
+
+			clientState.local_clear().unwrap();
+
+			let preferences = clientState.preferences.get_untracked().unwrap();
+			assert_eq!(preferences.lang,"FR");
+			assert_eq!(preferences.primaryHue,PrimaryHue::default());
+			assert!(!preferences.connected);
+			assert_eq!(preferences.updateVal,4);
+			assert!(clientState.preferencesPreview.get_untracked().is_none());
+			assert!(clientState.crypto.get().is_none());
+		});
+		owner.cleanup();
+	}
+
+	#[test]
 	fn rootPreferencesNeverSerializeClientSecret()
 	{
 		let preferences = UserPreferences::new("fr-FR");
 		let serialized = serde_json::to_string(&preferences).unwrap();
 
 		assert_eq!(preferences.lang, "FR");
+		assert_eq!(preferences.primaryHue.get(), PrimaryHue::DEFAULT);
+		assert!(serialized.contains("\"primaryHue\":212"));
 		assert!(!serialized.contains("userSalt"));
 		assert!(!serialized.contains("generatedId"));
+	}
+
+	#[test]
+	fn preferencesLegacyCookie_defaultsPrimaryHue()
+	{
+		let preferences: UserPreferences = serde_json::from_str(r#"{"lang":"FR","connected":true,"updateVal":3}"#).unwrap();
+
+		assert_eq!(preferences.lang, "FR");
+		assert_eq!(preferences.primaryHue.get(), 212);
+		assert!(preferences.connected);
+	}
+
+	#[test]
+	fn primaryHueDeserialization_rejectsUnsafeValuesToDefault()
+	{
+		for rawHue in ["-1", "360", "99999", "true", "null", "\"invalid\""]
+		{
+			let json = format!(r#"{{"lang":"EN","primaryHue":{},"connected":false,"updateVal":0}}"#, rawHue);
+			let preferences: UserPreferences = serde_json::from_str(&json).unwrap();
+
+			assert_eq!(preferences.primaryHue.get(), PrimaryHue::DEFAULT, "raw hue {rawHue}");
+		}
+	}
+
+	#[test]
+	fn preferencesPreview_acceptsOnlySupportedLanguageAndBoundedHue()
+	{
+		let preferences = UserPreferences::default();
+		let mut preview = PreferencesPreview::fromPreferences(&preferences);
+
+		assert!(preview.lang_set("fr"));
+		assert_eq!(preview.lang, "FR");
+		assert!(!preview.lang_set("DE"));
+		assert_eq!(preview.lang, "FR");
+		assert!(preview.primaryHue_set(0));
+		assert_eq!(preview.primaryHue.get(), 0);
+		assert!(preview.primaryHue_set(359));
+		assert_eq!(preview.primaryHue.get(), 359);
+		assert!(!preview.primaryHue_set(360));
+		assert_eq!(preview.primaryHue.get(), 359);
+	}
+
+	#[test]
+	fn preferencesNormalize_fallsBackToEnglish()
+	{
+		let mut preferences = UserPreferences::new("de-DE");
+
+		assert_eq!(preferences.lang, "EN");
+		preferences.lang = "invalid".to_string();
+		assert!(preferences.normalize());
+		assert_eq!(preferences.lang, "EN");
+		assert!(!preferences.normalize());
 	}
 
 	#[test]

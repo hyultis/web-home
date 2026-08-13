@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
+use async_lock::{Mutex as AsyncMutex, MutexGuardArc};
 use argon2::Config;
 use base64ct::{Base64, Encoding};
 use Hconfig::Errors;
@@ -19,11 +20,13 @@ use sha3::{Digest, Sha3_256};
 use time::OffsetDateTime;
 use tower_sessions::Session;
 
-use crate::api::login::components::LoginStatusErrors;
+use crate::api::login::components::{AccountPreferencesError, LoginStatusErrors, PasswordRotationContent, PasswordRotationError, PasswordRotationFinalize, PasswordRotationSnapshot};
+use crate::api::modules::components::ModuleContent;
 use crate::global_security::generate_salt_raw;
 
 const LOGIN_ATTEMPT_POLICY: AttemptPolicy = AttemptPolicy::new("login.attempts", 3, Duration::from_secs(15 * 60));
 const SIGN_ATTEMPT_POLICY: AttemptPolicy = AttemptPolicy::new("sign.attempts", 1, Duration::from_secs(24 * 60 * 60));
+pub(crate) const PASSWORD_ROTATION_REQUEST_MAXIMUM_BYTES: usize = 72 * 1024 * 1024;
 
 #[derive(Debug)]
 pub(crate) enum UserBackHelperError
@@ -31,6 +34,7 @@ pub(crate) enum UserBackHelperError
 	HConfigError(Errors),
 	ServerError(ServerFnErrorErr),
 	SessionError(String),
+	CredentialRotationInProgress,
 	CredentialVerifierError(String),
 	LoginError(LoginStatusErrors),
 }
@@ -44,6 +48,7 @@ impl From<UserBackHelperError> for ServerFnError
 			UserBackHelperError::HConfigError(err) => ServerFnError::new(format!("HConfigError: {}", err)),
 			UserBackHelperError::ServerError(err) => ServerFnError::new(format!("ServerError: {}", err)),
 			UserBackHelperError::SessionError(err) => ServerFnError::new(format!("SessionError: {}", err)),
+			UserBackHelperError::CredentialRotationInProgress => ServerFnError::new("Credential rotation in progress"),
 			UserBackHelperError::CredentialVerifierError(err) => ServerFnError::new(format!("CredentialVerifierError: {}", err)),
 			UserBackHelperError::LoginError(err) => ServerFnError::new(format!("LoginError: {}", err)),
 		};
@@ -74,25 +79,50 @@ impl UserConfigIdentity
 	}
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct AuthenticatedUser
 {
 	identity: UserConfigIdentity,
+	#[serde(default)]
+	credentialSalt: Option<String>,
+	#[serde(default)]
+	credentialVersion: u64,
+	#[serde(default)]
+	passwordRotationId: Option<String>,
+}
+
+impl std::fmt::Debug for AuthenticatedUser
+{
+	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+	{
+		return formatter.debug_struct("AuthenticatedUser")
+			.field("identity",&"[REDACTED]")
+			.field("credentialSalt",&self.credentialSalt.as_ref().map(|_| "[REDACTED]"))
+			.field("credentialVersion",&self.credentialVersion)
+			.field("passwordRotationPending",&self.passwordRotationId.is_some())
+			.finish();
+	}
 }
 
 impl AuthenticatedUser
 {
 	const SESSION_KEY: &'static str = "auth.user";
 
-	fn new(identity: UserConfigIdentity) -> Self
+	fn new(identity: UserConfigIdentity, credentialSalt: String, credentialVersion: u64) -> Self
 	{
-		return Self { identity };
+		return Self {
+			identity,
+			credentialSalt: Some(credentialSalt),
+			credentialVersion,
+			passwordRotationId: None,
+		};
 	}
 
 	pub(crate) async fn current() -> Result<Self, UserBackHelperError>
 	{
 		let session = extract::<Session>().await.map_err(UserBackHelperError::ServerError)?;
-		return Self::fromSession(&session).await;
+		let (user, _) = Self::fromSessionWithConfig(&session).await?;
+		return Ok(user);
 	}
 
 	async fn fromSession(session: &Session) -> Result<Self, UserBackHelperError>
@@ -103,18 +133,65 @@ impl AuthenticatedUser
 		return user.ok_or(UserBackHelperError::LoginError(LoginStatusErrors::USER_DISCONNECTED));
 	}
 
-	pub(super) async fn session_isAuthenticated(session: &Session) -> Result<bool, UserBackHelperError>
+	pub(crate) async fn currentWithConfig() -> Result<(Self,HConfig), UserBackHelperError>
 	{
-		let user = session.get::<Self>(Self::SESSION_KEY).await
-			.map_err(|err| UserBackHelperError::SessionError(err.to_string()))?;
-		return Ok(user.is_some());
+		let session = extract::<Session>().await.map_err(UserBackHelperError::ServerError)?;
+		return Self::fromSessionWithConfig(&session).await;
 	}
 
-	async fn establish(session: &Session, identity: UserConfigIdentity) -> Result<(), UserBackHelperError>
+	async fn fromSessionWithConfig(session: &Session) -> Result<(Self,HConfig), UserBackHelperError>
+	{
+		let user = Self::fromSession(session).await?;
+		let config = user.userConfig_get()?;
+		if (!user.credentialVersion_isCurrent(&config))
+		{
+			let _ = session.flush().await;
+			return Err(UserBackHelperError::LoginError(LoginStatusErrors::USER_DISCONNECTED));
+		}
+		return Ok((user,config));
+	}
+
+	pub(super) async fn session_isAuthenticated(session: &Session) -> Result<bool, UserBackHelperError>
+	{
+		let user = match Self::fromSession(session).await
+		{
+			Ok(user) => user,
+			Err(UserBackHelperError::LoginError(_)) => return Ok(false),
+			Err(error) => return Err(error),
+		};
+		let config = match user.userConfig_get()
+		{
+			Ok(config) => config,
+			Err(UserBackHelperError::LoginError(_)) => return Ok(false),
+			Err(error) => return Err(error),
+		};
+		// This middleware-only check must not flush a stale session. A final
+		// password-rotation response can fail after the atomic file save; keeping
+		// its rotation id lets the exact pending request recover through the receipt.
+		return Ok(user.credentialVersion_isCurrent(&config));
+	}
+
+	pub(crate) async fn session_passwordRotationBody_isAllowed(session: &Session) -> bool
+	{
+		let Ok(user) = Self::fromSession(session).await else {return false};
+		let Ok(config) = user.userConfig_get() else {return false};
+		return user.credentialVersion_isCurrent(&config)
+			|| user.passwordRotationId.as_deref()
+				.is_some_and(|rotationId| UserBackHelper::passwordRotationReceiptId_matches(&config,rotationId));
+	}
+
+	async fn establish(session: &Session, identity: UserConfigIdentity, credentialSalt: String, credentialVersion: u64) -> Result<(), UserBackHelperError>
 	{
 		session.cycle_id().await
 			.map_err(|err| UserBackHelperError::SessionError(err.to_string()))?;
-		session.insert(Self::SESSION_KEY, Self::new(identity)).await
+		session.insert(Self::SESSION_KEY, Self::new(identity,credentialSalt,credentialVersion)).await
+			.map_err(|err| UserBackHelperError::SessionError(err.to_string()))?;
+		return Ok(());
+	}
+
+	async fn session_update(&self, session: &Session) -> Result<(), UserBackHelperError>
+	{
+		session.insert(Self::SESSION_KEY,self.clone()).await
 			.map_err(|err| UserBackHelperError::SessionError(err.to_string()))?;
 		return Ok(());
 	}
@@ -135,6 +212,96 @@ impl AuthenticatedUser
 	pub(crate) fn userConfig_get(&self) -> Result<HConfig, UserBackHelperError>
 	{
 		return UserBackHelper::getUserConfigFromIdentity(&self.identity, false);
+	}
+
+	fn credentialVersion_isCurrent(&self, config: &HConfig) -> bool
+	{
+		return self.credentialVersion == UserBackHelper::credentialVersion_get(config);
+	}
+
+	pub(crate) async fn mutation_begin() -> Result<AuthenticatedUserMutation, UserBackHelperError>
+	{
+		let session = extract::<Session>().await.map_err(UserBackHelperError::ServerError)?;
+		return Self::mutation_beginFromSession(session).await;
+	}
+
+	async fn mutation_beginFromSession(session: Session) -> Result<AuthenticatedUserMutation, UserBackHelperError>
+	{
+		let requestUser = Self::fromSession(&session).await?;
+		let guard = UserMutationRegistry::singleton().lock_get(&requestUser.identity)?.lock_arc().await;
+		let currentUser = Self::fromSession(&session).await?;
+		if (currentUser != requestUser)
+		{
+			if (currentUser.identity == requestUser.identity
+				&& (currentUser.passwordRotationId.is_some()
+					|| requestUser.passwordRotationId.is_some()
+					|| currentUser.credentialVersion != requestUser.credentialVersion))
+			{
+				return Err(UserBackHelperError::CredentialRotationInProgress);
+			}
+			return Err(UserBackHelperError::LoginError(LoginStatusErrors::USER_DISCONNECTED));
+		}
+		let config = requestUser.userConfig_get()?;
+		if (!requestUser.credentialVersion_isCurrent(&config))
+		{
+			if (currentUser.passwordRotationId.as_deref()
+				.is_some_and(|rotationId| UserBackHelper::passwordRotationReceiptId_matches(&config,rotationId)))
+			{
+				return Err(UserBackHelperError::CredentialRotationInProgress);
+			}
+			else
+			{
+				let _ = session.flush().await;
+			}
+			return Err(UserBackHelperError::LoginError(LoginStatusErrors::USER_DISCONNECTED));
+		}
+		return Ok(AuthenticatedUserMutation {
+			_config: config,
+			_guard: guard,
+		});
+	}
+}
+
+pub(crate) struct AuthenticatedUserMutation
+{
+	_config: HConfig,
+	_guard: MutexGuardArc<()>,
+}
+
+impl AuthenticatedUserMutation
+{
+	pub(crate) fn config_getMut(&mut self) -> &mut HConfig
+	{
+		return &mut self._config;
+	}
+}
+
+#[derive(Default)]
+struct UserMutationRegistry
+{
+	locks: Mutex<HashMap<UserConfigIdentity,Weak<AsyncMutex<()>>>>,
+}
+
+impl UserMutationRegistry
+{
+	fn singleton() -> &'static Self
+	{
+		static SINGLETON: OnceLock<UserMutationRegistry> = OnceLock::new();
+		return SINGLETON.get_or_init(Self::default);
+	}
+
+	fn lock_get(&self, identity: &UserConfigIdentity) -> Result<Arc<AsyncMutex<()>>, UserBackHelperError>
+	{
+		let mut locks = self.locks.lock()
+			.map_err(|_| UserBackHelperError::SessionError("user mutation registry lock poisoned".to_string()))?;
+		locks.retain(|_,lock| lock.strong_count() > 0);
+		if let Some(lock) = locks.get(identity).and_then(Weak::upgrade)
+		{
+			return Ok(lock);
+		}
+		let lock = Arc::new(AsyncMutex::new(()));
+		locks.insert(identity.clone(),Arc::downgrade(&lock));
+		return Ok(lock);
 	}
 }
 
@@ -393,10 +560,27 @@ impl CredentialVerifier
 	}
 }
 
+#[derive(Deserialize, Serialize)]
+struct PasswordRotationReceipt
+{
+	rotationId: String,
+	credentialVersion: u64,
+	resultDigest: String,
+}
+
 pub(crate) struct UserBackHelper;
 
 impl UserBackHelper
 {
+	const CREDENTIAL_VERSION_FIELD: &'static str = "credentialVersion";
+	const ROTATION_RECEIPT_FIELD: &'static str = "passwordRotationReceipt";
+	const ACCOUNT_PREFERENCES_FIELD: &'static str = "preferences";
+	const ACCOUNT_PREFERENCES_MAXIMUM_BYTES: usize = 16 * 1024;
+	const ROTATION_CONTENT_MAXIMUM_BYTES: usize = 16 * 1024 * 1024;
+	const ROTATION_TOTAL_MAXIMUM_BYTES: usize = 64 * 1024 * 1024;
+	const ROTATION_MODULE_MAXIMUM: usize = 4_096;
+	const ROTATION_MODULE_ID_MAXIMUM_BYTES: usize = 512;
+
 	pub(super) fn generatedId_isValid(generatedId: &str) -> bool
 	{
 		return Base64::decode_vec(generatedId).map(|decoded| decoded.len() == 32).unwrap_or(false);
@@ -419,6 +603,7 @@ impl UserBackHelper
 
 		let identity = UserConfigIdentity::fromGeneratedId(&generatedId)?;
 		let sessionAttempts = SessionAttempts::current(SIGN_ATTEMPT_POLICY).await?;
+		let _guard = UserMutationRegistry::singleton().lock_get(&identity)?.lock_arc().await;
 		let mut config = Self::getUserConfigFromIdentity(&identity, true)?;
 		let alreadyExists = config.value_get("dateSignUp").is_some();
 
@@ -432,6 +617,7 @@ impl UserBackHelper
 		let verifier = CredentialVerifier::create(hashedPwd).await?;
 		config.value_set("dateSignUp", JsonValue::String(format!("{}", OffsetDateTime::now_utc())));
 		config.value_set(CredentialVerifier::CONFIG_FIELD, JsonValue::String(verifier));
+		Self::credentialVersion_set(&mut config,0);
 		config.file_save().map_err(UserBackHelperError::HConfigError)?;
 		let _ = sessionAttempts.attempt_record(OffsetDateTime::now_utc().unix_timestamp()).await?;
 		return Ok(true);
@@ -441,10 +627,12 @@ impl UserBackHelper
 	pub(crate) async fn loginCheckAndCreate(generatedId: String, hashedPwd: String) -> Result<(), UserBackHelperError>
 	{
 		let session = extract::<Session>().await.map_err(UserBackHelperError::ServerError)?;
-		return Self::loginCheckAndCreateFromSession(generatedId, hashedPwd, session, OffsetDateTime::now_utc().unix_timestamp()).await;
+		let credentialSalt = crate::api::login::salt::getSiteSaltForUser(generatedId.clone())
+			.ok_or(UserBackHelperError::LoginError(LoginStatusErrors::SALT_INVALID))?;
+		return Self::loginCheckAndCreateFromSession(generatedId, hashedPwd, credentialSalt, session, OffsetDateTime::now_utc().unix_timestamp()).await;
 	}
 
-	async fn loginCheckAndCreateFromSession(generatedId: String, hashedPwd: String, session: Session, now: i64) -> Result<(), UserBackHelperError>
+	async fn loginCheckAndCreateFromSession(generatedId: String, hashedPwd: String, credentialSalt: String, session: Session, now: i64) -> Result<(), UserBackHelperError>
 	{
 		if (!CredentialVerifier::credential_isValid(&hashedPwd))
 		{
@@ -458,6 +646,7 @@ impl UserBackHelper
 			return Err(UserBackHelperError::LoginError(LoginStatusErrors::LOCKED(lockedUntil)));
 		}
 
+		let _guard = UserMutationRegistry::singleton().lock_get(&identity)?.lock_arc().await;
 		let mut config = match Self::getUserConfigFromIdentity(&identity, false)
 		{
 			Ok(config) => config,
@@ -493,8 +682,359 @@ impl UserBackHelper
 
 		sessionAttempts.clear().await?;
 		AccountAttemptRegistry::singleton().clear(&identity)?;
-		AuthenticatedUser::establish(sessionAttempts.session_get(), identity).await?;
+		let credentialVersion = Self::credentialVersion_get(&config);
+		AuthenticatedUser::establish(sessionAttempts.session_get(),identity,credentialSalt,credentialVersion).await?;
 		return Ok(());
+	}
+
+	fn credentialVersion_get(config: &HConfig) -> u64
+	{
+		return match config.value_get(Self::CREDENTIAL_VERSION_FIELD)
+		{
+			Some(JsonValue::String(value)) => value.parse().unwrap_or(0),
+			Some(JsonValue::Number(value)) if value >= 0.0 => value as u64,
+			_ => 0,
+		};
+	}
+
+	fn credentialVersion_set(config: &mut HConfig, version: u64)
+	{
+		config.value_set(Self::CREDENTIAL_VERSION_FIELD,JsonValue::String(version.to_string()));
+	}
+
+	pub(crate) async fn accountPreferences_get() -> Result<Option<String>, AccountPreferencesError>
+	{
+		let (_,config) = AuthenticatedUser::currentWithConfig().await.map_err(Self::accountPreferencesError_fromUserBack)?;
+		return Self::accountPreferences_getFromConfig(&config);
+	}
+
+	pub(crate) async fn accountPreferences_set(content: String) -> Result<(), AccountPreferencesError>
+	{
+		Self::accountPreferencesContent_validate(&content)?;
+		let mut mutation = AuthenticatedUser::mutation_begin().await.map_err(Self::accountPreferencesError_fromUserBack)?;
+		let config = mutation.config_getMut();
+		config.value_set(Self::ACCOUNT_PREFERENCES_FIELD,JsonValue::String(content));
+		return config.file_save().map_err(|_| AccountPreferencesError::SERVER_ERROR);
+	}
+
+	fn accountPreferences_getFromConfig(config: &HConfig) -> Result<Option<String>, AccountPreferencesError>
+	{
+		return match config.value_get(Self::ACCOUNT_PREFERENCES_FIELD)
+		{
+			None => Ok(None),
+			Some(JsonValue::String(content)) => {
+				Self::accountPreferencesContent_validate(&content)?;
+				Ok(Some(content))
+			},
+			Some(_) => Err(AccountPreferencesError::CONTENT_INVALID),
+		};
+	}
+
+	fn accountPreferencesContent_validate(content: &str) -> Result<(), AccountPreferencesError>
+	{
+		if (content.is_empty() || content.len() > Self::ACCOUNT_PREFERENCES_MAXIMUM_BYTES)
+		{
+			return Err(AccountPreferencesError::CONTENT_INVALID);
+		}
+		return Ok(());
+	}
+
+	pub(crate) async fn passwordRotation_prepare() -> Result<PasswordRotationSnapshot, PasswordRotationError>
+	{
+		let session = extract::<Session>().await.map_err(|_| PasswordRotationError::SERVER_ERROR)?;
+		return Self::passwordRotation_prepareFromSession(session).await;
+	}
+
+	async fn passwordRotation_prepareFromSession(session: Session) -> Result<PasswordRotationSnapshot, PasswordRotationError>
+	{
+		let requestUser = AuthenticatedUser::fromSession(&session).await.map_err(Self::passwordRotationError_fromUserBack)?;
+		let guard = UserMutationRegistry::singleton().lock_get(&requestUser.identity)
+			.map_err(Self::passwordRotationError_fromUserBack)?
+			.lock_arc().await;
+		let user = AuthenticatedUser::fromSession(&session).await.map_err(Self::passwordRotationError_fromUserBack)?;
+		if (user.identity != requestUser.identity)
+		{
+			return Err(PasswordRotationError::AUTH_REQUIRED);
+		}
+		let config = user.userConfig_get().map_err(Self::passwordRotationError_fromUserBack)?;
+		if (!user.credentialVersion_isCurrent(&config))
+		{
+			if (user.passwordRotationId.as_deref()
+				.is_some_and(|rotationId| Self::passwordRotationReceiptId_matches(&config,rotationId)))
+			{
+				return Err(PasswordRotationError::CONFLICT);
+			}
+			let _ = session.flush().await;
+			return Err(PasswordRotationError::AUTH_REQUIRED);
+		}
+		let credentialSalt = user.credentialSalt.clone().ok_or(PasswordRotationError::REAUTH_REQUIRED)?;
+		let storedContents = ModuleContent::retrieveAll(&config).map_err(|_| PasswordRotationError::CONTENT_INVALID)?;
+		let contents = storedContents.iter()
+			.map(|content| PasswordRotationContent {
+				id: content.id.clone(),
+				content: content.content.clone(),
+			})
+			.collect::<Vec<_>>();
+		Self::passwordRotationContents_validate(&contents)?;
+		let preferences = Self::accountPreferences_getFromConfig(&config)
+			.map_err(|_| PasswordRotationError::CONTENT_INVALID)?;
+		let revision = Self::passwordRotationRevision_get(user.credentialVersion,&storedContents,preferences.as_deref())?;
+		let rotationId = uuid::Uuid::new_v4().to_string();
+		drop(guard);
+
+		return Ok(PasswordRotationSnapshot {
+			rotationId,
+			credentialSalt,
+			credentialVersion: user.credentialVersion,
+			revision,
+			preferences,
+			contents,
+		});
+	}
+
+	pub(crate) async fn passwordRotation_finalize(request: PasswordRotationFinalize) -> Result<(), PasswordRotationError>
+	{
+		let session = extract::<Session>().await.map_err(|_| PasswordRotationError::SERVER_ERROR)?;
+		return Self::passwordRotation_finalizeFromSession(request,session).await;
+	}
+
+	async fn passwordRotation_finalizeFromSession(request: PasswordRotationFinalize, session: Session) -> Result<(), PasswordRotationError>
+	{
+		Self::passwordRotationRequest_validate(&request)?;
+		let nextVersion = request.credentialVersion.checked_add(1).ok_or(PasswordRotationError::CONFLICT)?;
+		let resultDigest = Self::passwordRotationResultDigest_get(&request)?;
+		let mut requestUser = AuthenticatedUser::fromSession(&session).await.map_err(Self::passwordRotationError_fromUserBack)?;
+		let requestConfig = requestUser.userConfig_get().map_err(Self::passwordRotationError_fromUserBack)?;
+		let requestCurrentVersion = Self::credentialVersion_get(&requestConfig);
+		if (requestUser.credentialVersion != requestCurrentVersion)
+		{
+			let recoveryIsOwned = requestUser.passwordRotationId.as_deref() == Some(&request.rotationId)
+				&& Self::passwordRotationReceipt_matches(&requestConfig,&request.rotationId,nextVersion,&resultDigest);
+			if (!recoveryIsOwned)
+			{
+				let _ = session.flush().await;
+				return Err(PasswordRotationError::AUTH_REQUIRED);
+			}
+		}
+		else
+		{
+			requestUser.passwordRotationId = Some(request.rotationId.clone());
+			requestUser.session_update(&session).await.map_err(Self::passwordRotationError_fromUserBack)?;
+		}
+		let _guard = UserMutationRegistry::singleton().lock_get(&requestUser.identity)
+			.map_err(Self::passwordRotationError_fromUserBack)?
+			.lock_arc().await;
+		let mut user = AuthenticatedUser::fromSession(&session).await.map_err(Self::passwordRotationError_fromUserBack)?;
+		if (user.identity != requestUser.identity)
+		{
+			return Err(PasswordRotationError::AUTH_REQUIRED);
+		}
+		let mut config = user.userConfig_get().map_err(Self::passwordRotationError_fromUserBack)?;
+		let currentVersion = Self::credentialVersion_get(&config);
+
+		if (Self::passwordRotationReceipt_matches(&config,&request.rotationId,nextVersion,&resultDigest))
+		{
+			Self::passwordRotationCredential_require(&config,request.newCredential.clone()).await?;
+			user.credentialVersion = currentVersion;
+			user.passwordRotationId = None;
+			user.session_update(&session).await.map_err(Self::passwordRotationError_fromUserBack)?;
+			return Ok(());
+		}
+		if (user.passwordRotationId.as_deref() != Some(&request.rotationId))
+		{
+			return Err(if user.credentialVersion == currentVersion
+			{
+				PasswordRotationError::CONFLICT
+			}
+			else
+			{
+				PasswordRotationError::AUTH_REQUIRED
+			});
+		}
+
+		if (user.credentialVersion != currentVersion)
+		{
+			let _ = session.flush().await;
+			return Err(PasswordRotationError::AUTH_REQUIRED);
+		}
+		if (request.credentialVersion != currentVersion)
+		{
+			return Err(PasswordRotationError::CONFLICT);
+		}
+
+		Self::passwordRotationCredential_require(&config,request.oldCredential.clone()).await?;
+		let storedContents = ModuleContent::retrieveAll(&config).map_err(|_| PasswordRotationError::CONTENT_INVALID)?;
+		let storedPreferences = Self::accountPreferences_getFromConfig(&config)
+			.map_err(|_| PasswordRotationError::CONTENT_INVALID)?;
+		let currentRevision = Self::passwordRotationRevision_get(currentVersion,&storedContents,storedPreferences.as_deref())?;
+		if (currentRevision != request.revision)
+		{
+			return Err(PasswordRotationError::CONFLICT);
+		}
+		Self::passwordRotationContents_match(&storedContents,&request.contents)?;
+		if (storedPreferences.is_some() != request.preferences.is_some())
+		{
+			return Err(PasswordRotationError::CONFLICT);
+		}
+
+		let newVerifier = CredentialVerifier::create(request.newCredential.clone()).await
+			.map_err(Self::passwordRotationError_fromUserBack)?;
+		for content in request.contents.iter()
+		{
+			ModuleContent::encryptedContent_set(&mut config,&content.id,content.content.clone())
+				.map_err(|_| PasswordRotationError::CONTENT_INVALID)?;
+		}
+		if let Some(preferences) = request.preferences.clone()
+		{
+			Self::accountPreferencesContent_validate(&preferences)
+				.map_err(|_| PasswordRotationError::CONTENT_INVALID)?;
+			config.value_set(Self::ACCOUNT_PREFERENCES_FIELD,JsonValue::String(preferences));
+		}
+		config.value_set(CredentialVerifier::CONFIG_FIELD,JsonValue::String(newVerifier));
+		Self::credentialVersion_set(&mut config,nextVersion);
+		let receipt = PasswordRotationReceipt {
+			rotationId: request.rotationId.clone(),
+			credentialVersion: nextVersion,
+			resultDigest,
+		};
+		let receipt = serde_json::to_string(&receipt).map_err(|_| PasswordRotationError::SERVER_ERROR)?;
+		config.value_set(Self::ROTATION_RECEIPT_FIELD,JsonValue::String(receipt));
+		config.file_save().map_err(|_| PasswordRotationError::SERVER_ERROR)?;
+
+		user.credentialVersion = nextVersion;
+		user.passwordRotationId = None;
+		user.session_update(&session).await.map_err(Self::passwordRotationError_fromUserBack)?;
+		return Ok(());
+	}
+
+	async fn passwordRotationCredential_require(config: &HConfig, credential: String) -> Result<(), PasswordRotationError>
+	{
+		let Some(configVerifier) = config.value_get(CredentialVerifier::CONFIG_FIELD) else {return Err(PasswordRotationError::CURRENT_INVALID)};
+		let configVerifier: String = configVerifier.try_into().unwrap_or_default();
+		return match CredentialVerifier::verify(configVerifier,credential).await
+			.map_err(Self::passwordRotationError_fromUserBack)?
+		{
+			CredentialVerification::Current | CredentialVerification::Legacy => Ok(()),
+			CredentialVerification::Invalid => Err(PasswordRotationError::CURRENT_INVALID),
+		};
+	}
+
+	fn passwordRotationRequest_validate(request: &PasswordRotationFinalize) -> Result<(), PasswordRotationError>
+	{
+		if (uuid::Uuid::parse_str(&request.rotationId).is_err()
+			|| !CredentialVerifier::credential_isValid(&request.oldCredential)
+			|| !CredentialVerifier::credential_isValid(&request.newCredential)
+			|| request.oldCredential == request.newCredential
+			|| Base64::decode_vec(&request.revision).map(|value| value.len() != 32).unwrap_or(true))
+		{
+			return Err(PasswordRotationError::CONTENT_INVALID);
+		}
+		if let Some(preferences) = &request.preferences
+		{
+			Self::accountPreferencesContent_validate(preferences)
+				.map_err(|_| PasswordRotationError::CONTENT_INVALID)?;
+		}
+		return Self::passwordRotationContents_validate(&request.contents);
+	}
+
+	fn passwordRotationContents_validate(contents: &[PasswordRotationContent]) -> Result<(), PasswordRotationError>
+	{
+		if (contents.len() > Self::ROTATION_MODULE_MAXIMUM)
+		{
+			return Err(PasswordRotationError::CONTENT_INVALID);
+		}
+		let mut ids = HashSet::with_capacity(contents.len());
+		let mut totalBytes = 0usize;
+		for content in contents
+		{
+			if (content.id.id.is_empty()
+				|| content.id.id.len() > Self::ROTATION_MODULE_ID_MAXIMUM_BYTES
+				|| content.content.is_empty()
+				|| content.content.len() > Self::ROTATION_CONTENT_MAXIMUM_BYTES
+				|| !ids.insert(content.id.clone()))
+			{
+				return Err(PasswordRotationError::CONTENT_INVALID);
+			}
+			totalBytes = totalBytes.checked_add(content.content.len()).ok_or(PasswordRotationError::CONTENT_INVALID)?;
+			if (totalBytes > Self::ROTATION_TOTAL_MAXIMUM_BYTES)
+			{
+				return Err(PasswordRotationError::CONTENT_INVALID);
+			}
+		}
+		return Ok(());
+	}
+
+	fn passwordRotationContents_match(stored: &[ModuleContent], submitted: &[PasswordRotationContent]) -> Result<(), PasswordRotationError>
+	{
+		if (stored.len() != submitted.len())
+		{
+			return Err(PasswordRotationError::CONFLICT);
+		}
+		let submitted = submitted.iter().map(|content| (&content.id,&content.content)).collect::<HashMap<_,_>>();
+		for storedContent in stored
+		{
+			let Some(submittedContent) = submitted.get(&storedContent.id) else {return Err(PasswordRotationError::CONFLICT)};
+			let minimumLength = storedContent.content.len().saturating_sub(1_024);
+			let maximumLength = storedContent.content.len().saturating_add(1_024);
+			if (submittedContent.len() < minimumLength || submittedContent.len() > maximumLength)
+			{
+				return Err(PasswordRotationError::CONTENT_INVALID);
+			}
+		}
+		return Ok(());
+	}
+
+	fn passwordRotationRevision_get(credentialVersion: u64, contents: &[ModuleContent], preferences: Option<&str>) -> Result<String, PasswordRotationError>
+	{
+		let serialized = serde_json::to_vec(&(credentialVersion,contents,preferences)).map_err(|_| PasswordRotationError::SERVER_ERROR)?;
+		return Ok(Base64::encode_string(&Sha3_256::digest(serialized)));
+	}
+
+	fn passwordRotationResultDigest_get(request: &PasswordRotationFinalize) -> Result<String, PasswordRotationError>
+	{
+		let mut request = request.clone();
+		request.contents.sort_by(|left,right| left.id.cmp(&right.id));
+		let serialized = serde_json::to_vec(&request).map_err(|_| PasswordRotationError::SERVER_ERROR)?;
+		return Ok(Base64::encode_string(&Sha3_256::digest(serialized)));
+	}
+
+	fn passwordRotationReceipt_matches(config: &HConfig, rotationId: &str, credentialVersion: u64, resultDigest: &str) -> bool
+	{
+		let Some(receipt) = Self::passwordRotationReceipt_get(config) else {return false};
+		return receipt.rotationId == rotationId
+			&& receipt.credentialVersion == credentialVersion
+			&& receipt.resultDigest == resultDigest
+			&& Self::credentialVersion_get(config) == credentialVersion;
+	}
+
+	fn passwordRotationReceiptId_matches(config: &HConfig, rotationId: &str) -> bool
+	{
+		return Self::passwordRotationReceipt_get(config)
+			.is_some_and(|receipt| receipt.rotationId == rotationId);
+	}
+
+	fn passwordRotationReceipt_get(config: &HConfig) -> Option<PasswordRotationReceipt>
+	{
+		let Some(JsonValue::String(receipt)) = config.value_get(Self::ROTATION_RECEIPT_FIELD) else {return None};
+		return serde_json::from_str(&receipt).ok();
+	}
+
+	fn passwordRotationError_fromUserBack(error: UserBackHelperError) -> PasswordRotationError
+	{
+		return match error
+		{
+			UserBackHelperError::LoginError(_) => PasswordRotationError::AUTH_REQUIRED,
+			_ => PasswordRotationError::SERVER_ERROR,
+		};
+	}
+
+	fn accountPreferencesError_fromUserBack(error: UserBackHelperError) -> AccountPreferencesError
+	{
+		return match error
+		{
+			UserBackHelperError::LoginError(_) => AccountPreferencesError::AUTH_REQUIRED,
+			_ => AccountPreferencesError::SERVER_ERROR,
+		};
 	}
 
 	async fn loginFailure_record(sessionAttempts: &SessionAttempts, identity: &UserConfigIdentity, now: i64) -> Result<LoginStatusErrors, UserBackHelperError>
@@ -546,6 +1086,7 @@ mod tests
 
 	use crate::api::modules::components::{ModuleContent, ModuleID};
 	use crate::api::modules::{ApiModuleRetrieve, ApiModuleUpdate, ModuleApiError, ModuleReturnRetrieve};
+	use crate::api::login::{ApiUserPreferencesGet, ApiUserPreferencesSet};
 	use crate::api::login::session::SessionCookie;
 	use crate::api::Htrace::ApiHtraceLog;
 	use crate::api::proxys::imap::ApiProxysImapListbox;
@@ -569,6 +1110,7 @@ mod tests
 	{
 		fn new() -> Self
 		{
+			trace_initialize();
 			let lock = CONFIG_PATH_LOCK.lock().unwrap_or_else(|err| err.into_inner());
 			let previousPath = HConfigManager::singleton().confPath_get();
 			let testPath = std::env::temp_dir().join(format!("webhome-auth-test-{}", uuid::Uuid::new_v4()));
@@ -576,6 +1118,13 @@ mod tests
 			HConfigManager::singleton().confPath_set(testPath.to_string_lossy().to_string());
 			return Self { _lock: lock, previousPath, testPath };
 		}
+	}
+
+	fn trace_initialize()
+	{
+		TRACE_INITIALIZATION.call_once(|| {
+			Htrace::htracer::HTracer::globalContext_set(Htrace::components::context::Context::default());
+		});
 	}
 
 	impl Drop for ConfigPathGuard
@@ -595,6 +1144,47 @@ mod tests
 	fn validCredential_get() -> String
 	{
 		return Base64::encode_string(&[11u8; 32]);
+	}
+
+	async fn rotationAccount_create(seed: u8, credential: String, contents: Vec<ModuleContent>) -> (UserConfigIdentity,Session,Session)
+	{
+		let generatedId = Base64::encode_string(&[seed; 32]);
+		let identity = UserConfigIdentity::fromGeneratedId(&generatedId).unwrap();
+		let mut config = UserBackHelper::getUserConfigFromIdentity(&identity,true).unwrap();
+		let verifier = CredentialVerifier::create(credential).await.unwrap();
+		config.value_set("dateSignUp",JsonValue::String("password rotation test".to_string()));
+		config.value_set(CredentialVerifier::CONFIG_FIELD,JsonValue::String(verifier));
+		UserBackHelper::credentialVersion_set(&mut config,0);
+		config.file_save().unwrap();
+		for content in contents
+		{
+			content.update(&mut config,true).unwrap();
+		}
+
+		let store = Arc::new(MemoryStore::default());
+		let sessionA = Session::new(None,store.clone(),None);
+		let sessionB = Session::new(None,store,None);
+		AuthenticatedUser::establish(&sessionA,identity.clone(),"test-credential-salt".to_string(),0).await.unwrap();
+		AuthenticatedUser::establish(&sessionB,identity.clone(),"test-credential-salt".to_string(),0).await.unwrap();
+		return (identity,sessionA,sessionB);
+	}
+
+	fn rotationRequest_get(snapshot: PasswordRotationSnapshot, oldCredential: String, newCredential: String) -> PasswordRotationFinalize
+	{
+		return PasswordRotationFinalize {
+			rotationId: snapshot.rotationId,
+			credentialVersion: snapshot.credentialVersion,
+			revision: snapshot.revision,
+			oldCredential,
+			newCredential,
+			preferences: snapshot.preferences.map(|content| format!("rotated-{}",content)),
+			contents: snapshot.contents.into_iter()
+				.map(|content| PasswordRotationContent {
+					id: content.id,
+					content: format!("rotated-{}",content.content),
+				})
+				.collect(),
+		};
 	}
 
 	struct ModuleAuthorizationTest;
@@ -619,7 +1209,7 @@ mod tests
 			{
 				return StatusCode::INTERNAL_SERVER_ERROR;
 			}
-			if (AuthenticatedUser::establish(&session, identity).await.is_err())
+			if (AuthenticatedUser::establish(&session,identity,"test-credential-salt".to_string(),0).await.is_err())
 			{
 				return StatusCode::INTERNAL_SERVER_ERROR;
 			}
@@ -628,11 +1218,11 @@ mod tests
 
 		fn router_get() -> Router
 		{
-			TRACE_INITIALIZATION.call_once(|| {
-				Htrace::htracer::HTracer::globalContext_set(Htrace::components::context::Context::default());
-			});
+			trace_initialize();
 			return Router::new()
 				.route("/test/auth/{seed}", get(Self::authenticate))
+				.route(ApiUserPreferencesGet::PATH, post(leptos_axum::handle_server_fns))
+				.route(ApiUserPreferencesSet::PATH, post(leptos_axum::handle_server_fns))
 				.route(ApiModuleUpdate::PATH, post(leptos_axum::handle_server_fns))
 				.route(ApiModuleRetrieve::PATH, post(leptos_axum::handle_server_fns))
 				.route(ApiHtraceLog::PATH, post(leptos_axum::handle_server_fns))
@@ -699,6 +1289,26 @@ mod tests
 			return router.clone().oneshot(Self::serverRequest_get(
 				ApiModuleUpdate::PATH,
 				body.finish(),
+				cookie,
+			)).await.unwrap();
+		}
+
+		async fn accountPreferences_set(router: &Router, cookie: Option<&str>, content: &str) -> Response<Body>
+		{
+			let mut body = url::form_urlencoded::Serializer::new(String::new());
+			body.append_pair("content",content);
+			return router.clone().oneshot(Self::serverRequest_get(
+				ApiUserPreferencesSet::PATH,
+				body.finish(),
+				cookie,
+			)).await.unwrap();
+		}
+
+		async fn accountPreferences_get(router: &Router, cookie: Option<&str>) -> Response<Body>
+		{
+			return router.clone().oneshot(Self::serverRequest_get(
+				ApiUserPreferencesGet::PATH,
+				String::new(),
 				cookie,
 			)).await.unwrap();
 		}
@@ -800,14 +1410,14 @@ mod tests
 			let previousId = session.id().unwrap();
 			let identity = UserConfigIdentity::fromGeneratedId(&validGeneratedId_get()).unwrap();
 
-			AuthenticatedUser::establish(&session, identity.clone()).await.unwrap();
+			AuthenticatedUser::establish(&session,identity.clone(),"test-credential-salt".to_string(),0).await.unwrap();
 			session.save().await.unwrap();
 			let authenticatedId = session.id().unwrap();
 
 			assert_ne!(previousId, authenticatedId);
 			assert!(store.load(&previousId).await.unwrap().is_none());
 			let restored = Session::new(Some(authenticatedId), store, None);
-			assert_eq!(AuthenticatedUser::fromSession(&restored).await.unwrap(), AuthenticatedUser::new(identity));
+			assert_eq!(AuthenticatedUser::fromSession(&restored).await.unwrap(), AuthenticatedUser::new(identity,"test-credential-salt".to_string(),0));
 		});
 	}
 
@@ -819,7 +1429,7 @@ mod tests
 			let store = Arc::new(MemoryStore::default());
 			let session = Session::new(None, store.clone(), None);
 			let identity = UserConfigIdentity::fromGeneratedId(&validGeneratedId_get()).unwrap();
-			AuthenticatedUser::establish(&session, identity).await.unwrap();
+			AuthenticatedUser::establish(&session,identity,"test-credential-salt".to_string(),0).await.unwrap();
 			session.save().await.unwrap();
 			let authenticatedId = session.id().unwrap();
 
@@ -828,6 +1438,56 @@ mod tests
 			assert!(session.id().is_none());
 			assert!(store.load(&authenticatedId).await.unwrap().is_none());
 		});
+	}
+
+	#[test]
+	fn accountPreferences_requireAuthenticationAndStayOpaquePerAccount()
+	{
+		let runtime = tokio::runtime::Runtime::new().unwrap();
+		runtime.block_on(async {
+			let _configPath = ConfigPathGuard::new();
+			let router = ModuleAuthorizationTest::router_get();
+			let ciphertext = r#"{"salt":"opaque","nonce":"opaque","content":"opaque"}"#;
+
+			let anonymous = ModuleAuthorizationTest::accountPreferences_set(&router,None,ciphertext).await;
+			assert_eq!(anonymous.status(),StatusCode::INTERNAL_SERVER_ERROR);
+			assert_eq!(
+				ModuleAuthorizationTest::responseJson_get::<AccountPreferencesError>(anonymous).await,
+				AccountPreferencesError::AUTH_REQUIRED,
+			);
+
+			let cookieA = ModuleAuthorizationTest::cookie_get(&router,51).await;
+			let cookieB = ModuleAuthorizationTest::cookie_get(&router,52).await;
+			let saved = ModuleAuthorizationTest::accountPreferences_set(&router,Some(&cookieA),ciphertext).await;
+			assert_eq!(saved.status(),StatusCode::OK);
+			let accountA = ModuleAuthorizationTest::accountPreferences_get(&router,Some(&cookieA)).await;
+			assert_eq!(accountA.status(),StatusCode::OK);
+			assert_eq!(
+				ModuleAuthorizationTest::responseJson_get::<Option<String>>(accountA).await,
+				Some(ciphertext.to_string()),
+			);
+			let accountB = ModuleAuthorizationTest::accountPreferences_get(&router,Some(&cookieB)).await;
+			assert_eq!(accountB.status(),StatusCode::OK);
+			assert_eq!(ModuleAuthorizationTest::responseJson_get::<Option<String>>(accountB).await,None);
+		});
+	}
+
+	#[test]
+	fn accountPreferences_rejectEmptyAndOversizedCiphertexts()
+	{
+		assert_eq!(
+			UserBackHelper::accountPreferencesContent_validate(""),
+			Err(AccountPreferencesError::CONTENT_INVALID),
+		);
+		assert!(UserBackHelper::accountPreferencesContent_validate(
+			&"x".repeat(UserBackHelper::ACCOUNT_PREFERENCES_MAXIMUM_BYTES)
+		).is_ok());
+		assert_eq!(
+			UserBackHelper::accountPreferencesContent_validate(
+				&"x".repeat(UserBackHelper::ACCOUNT_PREFERENCES_MAXIMUM_BYTES + 1)
+			),
+			Err(AccountPreferencesError::CONTENT_INVALID),
+		);
 	}
 
 	#[test]
@@ -962,6 +1622,172 @@ mod tests
 	}
 
 	#[test]
+	fn authenticatedUser_legacySessionDefaultsVersionAndRequiresSaltForRotation()
+	{
+		let runtime = tokio::runtime::Runtime::new().unwrap();
+		runtime.block_on(async {
+			let _configPath = ConfigPathGuard::new();
+			let identity = UserConfigIdentity::fromGeneratedId(&validGeneratedId_get()).unwrap();
+			let serialized = serde_json::json!({"identity": identity});
+			let legacyUser: AuthenticatedUser = serde_json::from_value(serialized).unwrap();
+			assert_eq!(legacyUser.credentialVersion,0);
+			assert!(legacyUser.credentialSalt.is_none());
+
+			let mut config = UserBackHelper::getUserConfigFromIdentity(&legacyUser.identity,true).unwrap();
+			config.value_set("dateSignUp",JsonValue::String("legacy session".to_string()));
+			config.file_save().unwrap();
+			let session = Session::new(None,Arc::new(MemoryStore::default()),None);
+			session.insert(AuthenticatedUser::SESSION_KEY,legacyUser).await.unwrap();
+
+			assert_eq!(
+				UserBackHelper::passwordRotation_prepareFromSession(session).await.err().unwrap(),
+				PasswordRotationError::REAUTH_REQUIRED,
+			);
+		});
+	}
+
+	#[test]
+	fn passwordRotation_updatesAllContentsKeepsCurrentSessionAndRejectsOthers()
+	{
+		let runtime = tokio::runtime::Runtime::new().unwrap();
+		runtime.block_on(async {
+			let _configPath = ConfigPathGuard::new();
+			let oldCredential = Base64::encode_string(&[21u8;32]);
+			let newCredential = Base64::encode_string(&[22u8;32]);
+			let modules = vec![
+				ModuleContent {
+					id: ModuleID {id: "links".to_string()},
+					typeModule: "LINK".to_string(),
+					timestamp: 10,
+					content: "old-links-ciphertext".to_string(),
+					pos: [1,2],
+					size: [3,4],
+					depth: 5,
+				},
+				ModuleContent {
+					id: ModuleID {id: "unknown-module".to_string()},
+					typeModule: "FUTURE_TYPE".to_string(),
+					timestamp: 20,
+					content: "old-unknown-ciphertext".to_string(),
+					pos: [6,7],
+					size: [8,9],
+					depth: 10,
+				},
+			];
+			let (identity,sessionA,sessionB) = rotationAccount_create(31,oldCredential.clone(),modules.clone()).await;
+			let mut config = UserBackHelper::getUserConfigFromIdentity(&identity,false).unwrap();
+			config.value_set(UserBackHelper::ACCOUNT_PREFERENCES_FIELD,JsonValue::String("old-preferences-ciphertext".to_string()));
+			config.file_save().unwrap();
+			drop(config);
+			let snapshot = UserBackHelper::passwordRotation_prepareFromSession(sessionA.clone()).await.unwrap();
+			assert!(AuthenticatedUser::session_passwordRotationBody_isAllowed(&sessionA).await);
+			assert_eq!(snapshot.contents.len(),modules.len());
+			assert_eq!(snapshot.preferences.as_deref(),Some("old-preferences-ciphertext"));
+			let request = rotationRequest_get(snapshot,oldCredential.clone(),newCredential.clone());
+			let rotationId = request.rotationId.clone();
+
+			let mut invalidRequest = request.clone();
+			invalidRequest.oldCredential = Base64::encode_string(&[23u8;32]);
+			assert_eq!(
+				UserBackHelper::passwordRotation_finalizeFromSession(invalidRequest,sessionA.clone()).await.unwrap_err(),
+				PasswordRotationError::CURRENT_INVALID,
+			);
+
+			UserBackHelper::passwordRotation_finalizeFromSession(request.clone(),sessionA.clone()).await.unwrap();
+			let config = UserBackHelper::getUserConfigFromIdentity(&identity,false).unwrap();
+			assert_eq!(UserBackHelper::credentialVersion_get(&config),1);
+			assert_eq!(
+				UserBackHelper::accountPreferences_getFromConfig(&config).unwrap().as_deref(),
+				Some("rotated-old-preferences-ciphertext"),
+			);
+			let stored = ModuleContent::retrieveAll(&config).unwrap();
+			assert_eq!(stored.len(),modules.len());
+			for (before,after) in modules.iter().zip(stored.iter())
+			{
+				assert_eq!(after.id,before.id);
+				assert_eq!(after.typeModule,before.typeModule);
+				assert_eq!(after.timestamp,before.timestamp);
+				assert_eq!(after.pos,before.pos);
+				assert_eq!(after.size,before.size);
+				assert_eq!(after.depth,before.depth);
+				assert_eq!(after.content,format!("rotated-{}",before.content));
+			}
+			let verifier: String = config.value_get(CredentialVerifier::CONFIG_FIELD).unwrap().try_into().unwrap();
+			assert_eq!(CredentialVerifier::verify(verifier.clone(),newCredential).await.unwrap(),CredentialVerification::Current);
+			assert_eq!(CredentialVerifier::verify(verifier,oldCredential).await.unwrap(),CredentialVerification::Invalid);
+
+			let currentUser = AuthenticatedUser::fromSessionWithConfig(&sessionA).await.unwrap().0;
+			assert_eq!(currentUser.credentialVersion,1);
+			assert!(currentUser.passwordRotationId.is_none());
+			UserBackHelper::passwordRotation_finalizeFromSession(request.clone(),sessionA).await.unwrap();
+			let transientSession = Session::new(None,Arc::new(MemoryStore::default()),None);
+			let mut transientUser = AuthenticatedUser::new(identity.clone(),"test-credential-salt".to_string(),0);
+			transientUser.passwordRotationId = Some(rotationId);
+			transientSession.insert(AuthenticatedUser::SESSION_KEY,transientUser).await.unwrap();
+			assert!(AuthenticatedUser::session_passwordRotationBody_isAllowed(&transientSession).await);
+			assert!(matches!(
+				AuthenticatedUser::mutation_beginFromSession(transientSession.clone()).await.err(),
+				Some(UserBackHelperError::CredentialRotationInProgress),
+			));
+			assert!(matches!(
+				AuthenticatedUser::fromSessionWithConfig(&transientSession).await,
+				Err(UserBackHelperError::LoginError(LoginStatusErrors::USER_DISCONNECTED)),
+			));
+			assert!(AuthenticatedUser::fromSession(&transientSession).await.is_err());
+
+			assert!(!AuthenticatedUser::session_isAuthenticated(&sessionB).await.unwrap());
+			assert!(!AuthenticatedUser::session_passwordRotationBody_isAllowed(&sessionB).await);
+			assert_eq!(
+				UserBackHelper::passwordRotation_finalizeFromSession(request,sessionB.clone()).await.unwrap_err(),
+				PasswordRotationError::AUTH_REQUIRED,
+			);
+			assert!(AuthenticatedUser::fromSession(&sessionB).await.is_err());
+		});
+	}
+
+	#[test]
+	fn passwordRotation_conflictLeavesCredentialAndConcurrentContentUntouched()
+	{
+		let runtime = tokio::runtime::Runtime::new().unwrap();
+		runtime.block_on(async {
+			let _configPath = ConfigPathGuard::new();
+			let oldCredential = Base64::encode_string(&[41u8;32]);
+			let newCredential = Base64::encode_string(&[42u8;32]);
+			let original = ModuleContent {
+				id: ModuleID {id: "module".to_string()},
+				typeModule: "TEST".to_string(),
+				timestamp: 1,
+				content: "old-ciphertext".to_string(),
+				..Default::default()
+			};
+			let (identity,session,_) = rotationAccount_create(43,oldCredential.clone(),vec![original]).await;
+			let snapshot = UserBackHelper::passwordRotation_prepareFromSession(session.clone()).await.unwrap();
+			let request = rotationRequest_get(snapshot,oldCredential.clone(),newCredential);
+
+			let mut config = UserBackHelper::getUserConfigFromIdentity(&identity,false).unwrap();
+			let concurrent = ModuleContent {
+				id: ModuleID {id: "module".to_string()},
+				typeModule: "TEST".to_string(),
+				timestamp: 2,
+				content: "concurrent-ciphertext".to_string(),
+				..Default::default()
+			};
+			concurrent.update(&mut config,true).unwrap();
+			drop(config);
+
+			assert_eq!(
+				UserBackHelper::passwordRotation_finalizeFromSession(request,session).await.unwrap_err(),
+				PasswordRotationError::CONFLICT,
+			);
+			let config = UserBackHelper::getUserConfigFromIdentity(&identity,false).unwrap();
+			assert_eq!(UserBackHelper::credentialVersion_get(&config),0);
+			let verifier: String = config.value_get(CredentialVerifier::CONFIG_FIELD).unwrap().try_into().unwrap();
+			assert_eq!(CredentialVerifier::verify(verifier,oldCredential).await.unwrap(),CredentialVerification::Current);
+			assert_eq!(ModuleContent::retrieveAll(&config).unwrap()[0].content,"concurrent-ciphertext");
+		});
+	}
+
+	#[test]
 	fn legacyVerifier_isMigratedDuringSuccessfulLogin()
 	{
 		let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -978,13 +1804,22 @@ mod tests
 
 			let store = Arc::new(MemoryStore::default());
 			let session = Session::new(None, store, None);
-			UserBackHelper::loginCheckAndCreateFromSession(generatedId, credential.clone(), session.clone(), 1_000).await.unwrap();
+			UserBackHelper::loginCheckAndCreateFromSession(
+				generatedId,
+				credential.clone(),
+				"test-credential-salt".to_string(),
+				session.clone(),
+				1_000,
+			).await.unwrap();
 
 			let migratedConfig = UserBackHelper::getUserConfigFromIdentity(&identity, false).unwrap();
 			let migratedVerifier: String = migratedConfig.value_get(CredentialVerifier::CONFIG_FIELD).unwrap().try_into().unwrap();
 			assert!(migratedVerifier.starts_with(CredentialVerifier::FORMAT_PREFIX));
 			assert_eq!(CredentialVerifier::verify(migratedVerifier, credential).await.unwrap(), CredentialVerification::Current);
-			assert_eq!(AuthenticatedUser::fromSession(&session).await.unwrap(), AuthenticatedUser::new(identity));
+			assert_eq!(
+				AuthenticatedUser::fromSession(&session).await.unwrap(),
+				AuthenticatedUser::new(identity,"test-credential-salt".to_string(),0),
+			);
 		});
 	}
 }

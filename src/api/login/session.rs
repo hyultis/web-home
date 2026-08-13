@@ -213,7 +213,7 @@ mod tests
 	}
 
 	#[test]
-	fn sessionCookie_authenticatedServerErrorRenewsServerAndBrowserExpiry()
+	fn sessionCookie_malformedAuthenticatedStateDoesNotRenewServerError()
 	{
 		let runtime = tokio::runtime::Runtime::new().unwrap();
 		runtime.block_on(async {
@@ -230,7 +230,6 @@ mod tests
 			let firstCookie = firstCookieHeader.split(';').next().unwrap().to_string();
 			let sessionId = firstCookie.strip_prefix("id=").unwrap().parse().unwrap();
 			let firstRecord = store.load(&sessionId).await.unwrap().unwrap();
-			tokio::time::sleep(std::time::Duration::from_millis(5)).await;
 
 			let secondResponse = router.oneshot(
 				Request::builder()
@@ -241,15 +240,9 @@ mod tests
 			).await.unwrap();
 			assert_eq!(secondResponse.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-			let secondCookieHeader = secondResponse.headers().get(SET_COOKIE).unwrap().to_str().unwrap();
 			let secondRecord = store.load(&sessionId).await.unwrap().unwrap();
-			assert_eq!(secondCookieHeader.split(';').next().unwrap(), firstCookie);
-			assert!(secondCookieHeader.contains("HttpOnly"));
-			assert!(secondCookieHeader.contains("SameSite=Strict"));
-			assert!(secondCookieHeader.contains("Secure"));
-			assert!(secondCookieHeader.contains("Path=/"));
-			assert!(secondCookieHeader.contains("Max-Age=86400"));
-			assert!(secondRecord.expiry_date > firstRecord.expiry_date);
+			assert!(secondResponse.headers().get(SET_COOKIE).is_none());
+			assert_eq!(secondRecord.expiry_date,firstRecord.expiry_date);
 		});
 	}
 

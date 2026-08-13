@@ -28,3 +28,23 @@ pub async fn sessionErrorActivity_renew(
 {
 	return crate::api::login::session::SessionCookie::serverErrorActivity_renew(session,request,next).await;
 }
+
+pub async fn passwordRotationBodyLimit_apply(
+	session: Session,
+	mut request: Request,
+	next: Next,
+) -> Response
+{
+	use axum::extract::DefaultBodyLimit;
+	use leptos::server_fn::ServerFn;
+
+	let isPasswordRotation = request.uri().path()
+		== <crate::api::login::ApiUserPasswordrotationFinalize as ServerFn>::PATH;
+	if (isPasswordRotation
+		&& crate::api::login::user_back::AuthenticatedUser::session_passwordRotationBody_isAllowed(&session).await)
+	{
+		DefaultBodyLimit::max(crate::api::login::user_back::PASSWORD_ROTATION_REQUEST_MAXIMUM_BYTES)
+			.apply(&mut request);
+	}
+	return next.run(request).await;
+}

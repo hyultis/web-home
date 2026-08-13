@@ -8,6 +8,8 @@ use leptos_router::components::{Route, Router, Routes, A};
 use leptos_router::{hooks, path};
 use leptos_use::use_locales;
 use crate::api::runtimeConfig_set;
+use crate::api::login::components::PasswordRotationError;
+use crate::front::modules::module_holder::ModuleHolder;
 use crate::front::pages::home::Home;
 use crate::front::pages::connection::Connection;
 use crate::front::pages::inscription::Inscription;
@@ -64,6 +66,7 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 	let clientState = ClientState::new();
 	provide_context(clientState.clone());
 	let documentLangState = clientState.clone();
+	let documentThemeState = clientState.clone();
 	let locales = use_locales();
 
 	let is_initialized = RwSignal::new(false);
@@ -90,6 +93,39 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 			{
 				if (clientState.crypto_get().is_some())
 				{
+					if (clientState.passwordRotation_pendingIsAvailable_untracked())
+					{
+						ModuleHolder::network_suspend();
+						clientState.passwordRotation_runningSet(true);
+						let recoveryResult = clientState.passwordRotation_resume().await;
+						clientState.passwordRotation_runningSet(false);
+						match recoveryResult
+						{
+							Ok(true) => {
+								ModuleHolder::network_resume();
+								crate::front::utils::toaster_helpers::toastingSuccess(&toaster,"FRONTUI_OPTIONS_PASSWORD_SUCCESS").await;
+							},
+							Ok(false) => ModuleHolder::network_resume(),
+							Err(PasswordRotationError::AUTH_REQUIRED) => {
+								let storageClearFailed = clientState.local_clear().is_err();
+								ModuleHolder::lifecycle_close();
+								toastingErr(&toaster,PasswordRotationError::AUTH_REQUIRED).await;
+								if (storageClearFailed)
+								{
+									toastingErr(&toaster,AllFrontErrorEnum::CRYPTO_STORAGE_FAILED).await;
+								}
+								navigate("/",Default::default());
+								return;
+							},
+							Err(error) => {
+								if (!clientState.passwordRotation_pendingIsAvailable_untracked())
+								{
+									ModuleHolder::network_resume();
+								}
+								toastingErr(&toaster,error).await;
+							},
+						}
+					}
 					navigate("/home", Default::default());
 				}
 				else if let Some(window) = web_sys::window()
@@ -107,7 +143,11 @@ pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
 	});
 
 	view! {
-		<Html {..} lang=move || documentLangState.lang_get().to_ascii_lowercase()/>
+		<Html
+			{..}
+			lang=move || documentLangState.lang_get().to_ascii_lowercase()
+			style=move || format!("--theme-primary-hue: {};", documentThemeState.primaryHue_get())
+		/>
 
 		<Link
 			id="iconoir"

@@ -1,6 +1,7 @@
 use leptos::prelude::{For, GetUntracked, OnTargetAttribute, With};
 use leptos::prelude::{CollectView, Get, PropAttribute};
 use crate::front::modules::components::Backable;
+use crate::front::components::options_menu::OptionsMenu;
 use crate::front::modules::module_holder::{ModuleHolder, ModuleHolderEpoch};
 use crate::front::utils::all_front_enum::{AllFrontErrorEnum, AllFrontLoginEnum, AllFrontUIEnum};
 use crate::front::utils::dialog::{DialogActionStyle, DialogData, DialogManager};
@@ -84,8 +85,16 @@ pub fn Home() -> impl IntoView
 	// initialise ModuleHolder
 	let moduleContentInnerInitialLoad = moduleContent.clone();
 	let toasterInnerInitialLoad = toaster.clone();
+	let clientStateInitialLoad = clientState.clone();
 	let is_initialized = RwSignal::new(false);
 	Effect::new(move || {
+		if (clientStateInitialLoad.passwordRotation_runningIsActive()
+			|| clientStateInitialLoad.passwordRotation_pendingIsAvailable())
+		{
+			ModuleHolder::network_suspend();
+			return;
+		}
+		ModuleHolder::network_resume();
 		if(is_initialized.get_untracked()) {
 			return;
 		}
@@ -182,6 +191,7 @@ pub fn Home() -> impl IntoView
 							}.into_any()
 						}
 					}}
+					<OptionsMenu/>
 					<button type="button" class="icon_button icon_button--warning" on:click=disconnectFn>
 						<i class="iconoir-key" aria-hidden="true"></i>
 						<span class="visually_hidden"><TranslateText key="FRONTUI_LOGOUT_ACTION"/></span>

@@ -10,6 +10,7 @@ use web_home::entry::AppProps;
 use web_home::global_security::generate_salt;
 use web_home::server::{
 	runtimeConfig_set,
+	passwordRotationBodyLimit_apply,
 	sessionErrorActivity_renew,
 	sessionLayer_get,
 	traceFrontLog_enabled,
@@ -133,6 +134,7 @@ async fn main() {
         })
 	    .fallback(leptos_axum::file_and_error_handler(move |lo|shell((lo,trace_front_log,allow_registration))))
 	    .layer(middleware::from_fn(sessionErrorActivity_renew))
+	    .layer(middleware::from_fn(passwordRotationBodyLimit_apply))
 	    .layer(session_layer)
 	    .route(DeploymentHealth::PATH, get(DeploymentHealth::response_get))
 	    .route(

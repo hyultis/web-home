@@ -235,7 +235,8 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send,
 	getField: A,
 	updateField: B,
 	style: String,
-	inputType: FieldHelperType
+	inputType: FieldHelperType,
+	inputRef: NodeRef<Input>,
 }
 
 impl<A,B,T> FieldHelper<A,B,T>
@@ -253,7 +254,13 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
 			updateField,
 			style: "".to_string(),
 			inputType: FieldHelperType::TEXT,
+			inputRef: NodeRef::<Input>::new(),
 		}
+	}
+
+	pub fn inputRef_get(&self) -> NodeRef<Input>
+	{
+		return self.inputRef;
 	}
 
 	pub fn setInputType(&mut self,inputType: FieldHelperType)
@@ -296,7 +303,7 @@ where A: Fn(ArcRwSignal<T>) -> String + Clone + Send + 'static,
 			let getField = getField.clone();
 			move || getField(data)
 		});
-		let inputRef = NodeRef::<Input>::new();
+		let inputRef = self.inputRef;
 		Effect::new(move || {
 			let value = getField(data.clone());
 			let Some(input) = inputRef.get() else {return;};

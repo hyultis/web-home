@@ -17,6 +17,7 @@ use url::Url;
 pub(super) struct BrowserContentSecurity
 {
 	liveReload: Option<BrowserContentSecurityLiveReload>,
+	calDavOrigins: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -33,7 +34,7 @@ impl BrowserContentSecurity
 	const REPORTING_ENDPOINTS: &'static str = "webhome-csp=\"/csp-report\"";
 	const REPORT_LOG_MAXIMUM_PER_MINUTE: u16 = 64;
 
-	pub(super) fn new(options: &LeptosOptions,watchEnabled: bool) -> Self
+	pub(super) fn new(options: &LeptosOptions,watchEnabled: bool,calDavOrigins: Vec<String>) -> Self
 	{
 		let port = options.reload_external_port.unwrap_or(options.reload_port);
 		let liveReload = (options.env == Env::DEV && watchEnabled && port > 0 && port <= u16::MAX as u32)
@@ -45,7 +46,7 @@ impl BrowserContentSecurity
 				},
 				port,
 			});
-		return Self {liveReload};
+		return Self {liveReload,calDavOrigins};
 	}
 
 	pub(super) async fn headers_apply(
@@ -120,11 +121,14 @@ impl BrowserContentSecurity
 		let liveReloadSource = self.liveReloadSource_get(requestHeaders)
 			.map(|source| format!(" {source}"))
 			.unwrap_or_default();
+		let calDavSources = self.calDavOrigins.iter()
+			.map(|origin| format!(" {origin}"))
+			.collect::<String>();
 		let policy = format!(
 			concat!(
 				"default-src 'none'; ",
 				"base-uri 'none'; ",
-				"connect-src 'self' https://api.open-meteo.com{}; ",
+				"connect-src 'self' https://api.open-meteo.com https://date.nager.at{}{}; ",
 				"font-src 'none'; ",
 				"form-action 'self'; ",
 				"frame-ancestors 'none'; ",
@@ -140,6 +144,7 @@ impl BrowserContentSecurity
 				"report-uri /csp-report; ",
 				"report-to webhome-csp",
 			),
+			calDavSources,
 			liveReloadSource,
 			nonce,
 		);
@@ -363,7 +368,7 @@ mod tests
 		std::fs::write(&hashPath,"js: test-js-hash\nwasm: test-wasm-hash\ncss: test-css-hash\n").unwrap();
 		options.hash_files = true;
 		options.hash_file = hashPath.to_string_lossy().into_owned().into();
-		let contentSecurity = BrowserContentSecurity::new(&options,std::env::var_os("LEPTOS_WATCH").is_some());
+		let contentSecurity = BrowserContentSecurity::new(&options,std::env::var_os("LEPTOS_WATCH").is_some(),Vec::new());
 		let handler = leptos_axum::render_app_to_stream_in_order_with_context(
 			|| {},
 			move || web_home::entry::shell((options.clone(),false,false)),
@@ -438,7 +443,7 @@ mod tests
 
 		for directive in [
 			"default-src 'none'",
-			"connect-src 'self' https://api.open-meteo.com",
+			"connect-src 'self' https://api.open-meteo.com https://date.nager.at",
 			"object-src 'none'",
 			"script-src 'self' 'nonce-",
 			"style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
@@ -461,7 +466,7 @@ mod tests
 		let policy = policy_get(&contentSecurity,"127.0.0.1:3002");
 		let policy = policy.to_str().unwrap();
 
-		assert!(policy.contains("connect-src 'self' https://api.open-meteo.com ws://127.0.0.1:3011;"));
+		assert!(policy.contains("connect-src 'self' https://api.open-meteo.com https://date.nager.at ws://127.0.0.1:3011;"));
 		assert_eq!(policy.matches("ws://").count(),1);
 		assert!(!policy.contains("wss://"));
 	}
@@ -483,7 +488,7 @@ mod tests
 		let mut options = leptosOptions_get(Env::DEV);
 		options.reload_external_port = Some(443);
 		options.reload_ws_protocol = ReloadWSProtocol::WSS;
-		let contentSecurity = BrowserContentSecurity::new(&options,true);
+		let contentSecurity = BrowserContentSecurity::new(&options,true,Vec::new());
 		let policy = policy_get(&contentSecurity,"dev.example:8443");
 		let policy = policy.to_str().unwrap();
 
@@ -509,7 +514,22 @@ mod tests
 
 	fn contentSecurity_get(environment: Env,watchEnabled: bool) -> BrowserContentSecurity
 	{
-		return BrowserContentSecurity::new(&leptosOptions_get(environment),watchEnabled);
+		return BrowserContentSecurity::new(&leptosOptions_get(environment),watchEnabled,Vec::new());
+	}
+
+	#[test]
+	fn configuredCalDavOriginsAreLimitedToConnectSrc()
+	{
+		let contentSecurity = BrowserContentSecurity::new(
+			&leptosOptions_get(Env::PROD),
+			false,
+			vec!["https://calendar.example:8443".to_string()],
+		);
+		let policy = policy_get(&contentSecurity,"home.example");
+		let policy = policy.to_str().unwrap();
+
+		assert!(policy.contains("connect-src 'self' https://api.open-meteo.com https://date.nager.at https://calendar.example:8443;"));
+		assert_eq!(policy.matches("https://calendar.example:8443").count(),1);
 	}
 
 	fn leptosOptions_get(environment: Env) -> LeptosOptions

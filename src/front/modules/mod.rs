@@ -1,4 +1,5 @@
 pub mod components;
+pub mod calendar;
 pub mod link;
 mod mail;
 pub mod module_actions;
@@ -8,4 +9,3 @@ pub mod rss;
 pub mod todo;
 pub mod weather;
 pub mod module_holder;
-

@@ -11,6 +11,7 @@ The project was originally created in PHP in 2013 and is now built in Rust with 
 - RSS feeds
 - Weather forecasts
 - Email reading, attachments and mark-as-read actions through IMAP
+- CalDAV calendars with month/week views and event creation or deletion
 - English and French interface selected from the browser language
 
 ![WebHome dashboard](example.png)
@@ -57,6 +58,7 @@ WebHome creates `config/site.json` on first start. User records are stored under
 | `allow_registration` | `true` | Enables account registration. Set it to `false` when public registration is not wanted. |
 | `trace_front_log` | `true` in development | Enables bounded browser traces. It is always disabled when `ENV=PROD`. |
 | `imap_allowed_ports` | `[993]` | Non-empty list of TLS IMAP ports users may configure. Invalid values disable IMAP connections until corrected. |
+| `caldav_allowed_origins` | `[]` | Exact origins that Calendar modules may contact directly, for example `["https://calendar.example.com"]`. HTTPS is mandatory in production; HTTP is accepted only with `ENV=DEV` for local development. Paths and wildcards are rejected; any invalid entry disables the complete list. |
 
 Back up the complete `config` directory. It contains the server salt and all persistent user records.
 
@@ -66,6 +68,7 @@ Back up the complete `config` directory. It contains the server salt and all per
 - Keep `config` and `dynamic` writable by UID/GID `1000` when using the provided image.
 - Allow outbound DNS, HTTPS and configured IMAP traffic. WebHome rejects private and special-purpose proxy destinations.
 - Add client-network rate limiting at the reverse proxy, firewall or CDN. WebHome limits failures per account, but it cannot safely provide a deployment-wide IP limit behind every possible proxy setup.
+- Calendar modules connect directly from the browser. Configure Radicale CORS for the exact WebHome origin, answer `OPTIONS` preflights, allow `GET`, `PROPFIND`, `REPORT`, `PUT` and `DELETE`, allow the `Authorization`, `Content-Type`, `Depth`, `If-Match` and `If-None-Match` request headers, and expose `ETag`. Add the Radicale origin to `caldav_allowed_origins`.
 
 ### Caddy example
 
@@ -87,6 +90,10 @@ Rate limiting is not included in the standard Caddy distribution. Use a firewall
 ## Security model
 
 Persistent module payloads are encrypted in the browser before they are stored by the server. This protects stored content, but it is not protection against a compromised WebHome server, browser origin or browser extension.
+
+CalDAV credentials are part of that encrypted module configuration. Calendar requests and event contents travel directly between the browser and the configured CalDAV origin; WebHome does not proxy or cache them.
+
+When holiday highlighting is enabled, the browser requests public holidays from Nager.Date by country and year. Successful responses are cached in memory for the browser session; no calendar event or WebHome credential is sent to that service.
 
 RSS and email require server-side proxies because browsers cannot fetch arbitrary feeds or open IMAP connections directly. The server therefore receives RSS URLs and, when email is fetched, the configured IMAP host, port, login and password.
 

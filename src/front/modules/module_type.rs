@@ -3,6 +3,7 @@ use leptos::prelude::{ArcRwSignal, RwSignal, ViewFn};
 use strum_macros::EnumDiscriminants;
 use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::modules::components::{moduleContent, Backable, BoxFuture, Cache, Cacheable, ModuleName, ModuleSizeContrainte, RefreshTime};
+use crate::front::modules::calendar::Calendar;
 use crate::front::modules::todo::Todo;
 use strum_macros::EnumIter;
 use crate::front::modules::mail::Mail;
@@ -22,6 +23,8 @@ pub enum ModuleType
 	MAIL(Mail),
 	#[strum(to_string = "WEATHER")]
 	WEATHER(Weather),
+	#[strum(to_string = "CALENDAR")]
+	CALENDAR(Calendar),
 }
 
 impl ModuleTypeDiscriminants
@@ -34,6 +37,7 @@ impl ModuleTypeDiscriminants
 			Self::TODO => "MODULE_TYPE_TODO",
 			Self::MAIL => "MODULE_TYPE_MAIL",
 			Self::WEATHER => "MODULE_TYPE_WEATHER",
+			Self::CALENDAR => "MODULE_TYPE_CALENDAR",
 		};
 	}
 }
@@ -45,6 +49,7 @@ impl ModuleType {
 			ModuleType::TODO(x) => Box::new(x),
 			ModuleType::MAIL(x) => Box::new(x),
 			ModuleType::WEATHER(x) => Box::new(x),
+			ModuleType::CALENDAR(x) => Box::new(x),
 		}
 	}
 
@@ -54,6 +59,7 @@ impl ModuleType {
 			ModuleType::TODO(x) => Box::new(x),
 			ModuleType::MAIL(x) => Box::new(x),
 			ModuleType::WEATHER(x) => Box::new(x),
+			ModuleType::CALENDAR(x) => Box::new(x),
 		}
 	}
 
@@ -63,6 +69,7 @@ impl ModuleType {
 			ModuleType::TODO(x) => Box::new(x),
 			ModuleType::MAIL(x) => Box::new(x),
 			ModuleType::WEATHER(x) => Box::new(x),
+			ModuleType::CALENDAR(x) => Box::new(x),
 		}
 	}
 }
@@ -99,6 +106,7 @@ impl Backable for ModuleType {
 			ModuleType::TODO(x) => x.isOlderThan(other),
 			ModuleType::MAIL(x) => x.isOlderThan(other),
 			ModuleType::WEATHER(x) => x.isOlderThan(other),
+			ModuleType::CALENDAR(x) => x.isOlderThan(other),
 		}
 	}
 
@@ -115,6 +123,9 @@ impl Backable for ModuleType {
 			},
 			"MAIL" => {
 				Mail::newFromModuleContent(from).map(|content| Self::MAIL(content))
+			},
+			"CALENDAR" => {
+				Calendar::newFromModuleContent(from).map(|content| Self::CALENDAR(content))
 			},
 			&_ => panic!("ModuleType::newFromModuleContent : unknown module type {}", from.typeModule)
 		}
@@ -157,6 +168,7 @@ pub fn StringToModuleType(from: impl AsRef<str>) -> Option<ModuleType>
 		"TODO" => Some(ModuleType::TODO(Default::default())),
 		"WEATHER" => Some(ModuleType::WEATHER(Default::default())),
 		"MAIL" => Some(ModuleType::MAIL(Default::default())),
+		"CALENDAR" => Some(ModuleType::CALENDAR(Calendar::new())),
 		&_ => None
 	}
 }

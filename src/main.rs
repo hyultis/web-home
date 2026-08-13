@@ -90,6 +90,7 @@ async fn main() {
 	// set default site config
 	let mut trace_front_log = false;
 	let mut allow_registration = false;
+	let mut caldav_allowed_origins = Vec::new();
 	if let Some(mut siteConfig) = HConfigManager::singleton().get("site")
 	{
 		let config = siteConfig.value_mut();
@@ -97,6 +98,7 @@ async fn main() {
 		helper::preFillConfig(config,"allow_registration",true);
 		helper::preFillConfig(config,"trace_front_log",!production);
 		helper::preFillConfig(config,"imap_allowed_ports",vec![JsonValue::Number(993.0)]);
+		helper::preFillConfig(config,"caldav_allowed_origins",Vec::<JsonValue>::new());
 		if let Some(JsonValue::Boolean(raw)) = config.value_get("trace_front_log")
 		{
 			trace_front_log = traceFrontLog_enabled(raw,production);
@@ -104,6 +106,11 @@ async fn main() {
 		if let Some(JsonValue::Boolean(raw)) = config.value_get("allow_registration")
 		{
 			allow_registration = raw;
+		}
+		match helper::calDavOrigins_get(config.value_get("caldav_allowed_origins"),!production)
+		{
+			Ok(origins) => caldav_allowed_origins = origins,
+			Err(()) => HTrace!((Level::WARNING) "caldav_allowed_origins is invalid; no CalDAV origin will be allowed"),
 		}
 		HTraceError!(config.file_save());
 	}
@@ -119,6 +126,7 @@ async fn main() {
 	let browserContentSecurity = BrowserContentSecurity::new(
 		&leptos_options,
 		std::env::var_os("LEPTOS_WATCH").is_some(),
+		caldav_allowed_origins,
 	);
 	let browserAssetDelivery = BrowserAssetDelivery::new(&leptos_options);
 
@@ -161,11 +169,13 @@ async fn main() {
 
 #[cfg(feature = "ssr")]
 mod helper {
+	use std::collections::HashSet;
 	use axum::extract::Request;
 	use axum::middleware::Next;
 	use axum::response::Response;
 	use Hconfig::HConfig::HConfig;
 	use Hconfig::tinyjson::JsonValue;
+	use url::Url;
 
 	pub fn preFillConfig(config: &mut HConfig,fieldName: impl Into<String>, data: impl Into<JsonValue>)
 	{
@@ -177,6 +187,37 @@ mod helper {
 		} {
 			config.value_set(&fieldName,data);
 		}
+	}
+
+	pub fn calDavOrigins_get(value: Option<JsonValue>,allowHttp: bool) -> Result<Vec<String>,()>
+	{
+		let Some(JsonValue::Array(values)) = value else {return Err(());};
+		if (values.len() > 32) {return Err(());}
+		let mut seen = HashSet::new();
+		let mut origins = Vec::new();
+		for value in values
+		{
+			let JsonValue::String(value) = value else {return Err(());};
+			if (value.len() > 4_096) {return Err(());}
+			let url = Url::parse(value.trim()).map_err(|_| ())?;
+			if (!(url.scheme() == "https" || (allowHttp && url.scheme() == "http"))
+				|| url.host_str().is_none()
+				|| !url.username().is_empty()
+				|| url.password().is_some()
+				|| !matches!(url.path(),"" | "/")
+				|| url.query().is_some()
+				|| url.fragment().is_some())
+			{
+				return Err(());
+			}
+			let origin = url.origin().ascii_serialization();
+			if (seen.insert(origin.clone()))
+			{
+				origins.push(origin);
+			}
+		}
+		origins.sort();
+		return Ok(origins);
 	}
 
 	pub(crate) async fn tracing_request(
@@ -199,6 +240,48 @@ mod helper {
 		}
 
 		response
+	}
+}
+
+#[cfg(all(test,feature = "ssr"))]
+mod siteConfig_tests
+{
+	use Hconfig::tinyjson::JsonValue;
+	use super::helper::calDavOrigins_get;
+
+	#[test]
+	fn calDavOrigins_acceptOnlyExactHttpsOrigins()
+	{
+		let origins = calDavOrigins_get(Some(JsonValue::Array(vec![
+			JsonValue::String("https://calendar.example".to_string()),
+			JsonValue::String("https://calendar.example/".to_string()),
+			JsonValue::String("https://calendar.example:8443".to_string()),
+		])),false).unwrap();
+
+		assert_eq!(origins,["https://calendar.example","https://calendar.example:8443"]);
+		assert!(calDavOrigins_get(Some(JsonValue::Array(vec![
+			JsonValue::String("http://calendar.example".to_string()),
+		])),false).is_err());
+		assert!(calDavOrigins_get(Some(JsonValue::Array(vec![
+			JsonValue::String("https://calendar.example/path".to_string()),
+		])),false).is_err());
+		assert!(calDavOrigins_get(Some(JsonValue::Array(vec![
+			JsonValue::String("https://user:secret@calendar.example".to_string()),
+		])),false).is_err());
+	}
+
+	#[test]
+	fn calDavOrigins_acceptExactHttpOriginsOnlyWhenDevelopmentAllowsThem()
+	{
+		let value = || Some(JsonValue::Array(vec![
+			JsonValue::String("http://192.168.1.20:5232".to_string()),
+		]));
+
+		assert_eq!(
+			calDavOrigins_get(value(),true).unwrap(),
+			["http://192.168.1.20:5232"],
+		);
+		assert!(calDavOrigins_get(value(),false).is_err());
 	}
 }
 

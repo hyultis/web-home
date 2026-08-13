@@ -79,6 +79,15 @@ option
 	color: var(--color-text);
 }
 
+input[type="checkbox"]
+{
+	appearance: auto;
+	width: 1rem;
+	height: 1rem;
+	accent-color: var(--color-accent);
+	cursor: pointer;
+}
+
 textarea
 {
 	width: 100%;

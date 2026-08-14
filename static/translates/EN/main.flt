@@ -112,6 +112,14 @@ DISTANT_TIME_RESULT_YEAR = Y
 #modules
 MODULE_TITLE_CONF = Title:
 MODULE_TODO_CONTENT = Note content
+MODULE_TODO_EDITOR_HELP = Rich editor. Start a line with #, ## or ### for a heading, - for a list, * for a task, or *x for a completed task. HTTP and HTTPS links are detected automatically.
+MODULE_TODO_TASK_TOGGLE = Toggle task status
+MODULE_TODO_OPEN_LINK_ACTION = Open this link in a new tab
+MODULE_TODO_COMMANDS = Editor shortcuts
+MODULE_TODO_COMMAND_HEADING = Heading, up to three levels
+MODULE_TODO_COMMAND_LIST = Simple list
+MODULE_TODO_COMMAND_TASK = Task; *x marks it completed
+MODULE_TODO_COMMAND_LINK = Automatically detected HTTP(S) link
 
 #module link
 MODULE_LINK_DEL = Delete a link?

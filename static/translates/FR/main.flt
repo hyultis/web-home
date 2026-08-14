@@ -112,6 +112,14 @@ DISTANT_TIME_RESULT_YEAR = Y
 #modules
 MODULE_TITLE_CONF = Titre:
 MODULE_TODO_CONTENT = Contenu de la note
+MODULE_TODO_EDITOR_HELP = Éditeur riche. Commencez une ligne par #, ## ou ### pour un titre, - pour une liste, * pour une tâche ou *x pour une tâche terminée. Les liens HTTP et HTTPS sont détectés automatiquement.
+MODULE_TODO_TASK_TOGGLE = Changer l'état de la tâche
+MODULE_TODO_OPEN_LINK_ACTION = Ouvrir ce lien dans un nouvel onglet
+MODULE_TODO_COMMANDS = Raccourcis de l'éditeur
+MODULE_TODO_COMMAND_HEADING = Titre, jusqu'à trois niveaux
+MODULE_TODO_COMMAND_LIST = Liste simple
+MODULE_TODO_COMMAND_TASK = Tâche ; *x la marque comme terminée
+MODULE_TODO_COMMAND_LINK = Lien HTTP(S) détecté automatiquement
 
 #module link
 MODULE_LINK_DEL = Supprimer un lien ?

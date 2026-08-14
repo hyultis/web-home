@@ -1,16 +1,15 @@
+mod document;
+mod editor;
+
 use std::fmt::{Debug, Formatter};
 use leptoaster::ToasterContext;
-use leptos::prelude::{OnTargetAttribute, Set};
-use leptos::prelude::{AriaAttributes, ElementChild, GetUntracked, GlobalAttributes, PropAttribute, Update};
-use leptos::prelude::{ArcRwSignal, ClassAttribute, Get, IntoAny, RwSignal};
-use leptos::{component, view, IntoView};
+use leptos::prelude::{GetUntracked, Update};
+use leptos::prelude::{ArcRwSignal, RwSignal};
 use leptos::children::ViewFn;
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleName, ModuleSizeContrainte, RefreshTime};
-use leptos_use::watch_debounced;
 use crate::front::modules::module_actions::ModuleActionFn;
-use crate::front::utils::translate::TranslateText;
 
 static MAX_LENGTH: usize = 100000;
 
@@ -81,9 +80,7 @@ impl Backable for Todo
 		let contentInner = self.content.clone();
 		let updateInner = self._update.clone();
 		ViewFn::from(move || {
-			view!{
-				<TodoDraw contentTocheck=contentInner.clone() cache=updateInner.clone() moduleActions=moduleActions.clone() moduleId=moduleId.clone()/>
-			}.into_any()
+			return editor::draw(contentInner.clone(),updateInner.clone(),moduleActions.clone(),moduleId.clone());
 		})
 	}
 
@@ -140,42 +137,4 @@ impl Backable for Todo
 	fn size(&self) -> ModuleSizeContrainte {
 		ModuleSizeContrainte::default()
 	}
-}
-
-#[component]
-fn TodoDraw(contentTocheck: ArcRwSignal<String>, cache: ArcRwSignal<Cache>, moduleActions: ModuleActionFn, moduleId: ModuleID) -> impl IntoView
-{
-	let contentId = format!("module-todo-{}",moduleId.id);
-	let counterId = format!("{}-counter",contentId);
-	let contentWatcher = contentTocheck.clone();
-	let _newWatcher = watch_debounced(
-		move || contentWatcher.get(),
-		move |_, _, _| {
-			(moduleActions.clone().updateFn)((moduleId.clone()));
-		},
-		5000.0,
-	);
-	
-	let contentGet = contentTocheck.clone();
-	let contentWrite = contentTocheck.clone();
-	let contentLen = contentTocheck.clone();
-	return view!{
-			<div class="module_todo_layout">
-				<label class="visually_hidden" for={contentId.clone()}><TranslateText key="MODULE_TODO_CONTENT"/></label>
-				<textarea class="module_todo"
-					id={contentId}
-					aria-describedby={counterId.clone()}
-					maxlength={MAX_LENGTH}
-					prop:value=move || contentGet.get()
-					on:input:target=move |ev| {
-						cache.update(|cache|{
-							cache.update();
-						});
-						let mut newContent: String = ev.target().value();
-						newContent.truncate(MAX_LENGTH);
-						contentWrite.set(newContent);
-					}></textarea>
-				<span id={counterId} class="module_todo_counter">{move || contentLen.get().len()}/{MAX_LENGTH}c</span>
-			</div>
-		}.into_any();
 }

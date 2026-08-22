@@ -1,4 +1,5 @@
-use super::{CalendarLoadState,CalendarRuntime,browserTimezone_get,browser_today_get};
+use super::{CALENDAR_AI_ACTION_CREATE,CalendarLoadState,CalendarRuntime,browser_today_get};
+use crate::front::utils::browser;
 use super::caldav::CalDavError;
 #[cfg(feature = "hydrate")]
 use super::caldav::CalDavClient;
@@ -200,6 +201,9 @@ fn CalendarConfigDraw(
 	let weekendCheckedConfig = config.clone();
 	let weekendChangeConfig = config.clone();
 	let weekendChangeUpdate = update.clone();
+	let aiActionCheckedConfig = config.clone();
+	let aiActionChangeConfig = config.clone();
+	let aiActionChangeUpdate = update.clone();
 
 	view! {
 		<div class="module_config module_calendar_config">
@@ -298,6 +302,28 @@ fn CalendarConfigDraw(
 				</label>
 				{holidayCountryField.draw()}
 				<p class="module_config_help"><TranslateText key="MODULE_CALENDAR_HOLIDAY_COUNTRY_HELP"/></p>
+			</fieldset>
+			<fieldset class="module_ai_permissions">
+				<legend><TranslateText key="MODULE_AI_PERMISSIONS"/></legend>
+				<label class="module_ai_permission">
+					<input
+						type="checkbox"
+						prop:checked=move || aiActionCheckedConfig.get().aiGrant.action_allows(CALENDAR_AI_ACTION_CREATE)
+						on:change=move |event| {
+							let enabled = event_target_checked(&event);
+							aiActionChangeConfig.update(|config| {
+								config.aiGrant.actions.retain(|action| action != CALENDAR_AI_ACTION_CREATE);
+								if (enabled)
+								{
+									config.aiGrant.actions.push(CALENDAR_AI_ACTION_CREATE.to_string());
+								}
+							});
+							aiActionChangeUpdate.update(|cache| cache.update());
+						}
+					/>
+					<span><TranslateText key="MODULE_CALENDAR_AI_CREATE_ACTION"/></span>
+				</label>
+				<p class="module_config_help"><TranslateText key="MODULE_CALENDAR_AI_HELP"/></p>
 			</fieldset>
 		</div>
 	}
@@ -1486,7 +1512,7 @@ fn calendarCreateInput_get(
 		location,
 		start,
 		end,
-		timezone: browserTimezone_get(),
+		timezone: browser::timezone_get(),
 		recurrence,
 	};
 	input.validate().ok()?;

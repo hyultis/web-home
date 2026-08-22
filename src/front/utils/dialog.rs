@@ -85,14 +85,21 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 		{move || {
 			manager.dialog.get().map(|data| {
 				let closeEnabledData = data.clone();
+				let workspaceCloseEnabledData = data.clone();
 				let validateEnabledData = data.clone();
+				let isWorkspace = data.is_workspace;
+				let title = data.title.clone();
+				let workspaceHeaderStart = data.header_start.clone();
+				let workspaceCloseTitle = data.button_close_title.clone();
 				view! {
 					<div class={move || {
 							let mut closing = "";
 							if data.is_closing {closing = " closing";}
 							let mut larger = "";
 							if data.is_larger {larger = " larger";}
-							format!("dialog-backdrop{}{}",closing,larger)
+							let mut workspace = "";
+							if data.is_workspace {workspace = " workspace";}
+							format!("dialog-backdrop{}{}{}",closing,larger,workspace)
 						}} on:click=closeFn.clone() on:keydown=keyboardCloseFn.clone()>
 						<div
 							class="dialog-window"
@@ -103,19 +110,39 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 							tabindex="-1"
 							on:click=|e| e.stop_propagation()
 						>
-							<h2 id="webhome-dialog-title">{
-								if(data.title.starts_with("€")) {
-									view!({data.title.chars().next().map(|c| &data.title[c.len_utf8()..]).unwrap_or("MODULE_MAIL_NO_SUBJECT")}).into_any()
-								}
-								else {
-									view!(<TranslateText key={data.title}/>).into_any()
-								}
-					}</h2>
+							{if isWorkspace
+							{
+								view! {
+									<div class="dialog-workspace-header">
+										<div class="dialog-workspace-header-start">{
+											workspaceHeaderStart.map(|header| header())
+										}</div>
+										<h2 id="webhome-dialog-title">{dialogTitle_view(title.clone())}</h2>
+										<div class="dialog-workspace-header-end">{
+											workspaceCloseTitle.map(|button| view! {
+												<button
+													type="button"
+													class="dialog-workspace-close icon_button"
+													disabled=move || !workspaceCloseEnabledData.canClose()
+													on:click=closeFn.clone()
+												>
+													<i class="iconoir-xmark" aria-hidden="true"></i>
+													<span class="visually_hidden"><TranslateText key=button/></span>
+												</button>
+											})
+										}</div>
+									</div>
+								}.into_any()
+							}
+							else
+							{
+								view! {<h2 id="webhome-dialog-title">{dialogTitle_view(title)}</h2>}.into_any()
+							}}
 							<div class="dialog-content">{
 								let tmp = data.body.clone();
 								tmp()
 							}</div>
-							<div class="dialog-buttons">
+							{(!isWorkspace).then(|| view! {<div class="dialog-buttons">
 								{
 									if let Some(button) = data.button_close_title.clone()
 									{
@@ -144,7 +171,7 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 									}
 									else {view!{}.into_any()}
 								}
-							</div>
+							</div>})}
 						</div>
 					</div>
 				}
@@ -153,10 +180,20 @@ pub fn DialogHost(manager: DialogManager) -> impl IntoView
 	}
 }
 
+fn dialogTitle_view(title: String) -> AnyView
+{
+	if let Some(title) = title.strip_prefix('€')
+	{
+		return view!{{title.to_string()}}.into_any();
+	}
+	return view!{<TranslateText key=title/>}.into_any();
+}
+
 #[derive(Clone)]
 pub struct DialogData
 {
 	title: String,
+	header_start: Option<Arc<dyn Fn() -> AnyView + Send + Sync + 'static>>,
 	body: Arc<dyn Fn() -> AnyView + Send + Sync + 'static>,
 	// A dialog can outlive the reactive Owner that created it, so it must own its actions.
 	on_validate: Option<Arc<dyn Fn(()) -> bool + Send + Sync + 'static>>,
@@ -164,6 +201,7 @@ pub struct DialogData
 	can_close: Arc<dyn Fn() -> bool + Send + Sync + 'static>,
 	is_closing: bool,
 	is_larger: bool,
+	is_workspace: bool,
 	button_validate_title: Option<String>,
 	button_close_title: Option<String>,
 	validate_style: DialogActionStyle,
@@ -196,12 +234,14 @@ impl DialogData
 	{
 		Self {
 			title: AllFrontUIEnum::NOTITLE.to_string(),
+			header_start: None,
 			body: Arc::new(move || view!{}.into_any()),
 			on_validate: None,
 			on_close: None,
 			can_close: Arc::new(|| true),
 			is_closing: false,
 			is_larger: false,
+			is_workspace: false,
 			button_validate_title: Some(AllFrontUIEnum::VALID.to_string()),
 			button_close_title: Some(AllFrontUIEnum::CLOSE.to_string()),
 			validate_style: DialogActionStyle::Success,
@@ -218,6 +258,13 @@ impl DialogData
 	pub fn setBody(mut self, body: impl Fn() -> AnyView + Send + Sync + 'static) -> Self
 	{
 		self.body = Arc::new(body);
+		self
+	}
+
+	/// Adds content before the centered title in an application-like workspace header.
+	pub(crate) fn setHeaderStart(mut self,header_start: impl Fn() -> AnyView + Send + Sync + 'static) -> Self
+	{
+		self.header_start = Some(Arc::new(header_start));
 		self
 	}
 
@@ -278,6 +325,13 @@ impl DialogData
 	pub fn setIsLarger(mut self, is_larger: bool) -> Self
 	{
 		self.is_larger = is_larger;
+		self
+	}
+
+	/// "Workspace" reserves almost the complete viewport for an application-like surface.
+	pub fn setIsWorkspace(mut self,is_workspace: bool) -> Self
+	{
+		self.is_workspace = is_workspace;
 		self
 	}
 
@@ -466,6 +520,10 @@ fn dialogFocusableElements_get(dialog: &HtmlElement) -> Vec<HtmlElement>
 	{
 		if let Some(node) = nodes.item(index) && let Ok(element) = node.dyn_into::<HtmlElement>()
 		{
+			if (element.closest("[hidden]").ok().flatten().is_some())
+			{
+				continue;
+			}
 			focusableElements.push(element);
 		}
 	}
@@ -494,18 +552,24 @@ fn dialogFocus_trap(event: &KeyboardEvent, dialogRef: NodeRef<Div>)
 {
 	let Some(dialog) = dialogRef.get_untracked() else {return};
 	let dialogElement: HtmlElement = dialog.unchecked_into();
-	let focusableElements = dialogFocusableElements_get(&dialogElement);
+	let focusRoot = dialogElement.query_selector(concat!(
+		"[role=\"dialog\"][aria-modal=\"true\"],",
+		"[role=\"alertdialog\"][aria-modal=\"true\"]"
+	)).ok().flatten()
+		.and_then(|element| element.dyn_into::<HtmlElement>().ok())
+		.unwrap_or_else(|| dialogElement.clone());
+	let focusableElements = dialogFocusableElements_get(&focusRoot);
 	let activeElement = web_sys::window()
 		.and_then(|window| window.document())
 		.and_then(|document| document.active_element())
 		.and_then(|element| element.dyn_into::<HtmlElement>().ok());
 	let Some(firstElement) = focusableElements.first() else {
 		event.prevent_default();
-		let _ = dialogElement.focus();
+		let _ = focusRoot.focus();
 		return;
 	};
 	let Some(lastElement) = focusableElements.last() else {return};
-	let dialogHasFocus = activeElement.as_ref().is_none_or(|element| element == &dialogElement);
+	let dialogHasFocus = activeElement.as_ref().is_none_or(|element| element == &focusRoot);
 	let mustWrap = if (event.shift_key())
 	{
 		dialogHasFocus || activeElement.as_ref().is_some_and(|element| element == firstElement)

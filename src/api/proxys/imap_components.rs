@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub(crate) const IMAP_AI_CONTENT_MAXIMUM_BYTES: usize = 64 * 1024;
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BoxName
 {

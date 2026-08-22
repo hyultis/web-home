@@ -256,6 +256,52 @@ impl TodoEditorDocument
 		return &self.blocks;
 	}
 
+	pub(super) fn headingTitles_get(&self) -> Vec<String>
+	{
+		return self.blocks.iter().filter_map(|block| {
+			return matches!(block.kind,TodoBlockKind::Heading(_)).then(|| block.text.clone());
+		}).collect();
+	}
+
+	pub(super) fn task_append(&mut self,heading: &str,text: String) -> bool
+	{
+		if (self.blocks.len() >= MAX_BLOCKS)
+		{
+			return false;
+		}
+		if (self.blocks.len() == 1
+			&& self.blocks[0].kind == TodoBlockKind::Paragraph
+			&& self.blocks[0].text.is_empty())
+		{
+			self.blocks[0].kind = TodoBlockKind::Task(false);
+			self.blocks[0].text = text;
+			return true;
+		}
+
+		let insertIndex = self.blocks.iter().enumerate().find_map(|(index,block)| {
+			let TodoBlockKind::Heading(level) = block.kind else {return None};
+			if (block.text != heading)
+			{
+				return None;
+			}
+			return Some(self.blocks.iter().enumerate().skip(index + 1)
+				.find_map(|(nextIndex,nextBlock)| match nextBlock.kind
+				{
+					TodoBlockKind::Heading(nextLevel) if nextLevel <= level => Some(nextIndex),
+					_ => None,
+				})
+				.unwrap_or(self.blocks.len()));
+		}).unwrap_or(self.blocks.len());
+		let blockId = TodoBlockId(self.nextBlockId);
+		self.nextBlockId = self.nextBlockId.saturating_add(1);
+		self.blocks.insert(insertIndex,TodoBlock {
+			id: blockId,
+			kind: TodoBlockKind::Task(false),
+			text,
+		});
+		return true;
+	}
+
 	pub(super) fn block_get(&self, id: TodoBlockId) -> Option<&TodoBlock>
 	{
 		return self.blocks.iter().find(|block| block.id==id);
@@ -808,5 +854,40 @@ mod tests
 		assert_eq!(document.block_enterRange(firstId,0,4),None);
 		assert_eq!(document.block_linesReplace(firstId,"first\nsecond"),None);
 		assert_eq!(document.source_get(),source);
+	}
+
+	#[test]
+	fn aiTaskAppend_targetsTheEndOfTheSelectedHeadingSection()
+	{
+		let mut document = TodoEditorDocument::source_parse(
+			"# Work\n* first\n## Details\nplain\n# Home\n* second",
+		);
+
+		assert!(document.task_append("Work","generated".to_string()));
+
+		assert_eq!(
+			document.source_get(),
+			"# Work\n* first\n## Details\nplain\n* generated\n# Home\n* second",
+		);
+	}
+
+	#[test]
+	fn aiTaskAppend_fallsBackToTheDocumentEndWhenHeadingDisappeared()
+	{
+		let mut document = TodoEditorDocument::source_parse("# Current\nplain");
+
+		assert!(document.task_append("Deleted","generated".to_string()));
+
+		assert_eq!(document.source_get(),"# Current\nplain\n* generated");
+	}
+
+	#[test]
+	fn aiTaskAppend_replacesTheSyntheticEmptyParagraph()
+	{
+		let mut document = TodoEditorDocument::source_parse("");
+
+		assert!(document.task_append("Missing","generated".to_string()));
+
+		assert_eq!(document.source_get(),"* generated");
 	}
 }

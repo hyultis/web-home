@@ -147,6 +147,69 @@
 	overflow: hidden;
 }
 
+.dialog-backdrop.workspace
+{
+	padding: var(--space-2);
+}
+
+.dialog-backdrop.workspace .dialog-window
+{
+	width: calc(100vw - (2 * var(--space-2)));
+	height: calc(100vh - (2 * var(--space-2)));
+	height: calc(100dvh - (2 * var(--space-2)));
+	max-height: none;
+}
+
+.dialog-workspace-header
+{
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+	align-items: center;
+	gap: var(--space-3);
+	padding-bottom: var(--space-3);
+	border-bottom: 1px solid var(--color-border);
+}
+
+.dialog-workspace-header-start,
+.dialog-workspace-header-end
+{
+	min-width: 0;
+}
+
+.dialog-workspace-header h2
+{
+	grid-column: 2;
+	text-align: center;
+	white-space: nowrap;
+}
+
+.dialog-workspace-header-start
+{
+	grid-column: 1;
+	grid-row: 1;
+}
+
+.dialog-workspace-header-end
+{
+	display: flex;
+	grid-column: 3;
+	grid-row: 1;
+	justify-content: flex-end;
+}
+
+.dialog-workspace-close
+{
+	margin: 0;
+}
+
+.dialog-backdrop.workspace .dialog-content
+{
+	display: flex;
+	flex: 1 1 auto;
+	margin-top: 0;
+	overflow: hidden;
+}
+
 .dialog-backdrop.closing
 {
 	animation: dialog_backdrop_close var(--motion-overlay) var(--motion-easing) forwards;

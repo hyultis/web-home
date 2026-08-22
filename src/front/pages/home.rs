@@ -2,6 +2,9 @@ use leptos::prelude::{For, GetUntracked, OnTargetAttribute, With};
 use leptos::prelude::{CollectView, Get, PropAttribute};
 use crate::front::modules::components::Backable;
 use crate::front::components::options_menu::OptionsMenu;
+use crate::front::ai::workspace::AiWorkspaceButton;
+use crate::front::ai::inbox::AiInboxButton;
+use crate::front::ai::AiAllowedOrigins;
 use crate::front::modules::module_holder::{ModuleHolder, ModuleHolderEpoch};
 use crate::front::utils::all_front_enum::{AllFrontErrorEnum, AllFrontLoginEnum, AllFrontUIEnum};
 use crate::front::utils::dialog::{DialogActionStyle, DialogData, DialogManager};
@@ -65,6 +68,13 @@ pub fn Home() -> impl IntoView
 		}
 	});
 
+	Effect::new(move |_| {
+		if (ModuleHolder::aiChat_migration_isNeeded())
+		{
+			ModuleHolder::aiChat_migration_start(lifecycleEpoch);
+		}
+	});
+
 	// auto refresh cookie every 2 hour
 	let clientStateRefresh = clientState.clone();
 	let _ = use_interval_fn(
@@ -76,7 +86,8 @@ pub fn Home() -> impl IntoView
 	);
 
 	// pre init ModuleHolder
-	let moduleActions = ModuleActionFn::new(toaster.clone(), lifecycleEpoch);
+	let aiAllowedOrigins = leptos::prelude::expect_context::<AiAllowedOrigins>();
+	let moduleActions = ModuleActionFn::new(toaster.clone(),aiAllowedOrigins,lifecycleEpoch);
 	let innerModuleActions = moduleActions.clone();
 	moduleContent.update(|modules|{
 		modules.moduleActions_set(lifecycleEpoch, innerModuleActions);
@@ -191,7 +202,9 @@ pub fn Home() -> impl IntoView
 							}.into_any()
 						}
 					}}
-					<OptionsMenu/>
+					<AiWorkspaceButton lifecycleEpoch/>
+					<AiInboxButton lifecycleEpoch/>
+					<OptionsMenu lifecycleEpoch/>
 					<button type="button" class="icon_button icon_button--warning" on:click=disconnectFn>
 						<i class="iconoir-key" aria-hidden="true"></i>
 						<span class="visually_hidden"><TranslateText key="FRONTUI_LOGOUT_ACTION"/></span>

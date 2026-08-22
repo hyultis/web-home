@@ -109,6 +109,8 @@ impl Weather
 	}
 }
 
+impl crate::front::ai::automation::AiAutomationCapable for Weather {}
+
 impl ModuleName for Weather
 {
 	const MODULE_NAME: &'static str = "WEATHER";

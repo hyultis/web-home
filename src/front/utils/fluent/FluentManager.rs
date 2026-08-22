@@ -459,6 +459,6 @@ mod tests
 		assert!(!inscriptionSource.contains("\"retour\""));
 		assert!(mailSource.contains("<TranslateText key=\"MODULE_MAIL_NO_SUBJECT\"/>"));
 		assert!(!dialogSource.contains("<Translate key={data.title}/>"));
-		assert!(dialogSource.contains("<TranslateText key={data.title}/>"));
+		assert!(dialogSource.contains("<TranslateText key=title/>"));
 	}
 }

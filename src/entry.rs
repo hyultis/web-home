@@ -9,6 +9,7 @@ use leptos_router::{hooks, path};
 use leptos_use::use_locales;
 use crate::api::runtimeConfig_set;
 use crate::api::login::components::PasswordRotationError;
+use crate::front::ai::AiAllowedOrigins;
 use crate::front::modules::module_holder::ModuleHolder;
 use crate::front::pages::home::Home;
 use crate::front::pages::connection::Connection;
@@ -19,7 +20,7 @@ use crate::front::utils::toaster_helpers::{toasterOwner_provide, toastingErr};
 use crate::front::utils::translate::Translate;
 use crate::front::utils::users_data::ClientState;
 
-pub fn shell((options,trace_front_log,allowRegistration): (LeptosOptions, bool, bool)) -> impl IntoView {
+pub fn shell((options,trace_front_log,allowRegistration,llmAllowedOrigins): (LeptosOptions, bool, bool, Vec<String>)) -> impl IntoView {
 	#[cfg(feature="ssr")]
 	if let Some(requestParts) = use_context::<http::request::Parts>()
 	{
@@ -46,18 +47,19 @@ pub fn shell((options,trace_front_log,allowRegistration): (LeptosOptions, bool, 
 				<script type="module" src="setUpWorkers.js"></script>
 			</head>
 			<body>
-				<App traceFrontLog={trace_front_log} allowRegistration={allowRegistration}/>
+				<App traceFrontLog={trace_front_log} allowRegistration={allowRegistration} llmAllowedOrigins={llmAllowedOrigins}/>
 			</body>
 		</html>
 	}
 }
 
 #[island]
-pub fn App(traceFrontLog: bool,allowRegistration: bool) -> impl IntoView {
+pub fn App(traceFrontLog: bool,allowRegistration: bool,llmAllowedOrigins: Vec<String>) -> impl IntoView {
 	// Provides context that manages stylesheets, titles, meta tags, etc.
 	provide_meta_context();
 	provide_toaster();
 	toasterOwner_provide();
+	provide_context(AiAllowedOrigins::new(llmAllowedOrigins));
 
 	runtimeConfig_set(traceFrontLog,allowRegistration);
 

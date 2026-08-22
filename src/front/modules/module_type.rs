@@ -10,6 +10,11 @@ use crate::front::modules::mail::Mail;
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::modules::rss::Rss;
 use crate::front::modules::weather::Weather;
+use crate::front::ai::automation::{
+	AiActionFuture,AiActionPersistence,AiAutomationCapable,AiAutomationError,AiAutomationEvent,
+	AiCapabilityCatalog,AiExposureFuture,AiExposureRequest,AiEventReservation,AiModuleGrant,
+	AiValidatedAction,
+};
 
 #[derive(EnumDiscriminants,Debug)]
 #[strum_discriminants(derive(strum_macros::Display,EnumIter))]
@@ -43,6 +48,18 @@ impl ModuleTypeDiscriminants
 }
 
 impl ModuleType {
+	fn intoAiCapable(&self) -> &dyn AiAutomationCapable
+	{
+		return match self
+		{
+			ModuleType::RSS(module) => module,
+			ModuleType::TODO(module) => module,
+			ModuleType::MAIL(module) => module,
+			ModuleType::WEATHER(module) => module,
+			ModuleType::CALENDAR(module) => module,
+		};
+	}
+
 	pub fn intoBackable(&self) -> Box<&dyn Backable> {
 		match self {
 			ModuleType::RSS(x) => Box::new(x),
@@ -71,6 +88,65 @@ impl ModuleType {
 			ModuleType::WEATHER(x) => Box::new(x),
 			ModuleType::CALENDAR(x) => Box::new(x),
 		}
+	}
+}
+
+impl AiAutomationCapable for ModuleType
+{
+	fn ai_capabilities(&self) -> AiCapabilityCatalog
+	{
+		return self.intoAiCapable().ai_capabilities();
+	}
+
+	fn ai_grant(&self) -> AiModuleGrant
+	{
+		return self.intoAiCapable().ai_grant();
+	}
+
+	fn ai_exposure(&self,request: AiExposureRequest) -> Option<AiExposureFuture>
+	{
+		return self.intoAiCapable().ai_exposure(request);
+	}
+
+	fn ai_action_apply(&self,action: AiValidatedAction) -> Option<AiActionFuture>
+	{
+		return self.intoAiCapable().ai_action_apply(action);
+	}
+
+	fn ai_actionPersistence_prepare(
+		&self,
+		action: &AiValidatedAction,
+		base: Option<&ModuleContent>,
+	) -> Result<AiActionPersistence,AiAutomationError>
+	{
+		return self.intoAiCapable().ai_actionPersistence_prepare(action,base);
+	}
+
+	fn ai_actionPersistence_saved(&self,content: &ModuleContent) -> Result<(),AiAutomationError>
+	{
+		return self.intoAiCapable().ai_actionPersistence_saved(content);
+	}
+
+	fn ai_eventRetry(&self,event: &AiAutomationEvent)
+	{
+		self.intoAiCapable().ai_eventRetry(event);
+	}
+
+	fn ai_eventReservation_prepare(
+		&self,
+		event: &AiAutomationEvent,
+		base: Option<&ModuleContent>,
+	) -> Result<AiEventReservation,AiAutomationError>
+	{
+		return self.intoAiCapable().ai_eventReservation_prepare(event,base);
+	}
+
+	fn ai_eventReservation_saved(
+		&self,
+		content: &ModuleContent,
+	) -> Result<(),AiAutomationError>
+	{
+		return self.intoAiCapable().ai_eventReservation_saved(content);
 	}
 }
 

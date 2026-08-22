@@ -4,9 +4,9 @@ use std::sync::Arc;
 use gloo_timers::callback::Timeout;
 use leptoaster::{expect_toaster, ToasterContext};
 use leptos::children::ViewFn;
-use leptos::prelude::{use_context, AriaAttributes, CollectView, GlobalAttributes, StyleAttribute, Write};
-use leptos::prelude::{ClassAttribute, ElementChild, GetUntracked, Update};
-use leptos::prelude::{AnyView, ArcRwSignal, Get, IntoAny, OnAttribute, RwSignal, Set};
+use leptos::prelude::{use_context, AriaAttributes, CollectView, GlobalAttributes, StyleAttribute, Write,event_target_checked};
+use leptos::prelude::{ClassAttribute, ElementChild, GetUntracked, Update, WithUntracked};
+use leptos::prelude::{AnyView, ArcRwSignal, Get, IntoAny, OnAttribute, PropAttribute, RwSignal, Set};
 use leptos::{component, view, IntoView};
 use leptos_use::{use_event_listener, use_window};
 use serde::{Deserialize, Serialize};
@@ -14,8 +14,13 @@ use time::UtcDateTime;
 #[cfg(feature="hydrate")]
 use wasm_bindgen::JsCast;
 use crate::api::modules::components::{ModuleContent, ModuleID};
-use crate::api::proxys::imap::{API_proxys_imap_getMailContent, API_proxys_imap_listbox, API_proxys_imap_setMailSee, API_proxys_imap_sync};
-use crate::api::proxys::imap_components::{imap_connector, Attachment, BoxName, ImapMailboxSync, ImapMailboxSyncState, ImapMail, ImapMailContentType, ImapMailKey, ImapSyncRequest};
+use crate::api::proxys::imap::{API_proxys_imap_getMailAiContent, API_proxys_imap_getMailContent, API_proxys_imap_listbox, API_proxys_imap_setMailSee, API_proxys_imap_sync};
+use crate::api::proxys::imap_components::{imap_connector, Attachment, BoxName, ImapMailboxSync, ImapMailboxSyncState, ImapMail, ImapMailContentType, ImapMailKey, ImapSyncRequest, IMAP_AI_CONTENT_MAXIMUM_BYTES};
+use crate::front::ai::automation::{
+	AiAutomationCapable,AiAutomationError,AiAutomationEvent,AiCapabilityCatalog,AiEventCapability,
+	AiEventCausation,AiEventGrant,AiEventReservation,AiEventReservationCandidate,AiExposure,
+	AiExposureFuture,AiExposureRequest,AiModuleGrant,AiNamedValue,AiValue,AiValueDefinition,
+};
 use crate::front::modules::components::{distant_time_simpler, Backable, BoxFuture, Cache, Cacheable, FieldHelper, FieldHelperType, ModuleName, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::contentDownloader::download_attachment;
@@ -23,7 +28,19 @@ use crate::front::utils::dialog::{DialogData, DialogManager};
 use crate::front::utils::draw_title_if_present;
 use crate::front::utils::toaster_helpers::{toaster_api, toastingErr};
 use crate::front::utils::translate::{Translate, TranslateText};
+use crate::global_security::hash;
 use crate::HWebTrace;
+
+const MAIL_AI_EVENT_NEW: &str = "mail.new";
+const MAIL_AI_FIELD_FROM: &str = "from";
+const MAIL_AI_FIELD_TO: &str = "to";
+const MAIL_AI_FIELD_SUBJECT: &str = "subject";
+const MAIL_AI_FIELD_DATE: &str = "date";
+const MAIL_AI_FIELD_CONTENT: &str = "content";
+const MAIL_AI_HEADER_MAXIMUM_BYTES: usize = 64 * 1024;
+const MAIL_AI_CONTENT_MAXIMUM_BYTES: usize = IMAP_AI_CONTENT_MAXIMUM_BYTES;
+const MAIL_AI_HANDLED_ID_MAXIMUM_BYTES: usize = 64;
+const MAIL_AI_HANDLED_MAXIMUM: usize = 2_048;
 
 #[derive(Serialize,Deserialize,Debug)]
 #[derive(Clone)]
@@ -35,6 +52,10 @@ struct MailConfig
 	mailAsTag: String,
 	#[serde(default)]
 	remoteImageSenderAllowList: Vec<String>,
+	#[serde(default)]
+	aiGrant: AiModuleGrant,
+	#[serde(default)]
+	aiHandledMailIds: Vec<String>,
 	pub imap: imap_connector,
 }
 impl Default for MailConfig
@@ -45,6 +66,8 @@ impl Default for MailConfig
 			title: "".to_string(),
 			mailAsTag: "".to_string(),
 			remoteImageSenderAllowList: Vec::new(),
+			aiGrant: AiModuleGrant::default(),
+			aiHandledMailIds: Vec::new(),
 			imap: imap_connector::default(),
 		}
 	}
@@ -293,15 +316,16 @@ impl MailOverlayPlacement
 struct MailOverlayState
 {
 	mail: ImapMail,
+	aiHandled: bool,
 	placement: MailOverlayPlacement,
 }
 
 impl MailOverlayState
 {
-	fn from_event_target(mail: ImapMail, target: Option<web_sys::EventTarget>) -> Option<Self>
+	fn from_event_target(mail: ImapMail,aiHandled: bool,target: Option<web_sys::EventTarget>) -> Option<Self>
 	{
 		return MailOverlayPlacement::from_event_target(target)
-			.map(|placement| Self {mail,placement});
+			.map(|placement| Self {mail,aiHandled,placement});
 	}
 }
 
@@ -375,6 +399,118 @@ impl MailContentFrame
 
 impl MailConfig
 {
+	fn aiHandledMailId_isValid(id: &str) -> bool
+	{
+		return !id.is_empty()
+			&& id.len() <= MAIL_AI_HANDLED_ID_MAXIMUM_BYTES
+			&& id.trim() == id
+			&& !id.chars().any(char::is_control);
+	}
+
+	fn aiHandledMailIds_normalize(&mut self)
+	{
+		let mut uniqueIds = HashSet::new();
+		self.aiHandledMailIds.retain(|id| {
+			return Self::aiHandledMailId_isValid(id) && uniqueIds.insert(id.clone());
+		});
+		if (self.aiHandledMailIds.len() > MAIL_AI_HANDLED_MAXIMUM)
+		{
+			self.aiHandledMailIds.drain(..self.aiHandledMailIds.len() - MAIL_AI_HANDLED_MAXIMUM);
+		}
+	}
+
+	fn aiHandledMail_isHandled(&self,eventId: &str) -> bool
+	{
+		return self.aiHandledMailIds.iter().any(|handled| handled == eventId);
+	}
+
+	fn aiHandledMail_add(&mut self,eventId: &str) -> bool
+	{
+		self.aiHandledMailIds_normalize();
+		if (!Self::aiHandledMailId_isValid(eventId) || self.aiHandledMail_isHandled(eventId))
+		{
+			return false;
+		}
+		self.aiHandledMailIds.push(eventId.to_string());
+		if (self.aiHandledMailIds.len() > MAIL_AI_HANDLED_MAXIMUM)
+		{
+			self.aiHandledMailIds.remove(0);
+		}
+		return true;
+	}
+
+	fn aiHandledMails_merge(&mut self,eventIds: &[String])
+	{
+		self.aiHandledMailIds_normalize();
+		let mut uniqueIds = self.aiHandledMailIds.iter().cloned().collect::<HashSet<_>>();
+		for eventId in eventIds
+		{
+			if (Self::aiHandledMailId_isValid(eventId) && uniqueIds.insert(eventId.clone()))
+			{
+				self.aiHandledMailIds.push(eventId.clone());
+			}
+		}
+		if (self.aiHandledMailIds.len() > MAIL_AI_HANDLED_MAXIMUM)
+		{
+			self.aiHandledMailIds.drain(..self.aiHandledMailIds.len() - MAIL_AI_HANDLED_MAXIMUM);
+		}
+	}
+
+	fn aiEvent_isEnabled(&self) -> bool
+	{
+		return self.aiGrant.events.iter().any(|grant| grant.event == MAIL_AI_EVENT_NEW);
+	}
+
+	fn aiEvent_set(&mut self,enabled: bool)
+	{
+		self.aiGrant.events.retain(|grant| grant.event != MAIL_AI_EVENT_NEW);
+		if (enabled)
+		{
+			self.aiGrant.events.push(AiEventGrant {
+				event: MAIL_AI_EVENT_NEW.to_string(),
+				fields: vec![
+					MAIL_AI_FIELD_FROM.to_string(),
+					MAIL_AI_FIELD_TO.to_string(),
+					MAIL_AI_FIELD_SUBJECT.to_string(),
+					MAIL_AI_FIELD_DATE.to_string(),
+				],
+			});
+		}
+	}
+
+	fn aiField_isEnabled(&self,field: &str) -> bool
+	{
+		return self.aiGrant.events.iter()
+			.find(|grant| grant.event == MAIL_AI_EVENT_NEW)
+			.is_some_and(|grant| grant.fields.iter().any(|granted| granted == field));
+	}
+
+	fn aiField_set(&mut self,field: &str,enabled: bool)
+	{
+		let Some(grant) = self.aiGrant.events.iter_mut()
+			.find(|grant| grant.event == MAIL_AI_EVENT_NEW)
+		else
+		{
+			return;
+		};
+		grant.fields.retain(|granted| granted != field);
+		if (enabled)
+		{
+			grant.fields.push(field.to_string());
+		}
+		let fieldOrder = [
+			MAIL_AI_FIELD_FROM,MAIL_AI_FIELD_TO,MAIL_AI_FIELD_SUBJECT,
+			MAIL_AI_FIELD_DATE,MAIL_AI_FIELD_CONTENT,
+		];
+		grant.fields.sort_unstable_by_key(|field| {
+			return fieldOrder.iter().position(|available| available == field).unwrap_or(usize::MAX);
+		});
+		if (grant.fields.is_empty())
+		{
+			self.aiGrant.events.retain(|grant| grant.event != MAIL_AI_EVENT_NEW);
+		}
+	}
+
 	fn mail_tag_is_active(&self) -> bool
 	{
 		return !self.mailAsTag.trim().trim_start_matches('@').is_empty();
@@ -421,11 +557,37 @@ impl MailConfig
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct MailSyncIdentity
+struct MailAccountIdentity
 {
 	host: String,
 	port: u16,
 	username: String,
+}
+
+impl MailAccountIdentity
+{
+	fn new(connector: &imap_connector) -> Self
+	{
+		return Self {
+			host: connector.host.trim().trim_end_matches('.').to_ascii_lowercase(),
+			port: connector.port,
+			username: connector.username.trim().to_string(),
+		};
+	}
+
+	fn eventId_get(&self,key: &ImapMailKey) -> String
+	{
+		return hash(format!(
+			"mail\0{}\0{}\0{}\0{}\0{}\0{}",
+			self.host,self.port,self.username,key.boxName,key.uidValidity,key.uid,
+		));
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MailSyncIdentity
+{
+	account: MailAccountIdentity,
 	boxAllowList: Option<Vec<String>>,
 	boxBlackList: Option<Vec<String>>,
 }
@@ -447,9 +609,7 @@ impl MailSyncIdentity
 			boxBlackList.dedup();
 		}
 		return Self {
-			host: connector.host.clone(),
-			port: connector.port,
-			username: connector.username.clone(),
+			account: MailAccountIdentity::new(connector),
 			boxAllowList,
 			boxBlackList,
 		};
@@ -461,6 +621,8 @@ struct MailsContent
 {
 	mailboxes: Option<HashMap<String,Option<u32>>>,
 	mailsData: HashMap<ImapMailKey,ImapMail>,
+	aiContentText: HashMap<ImapMailKey,String>,
+	pendingAiEvents: Vec<(ImapMailKey,i64)>,
 	pendingSeen: HashSet<ImapMailKey>,
 	confirmedSeen: HashSet<ImapMailKey>,
 	boxs: Vec<BoxName>,
@@ -516,9 +678,10 @@ impl MailsContent
 		return Some(ImapSyncRequest { mailboxes });
 	}
 
-	fn sync_apply(&mut self, mailboxes: Vec<ImapMailboxSync>)
+	fn sync_apply(&mut self, mailboxes: Vec<ImapMailboxSync>) -> Vec<(ImapMailKey,i64)>
 	{
 		let mut synchronizedMailboxes = HashMap::new();
+		let mut newMails = Vec::new();
 		for mailbox in mailboxes
 		{
 			let previousValidity = self.mailboxes.as_ref()
@@ -528,6 +691,8 @@ impl MailsContent
 			if (previousValidity != Some(mailbox.uidValidity))
 			{
 				self.mailsData.retain(|key,_| key.boxName != mailbox.boxName);
+				self.aiContentText.retain(|key,_| key.boxName != mailbox.boxName);
+				self.pendingAiEvents.retain(|(key,_)| key.boxName != mailbox.boxName);
 				self.pendingSeen.retain(|key| key.boxName != mailbox.boxName);
 				self.confirmedSeen.retain(|key| key.boxName != mailbox.boxName);
 			}
@@ -539,6 +704,8 @@ impl MailsContent
 					uid,
 				};
 				self.mailsData.remove(&key);
+				self.aiContentText.remove(&key);
+				self.pendingAiEvents.retain(|(candidate,_)| candidate != &key);
 				self.pendingSeen.remove(&key);
 				self.confirmedSeen.remove(&key);
 			}
@@ -551,7 +718,13 @@ impl MailsContent
 				};
 				if (!self.pendingSeen.contains(&key))
 				{
-					self.mailsData.insert(key,mail);
+					let isNew = !self.mailsData.contains_key(&key);
+					let date = mail.date;
+					self.mailsData.insert(key.clone(),mail);
+					if (isNew)
+					{
+						newMails.push((key,date));
+					}
 				}
 			}
 			let reconciledSeen = self.confirmedSeen.iter()
@@ -568,6 +741,12 @@ impl MailsContent
 		self.mailsData.retain(|key,_| {
 			return synchronizedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
 		});
+		self.aiContentText.retain(|key,_| {
+			return synchronizedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
+		});
+		self.pendingAiEvents.retain(|(key,_)| {
+			return synchronizedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
+		});
 		self.pendingSeen.retain(|key| {
 			return synchronizedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
 		});
@@ -575,6 +754,49 @@ impl MailsContent
 			return synchronizedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
 		});
 		self.mailboxes = Some(synchronizedMailboxes);
+		newMails.sort_unstable_by(|(leftKey,leftDate),(rightKey,rightDate)| {
+			return leftDate.cmp(rightDate)
+				.then_with(|| leftKey.boxName.cmp(&rightKey.boxName))
+				.then_with(|| leftKey.uidValidity.cmp(&rightKey.uidValidity))
+				.then_with(|| leftKey.uid.cmp(&rightKey.uid));
+		});
+		return newMails;
+	}
+
+	fn aiEventCandidates_take(&mut self,mut newMails: Vec<(ImapMailKey,i64)>) -> Vec<(ImapMailKey,i64)>
+	{
+		newMails.append(&mut self.pendingAiEvents);
+		newMails.retain(|(key,_)| self.mailsData.contains_key(key));
+		let mut uniqueKeys = HashSet::new();
+		newMails.retain(|(key,_)| uniqueKeys.insert(key.clone()));
+		newMails.sort_unstable_by(|(leftKey,leftDate),(rightKey,rightDate)| {
+			return leftDate.cmp(rightDate)
+				.then_with(|| leftKey.boxName.cmp(&rightKey.boxName))
+				.then_with(|| leftKey.uidValidity.cmp(&rightKey.uidValidity))
+				.then_with(|| leftKey.uid.cmp(&rightKey.uid));
+		});
+		return newMails;
+	}
+
+	fn aiEvents_rejectedSet(
+		&mut self,
+		candidates: Vec<(ImapMailKey,i64)>,
+		rejected: &[AiAutomationEvent],
+		connector: &imap_connector,
+	)
+	{
+		let rejectedIds = rejected.iter().map(|event| event.eventId.as_str()).collect::<HashSet<_>>();
+		self.pendingAiEvents.extend(candidates.into_iter().filter(|(key,_)| {
+			return rejectedIds.contains(Mail::aiEventId_get(connector,key).as_str());
+		}));
+		let mut uniqueKeys = HashSet::new();
+		self.pendingAiEvents.retain(|(key,_)| uniqueKeys.insert(key.clone()));
+		self.pendingAiEvents.sort_unstable_by(|(leftKey,leftDate),(rightKey,rightDate)| {
+			return leftDate.cmp(rightDate)
+				.then_with(|| leftKey.boxName.cmp(&rightKey.boxName))
+				.then_with(|| leftKey.uidValidity.cmp(&rightKey.uidValidity))
+				.then_with(|| leftKey.uid.cmp(&rightKey.uid));
+		});
 	}
 
 	fn topology_set(&mut self, boxes: &[BoxName], connector: &imap_connector)
@@ -585,6 +807,8 @@ impl MailsContent
 		{
 			self.mailboxes = None;
 			self.mailsData.clear();
+			self.aiContentText.clear();
+			self.pendingAiEvents.clear();
 			self.pendingSeen.clear();
 			self.confirmedSeen.clear();
 			return;
@@ -597,6 +821,12 @@ impl MailsContent
 			})
 			.collect::<HashMap<_,_>>();
 		self.mailsData.retain(|key,_| {
+			return selectedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
+		});
+		self.aiContentText.retain(|key,_| {
+			return selectedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
+		});
+		self.pendingAiEvents.retain(|(key,_)| {
 			return selectedMailboxes.get(&key.boxName) == Some(&Some(key.uidValidity));
 		});
 		self.pendingSeen.retain(|key| {
@@ -619,6 +849,8 @@ impl MailsContent
 	fn mailSeen_begin(&mut self, key: &ImapMailKey) -> Option<ImapMail>
 	{
 		self.pendingSeen.insert(key.clone());
+		self.aiContentText.remove(key);
+		self.pendingAiEvents.retain(|(candidate,_)| candidate != key);
 		return self.mailsData.remove(key);
 	}
 
@@ -644,6 +876,8 @@ impl MailsContent
 	{
 		self.mailboxes = None;
 		self.mailsData.clear();
+		self.aiContentText.clear();
+		self.pendingAiEvents.clear();
 		self.pendingSeen.clear();
 		self.confirmedSeen.clear();
 		self.boxs.clear();
@@ -663,6 +897,50 @@ pub struct Mail
 
 impl Mail
 {
+	fn aiEventId_get(connector: &imap_connector,key: &ImapMailKey) -> String
+	{
+		return MailAccountIdentity::new(connector).eventId_get(key);
+	}
+
+	fn aiEvent_get(moduleId: ModuleID,connector: &imap_connector,key: &ImapMailKey,date: i64) -> AiAutomationEvent
+	{
+		return AiAutomationEvent::new(
+			moduleId,MAIL_AI_EVENT_NEW.to_string(),Self::aiEventId_get(connector,key),date.max(0),
+			AiEventCausation::External,
+		);
+	}
+
+	fn aiDateText_get(timestamp: i64) -> Option<String>
+	{
+		let date = UtcDateTime::from_unix_timestamp(timestamp).ok()?;
+		return Some(format!(
+			"{:0>4}-{:0>2}-{:0>2}T{:0>2}:{:0>2}:{:0>2}Z",
+			date.year(),date.month() as u8,date.day(),date.hour(),date.minute(),date.second(),
+		));
+	}
+
+	fn aiEventCandidates_filter(
+		config: &MailConfig,
+		mut candidates: Vec<(ImapMailKey,i64)>,
+	) -> Vec<(ImapMailKey,i64)>
+	{
+		candidates.retain(|(mailKey,_)| {
+			return !config.aiHandledMail_isHandled(&Self::aiEventId_get(&config.imap,mailKey));
+		});
+		return candidates;
+	}
+
+	fn aiMail_get(
+		mailsContent: &MailsContent,
+		connector: &imap_connector,
+		eventId: &str,
+	) -> Option<(ImapMailKey,ImapMail)>
+	{
+		return mailsContent.mailsData.iter()
+			.find(|(key,_)| Self::aiEventId_get(connector,key) == eventId)
+			.map(|(key,mail)| (key.clone(),mail.clone()));
+	}
+
 	fn draw_config(getBoxsMailConfig: ArcRwSignal<MailConfig>, getBoxsMailsCache: ArcRwSignal<MailsContent>, update: ArcRwSignal<Cache>, moduleActions: ModuleActionFn) -> AnyView
 	{
 		let getBoxsMailConfigInner = getBoxsMailConfig.clone();
@@ -725,6 +1003,18 @@ impl Mail
 		passwordF.setInputType(FieldHelperType::PASSWORD);
 		let remoteImageAllowListConfig = getBoxsMailConfig.clone();
 		let remoteImageAllowListCache = update.clone();
+		let aiEventCheckedConfig = getBoxsMailConfig.clone();
+		let aiEventChangeConfig = getBoxsMailConfig.clone();
+		let aiEventChangeCache = update.clone();
+		let aiFieldsConfig = getBoxsMailConfig.clone();
+		let aiFieldsCache = update.clone();
+		let aiFieldChoices = [
+			(MAIL_AI_FIELD_FROM,"MODULE_MAIL_AI_FIELD_FROM"),
+			(MAIL_AI_FIELD_TO,"MODULE_MAIL_AI_FIELD_TO"),
+			(MAIL_AI_FIELD_SUBJECT,"MODULE_MAIL_AI_FIELD_SUBJECT"),
+			(MAIL_AI_FIELD_DATE,"MODULE_MAIL_AI_FIELD_DATE"),
+			(MAIL_AI_FIELD_CONTENT,"MODULE_MAIL_AI_FIELD_CONTENT"),
+		];
 
 		view!{
 			<div class="module_config module_mail_config">
@@ -774,6 +1064,43 @@ impl Mail
 						}.into_any();
 					}
 				}
+				<fieldset class="module_ai_permissions">
+					<legend><TranslateText key="MODULE_AI_PERMISSIONS"/></legend>
+					<label class="module_ai_permission">
+						<input
+							type="checkbox"
+							prop:checked=move || aiEventCheckedConfig.get().aiEvent_isEnabled()
+							on:change=move |event| {
+								aiEventChangeConfig.update(|config| config.aiEvent_set(event_target_checked(&event)));
+								aiEventChangeCache.update(|cache| cache.update());
+							}
+						/>
+						<span><TranslateText key="MODULE_MAIL_AI_NEW_EVENT"/></span>
+					</label>
+					<p class="module_config_help"><TranslateText key="MODULE_MAIL_AI_HELP"/></p>
+					<div class="module_ai_permission_fields">
+						{aiFieldChoices.into_iter().map(|(field,translateKey)| {
+							let checkedConfig = aiFieldsConfig.clone();
+							let enabledConfig = aiFieldsConfig.clone();
+							let changeConfig = aiFieldsConfig.clone();
+							let changeCache = aiFieldsCache.clone();
+							view! {
+								<label class="module_ai_permission">
+									<input
+										type="checkbox"
+										disabled=move || !enabledConfig.get().aiEvent_isEnabled()
+										prop:checked=move || checkedConfig.get().aiField_isEnabled(field)
+										on:change=move |event| {
+											changeConfig.update(|config| config.aiField_set(field,event_target_checked(&event)));
+											changeCache.update(|cache| cache.update());
+										}
+									/>
+									<span><TranslateText key=translateKey/></span>
+								</label>
+							}
+						}).collect_view()}
+					</div>
+				</fieldset>
 				<div class="module_config_actions">
 					<button type="button" on:click={getBoxsFn}><Translate key="MODULE_MAIL_GETBOXS"/></button>
 				</div>
@@ -1063,7 +1390,13 @@ impl Mail
 		}
 	}
 
-	async fn sync(toaster: ToasterContext, mailContentRaw: ArcRwSignal<MailsContent>, config: ArcRwSignal<MailConfig>, moduleActions: ModuleActionFn)
+	async fn sync(
+		toaster: ToasterContext,
+		mailContentRaw: ArcRwSignal<MailsContent>,
+		config: ArcRwSignal<MailConfig>,
+		moduleActions: ModuleActionFn,
+		moduleId: ModuleID,
+	)
 	{
 		if (!moduleActions.lifecycle_isActive())
 		{
@@ -1101,7 +1434,22 @@ impl Mail
 		{
 			return;
 		}
-		mailContentRaw.update(move |mailContent| mailContent.sync_apply(mailboxes));
+		let newMails = mailContentRaw.try_update(move |mailContent| {
+			let newMails = mailContent.sync_apply(mailboxes);
+			return mailContent.aiEventCandidates_take(newMails);
+		})
+			.unwrap_or_default();
+		let newMails = Self::aiEventCandidates_filter(&config,newMails);
+		if (!newMails.is_empty() && moduleActions.lifecycle_isActive())
+		{
+			let events = newMails.iter().map(|(mailKey,date)| {
+				return Self::aiEvent_get(moduleId.clone(),&config.imap,mailKey,*date);
+			}).collect();
+			let rejected = moduleActions.aiAutomation_eventsPublish(events);
+			mailContentRaw.update(|mailContent| {
+				mailContent.aiEvents_rejectedSet(newMails,&rejected,&config.imap);
+			});
+		}
 	}
 
 	fn utils_mailOverlay(state: &MailOverlayState) -> AnyView
@@ -1117,8 +1465,216 @@ impl Mail
 					let date = UtcDateTime::from_unix_timestamp(mail.date).unwrap_or(UtcDateTime::now());
 					format!("{:0>2}/{:0>2}/{:0>4} {:0>2}:{:0>2}:{:0>2}",date.day(),date.month() as u8,date.year(),date.hour(),date.minute(),date.second())
 				}</span>
+				{state.aiHandled.then(|| view! {
+					<><br/><span class="module_mail_overlay_ai"><TranslateText key="MODULE_MAIL_AI_HANDLED"/></span></>
+				})}
 			</div>
 		}.into_any();
+	}
+}
+
+impl AiAutomationCapable for Mail
+{
+	fn ai_capabilities(&self) -> AiCapabilityCatalog
+	{
+		return AiCapabilityCatalog {
+			events: vec![AiEventCapability {
+				id: MAIL_AI_EVENT_NEW,
+				translateKey: "MODULE_MAIL_AI_NEW_EVENT",
+				fields: vec![
+					AiValueDefinition::text(MAIL_AI_FIELD_FROM,"MODULE_MAIL_AI_FIELD_FROM",true,MAIL_AI_HEADER_MAXIMUM_BYTES),
+					AiValueDefinition::text(MAIL_AI_FIELD_TO,"MODULE_MAIL_AI_FIELD_TO",true,MAIL_AI_HEADER_MAXIMUM_BYTES),
+					AiValueDefinition::text(MAIL_AI_FIELD_SUBJECT,"MODULE_MAIL_AI_FIELD_SUBJECT",false,MAIL_AI_HEADER_MAXIMUM_BYTES),
+					AiValueDefinition::text(MAIL_AI_FIELD_DATE,"MODULE_MAIL_AI_FIELD_DATE",true,32),
+					AiValueDefinition::text(MAIL_AI_FIELD_CONTENT,"MODULE_MAIL_AI_FIELD_CONTENT",false,MAIL_AI_CONTENT_MAXIMUM_BYTES),
+				],
+				promptRules: vec![
+					"date is only the email message timestamp, formatted as an ISO 8601 UTC date-time ending in Z. It may help resolve relative wording, but it is not an appointment start or end unless the mail content explicitly identifies that exact timestamp as the appointment time.",
+					"from and to are email address header strings; content is normalized plain text when present.",
+				],
+			}],
+			actions: Vec::new(),
+		};
+	}
+
+	fn ai_grant(&self) -> AiModuleGrant
+	{
+		return self.config.get_untracked().aiGrant;
+	}
+
+	fn ai_exposure(&self,request: AiExposureRequest) -> Option<AiExposureFuture>
+	{
+		if (request.validate().is_err() || request.event.event != MAIL_AI_EVENT_NEW)
+		{
+			return None;
+		}
+		let config = self.config.get_untracked();
+		if (!config.aiGrant.event_allows(MAIL_AI_EVENT_NEW,&request.fields))
+		{
+			return None;
+		}
+		let catalog = self.ai_capabilities();
+		let eventCapability = catalog.event_get(MAIL_AI_EVENT_NEW)?;
+		let definitions = request.fields.iter().filter_map(|field| {
+			return eventCapability.fields.iter().find(|definition| definition.id == field).cloned();
+		}).collect::<Vec<_>>();
+		if (definitions.len() != request.fields.len())
+		{
+			return None;
+		}
+		let (mailKey,mail,cachedContent) = self.mailsClientCache.with_untracked(|mailsContent| {
+			let (mailKey,mail) = Self::aiMail_get(mailsContent,&config.imap,&request.event.eventId)?;
+			let cachedContent = mailsContent.aiContentText.get(&mailKey).cloned();
+			return Some((mailKey,mail,cachedContent));
+		})?;
+		let contentRequested = request.fields.iter().any(|field| field == MAIL_AI_FIELD_CONTENT);
+		let values = request.fields.iter().filter_map(|field| {
+			let value = match field.as_str()
+			{
+				MAIL_AI_FIELD_FROM => AiValue::Text(mail.from.clone()),
+				MAIL_AI_FIELD_TO => AiValue::Text(mail.to.clone()),
+				MAIL_AI_FIELD_SUBJECT => AiValue::Text(mail.subject.clone().unwrap_or_default()),
+				MAIL_AI_FIELD_DATE => AiValue::Text(Self::aiDateText_get(mail.date)?),
+				MAIL_AI_FIELD_CONTENT => return None,
+				_ => return None,
+			};
+			return Some(AiNamedValue {id: field.clone(),value});
+		}).collect::<Vec<_>>();
+		let metadataDefinitions = definitions.iter()
+			.filter(|definition| definition.id != MAIL_AI_FIELD_CONTENT)
+			.cloned()
+			.collect::<Vec<_>>();
+		if (AiExposure::new(values.clone()).validate(&metadataDefinitions).is_err())
+		{
+			return None;
+		}
+		let connector = config.imap;
+		let mailsClientCache = self.mailsClientCache.clone();
+		return Some(Box::pin(async move {
+			let mut values = values;
+			if (contentRequested)
+			{
+				let content = if let Some(content) = cachedContent
+				{
+					content
+				}
+				else
+				{
+					let content = API_proxys_imap_getMailAiContent(connector,mailKey.clone()).await
+						.map_err(|_| AiAutomationError::CapabilityUnavailable)?;
+					mailsClientCache.update(|mailsContent| {
+						if (mailsContent.mailsData.contains_key(&mailKey))
+						{
+							mailsContent.aiContentText.insert(mailKey.clone(),content.clone());
+						}
+					});
+					content
+				};
+				values.push(AiNamedValue {
+					id: MAIL_AI_FIELD_CONTENT.to_string(),
+					value: AiValue::Text(content),
+				});
+			}
+			let exposure = AiExposure::new(values);
+			exposure.validate(&definitions)?;
+			return Ok(exposure);
+		}));
+	}
+
+	fn ai_eventRetry(&self,event: &AiAutomationEvent)
+	{
+		if (event.event != MAIL_AI_EVENT_NEW)
+		{
+			return;
+		}
+		let config = self.config.get_untracked();
+		self.mailsClientCache.update(|mailsContent| {
+			let Some((mailKey,_)) = Self::aiMail_get(mailsContent,&config.imap,&event.eventId)
+			else
+			{
+				return;
+			};
+			mailsContent.aiEvents_rejectedSet(
+				vec![(mailKey,event.occurredAt)],
+				std::slice::from_ref(event),
+				&config.imap,
+			);
+		});
+	}
+
+	fn ai_eventReservation_prepare(
+		&self,
+		event: &AiAutomationEvent,
+		base: Option<&ModuleContent>,
+	) -> Result<AiEventReservation,AiAutomationError>
+	{
+		if (event.event != MAIL_AI_EVENT_NEW)
+		{
+			return Ok(AiEventReservation::Unsupported);
+		}
+		let localConfig = self.config.get_untracked();
+		let mailExists = self.mailsClientCache.with_untracked(|mailsContent| {
+			return Self::aiMail_get(mailsContent,&localConfig.imap,&event.eventId).is_some();
+		});
+		if (!mailExists)
+		{
+			return Err(AiAutomationError::InvalidSource);
+		}
+		let (mut config,expectedTimestamp) = if let Some(base) = base
+		{
+			if (base.typeModule != Self::MODULE_NAME)
+			{
+				return Err(AiAutomationError::InvalidSource);
+			}
+			let config = serde_json::from_str::<MailConfig>(&base.content)
+				.map_err(|_| AiAutomationError::InvalidSource)?;
+			if (MailAccountIdentity::new(&config.imap) != MailAccountIdentity::new(&localConfig.imap))
+			{
+				return Err(AiAutomationError::PermissionDenied);
+			}
+			(config,base.timestamp)
+		}
+		else
+		{
+			(localConfig,self._update.get_untracked().get())
+		};
+		config.aiHandledMailIds_normalize();
+		if (config.aiHandledMail_isHandled(&event.eventId))
+		{
+			return Ok(AiEventReservation::AlreadyHandled);
+		}
+		if (!config.aiEvent_isEnabled() || !config.aiHandledMail_add(&event.eventId))
+		{
+			return Err(AiAutomationError::PermissionDenied);
+		}
+		let minimumTimestamp = expectedTimestamp.checked_add(1)
+			.ok_or(AiAutomationError::InvalidCheckpoint)?;
+		let timestamp = Cache::now().max(minimumTimestamp);
+		let content = serde_json::to_string(&config).map_err(|_| AiAutomationError::InvalidValue)?;
+		return Ok(AiEventReservation::Prepared(AiEventReservationCandidate {
+			expectedTimestamp,timestamp,content,
+		}));
+	}
+
+	fn ai_eventReservation_saved(&self,content: &ModuleContent) -> Result<(),AiAutomationError>
+	{
+		if (content.typeModule != Self::MODULE_NAME)
+		{
+			return Err(AiAutomationError::InvalidSource);
+		}
+		let mut savedConfig = serde_json::from_str::<MailConfig>(&content.content)
+			.map_err(|_| AiAutomationError::InvalidSource)?;
+		savedConfig.aiHandledMailIds_normalize();
+		self.config.update(|config| config.aiHandledMails_merge(&savedConfig.aiHandledMailIds));
+		let localTimestamp = self._update.get_untracked().get();
+		if (localTimestamp <= content.timestamp)
+		{
+			self._update.update(|cache| cache.update_from(content.timestamp));
+		}
+		self._sended.update(|cache| {
+			if (cache.get() < content.timestamp) {cache.update_from(content.timestamp);}
+		});
+		return Ok(());
 	}
 }
 
@@ -1149,10 +1705,10 @@ impl Backable for Mail
 		RefreshTime::MINUTES(30)
 	}
 
-	fn refresh(&self, moduleActions: ModuleActionFn, _moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
+	fn refresh(&self, moduleActions: ModuleActionFn, moduleId: ModuleID, toaster: ToasterContext) -> Option<BoxFuture> {
 		let config = self.config.clone();
 		let mailsCache = self.mailsClientCache.clone();
-		let tmp = Self::sync(toaster, mailsCache, config, moduleActions);
+		let tmp = Self::sync(toaster, mailsCache, config, moduleActions,moduleId);
 		return Some(Box::pin(async move {
 			tmp.await;
 		}));
@@ -1171,7 +1727,8 @@ impl Backable for Mail
 
 	fn import(&mut self, import: ModuleContent)
 	{
-		let Ok(content): Result<MailConfig,_> = serde_json::from_str(&import.content.clone()) else {return};
+		let Ok(mut content): Result<MailConfig,_> = serde_json::from_str(&import.content.clone()) else {return};
+		content.aiHandledMailIds_normalize();
 
 		self.config.update(|config|{
 			*config = content;
@@ -1190,7 +1747,8 @@ impl Backable for Mail
 	}
 
 	fn newFromModuleContent(from: &ModuleContent) -> Option<Self> {
-		let Ok(content): Result<MailConfig,_> = serde_json::from_str(&from.content) else {return None};
+		let Ok(mut content): Result<MailConfig,_> = serde_json::from_str(&from.content) else {return None};
+		content.aiHandledMailIds_normalize();
 		Some(Self {
 			config: ArcRwSignal::new(content),
 			mailsClientCache: Default::default(),
@@ -1308,12 +1866,14 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 									let markVueCacheInner = markVueCacheInner.clone();
 									let mailTag = if(mailTagIsActive) {mailConfig.mail_tag(&mail)} else {None};
 									let mailSubject = mail.subject.clone().filter(|subject| !subject.is_empty());
+									let mailAiHandled = mailConfig.aiHandledMail_isHandled(&Mail::aiEventId_get(&mailConfig.imap,&mailKey));
 									let mailOverlayMouse = mail.clone();
 									let mailOverlayFocus = mail.clone();
+									let mailOverlayAiFocus = mail.clone();
 									view!{
 										<tr
 											class="module_mail_row"
-											on:mouseenter={move |event| mailOverlayHovered.set(MailOverlayState::from_event_target(mailOverlayMouse.clone(),event.current_target()))}
+											on:mouseenter={move |event| mailOverlayHovered.set(MailOverlayState::from_event_target(mailOverlayMouse.clone(),mailAiHandled,event.current_target()))}
 											on:mouseleave={move |_| mailOverlayHovered.set(None)}
 										>
 											<td class="module_mail_date">{distant_time_simpler(mail.date)}</td>
@@ -1342,10 +1902,10 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 							>
 								<button
 									type="button"
-									class="module_mail_subject_button"
-									on:focus={move |event| mailOverlayFocused.set(MailOverlayState::from_event_target(mailOverlayFocus.clone(),event.current_target()))}
-									on:blur={move |_| mailOverlayFocused.set(None)}
-									on:click={move |_| viewContentFn.clone()(mailKeyView.clone(),mailView.clone())}
+								class="module_mail_subject_button"
+								on:focus={move |event| mailOverlayFocused.set(MailOverlayState::from_event_target(mailOverlayFocus.clone(),mailAiHandled,event.current_target()))}
+								on:blur={move |_| mailOverlayFocused.set(None)}
+								on:click={move |_| viewContentFn.clone()(mailKeyView.clone(),mailView.clone())}
 								>
 									{
 										if let Some(subject) = mailSubject
@@ -1360,6 +1920,19 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 									<span class="visually_hidden">{" - "}<TranslateText key="MODULE_MAIL_OPEN_ACTION"/></span>
 								</button>
 							</td>
+							<td class="module_mail_ai_status">{
+								mailAiHandled.then(|| view! {
+									<span
+										class="module_mail_ai_handled"
+										tabindex="0"
+										on:focus={move |event| mailOverlayFocused.set(MailOverlayState::from_event_target(mailOverlayAiFocus.clone(),true,event.current_target()))}
+										on:blur={move |_| mailOverlayFocused.set(None)}
+									>
+										<i class="iconoir-doc-magnifying-glass" aria-hidden="true"></i>
+										<span class="visually_hidden"><TranslateText key="MODULE_MAIL_AI_HANDLED"/></span>
+									</span>
+								})
+							}</td>
 							<td class="module_mail_status">{
 								if(mail.confirmVue)
 								{
@@ -1406,8 +1979,11 @@ mod tests
 {
 	use std::collections::HashMap;
 
-	use super::{MailConfig, MailContentFrame, MailOverlayPlacement, MailOverlaySide, MailSenderAddress, MailSyncIdentity, MailTag, MailsContent};
+	use super::{Mail, MailConfig, MailContentFrame, MailOverlayPlacement, MailOverlaySide, MailSenderAddress, MailSyncIdentity, MailTag, MailsContent};
+	use crate::api::modules::components::{ModuleContent,ModuleID};
 	use crate::api::proxys::imap_components::{Attributs, BoxName, imap_connector, imap_connector_extra, ImapMailboxSync, ImapMail, ImapMailContentType, ImapMailKey};
+	use crate::front::ai::automation::{AiAutomationCapable,AiEventReservation};
+	use leptos::prelude::{GetUntracked,Update,WithUntracked};
 
 	fn config_with_suffix(suffix: &str) -> MailConfig
 	{
@@ -1464,6 +2040,16 @@ mod tests
 		return ImapMailKey {boxName: boxName.to_string(),uidValidity,uid};
 	}
 
+	fn aiConnector_get() -> imap_connector
+	{
+		return imap_connector {
+			host: "imap.example.com".to_string(),
+			username: "user@example.com".to_string(),
+			password: "secret".to_string(),
+			..Default::default()
+		};
+	}
+
 	fn mailboxSync_get(boxName: &str, uidValidity: u32, removedUids: Vec<u32>, mailUids: Vec<u32>) -> ImapMailboxSync
 	{
 		return ImapMailboxSync {
@@ -1500,6 +2086,43 @@ mod tests
 		let config: MailConfig = serde_json::from_value(serializedConfig).unwrap();
 
 		assert!(config.remoteImageSenderAllowList.is_empty());
+	}
+
+	#[test]
+	fn mail_config_without_ai_grant_denies_all_ai_access()
+	{
+		let mut serializedConfig = serde_json::to_value(MailConfig::default()).unwrap();
+		serializedConfig.as_object_mut().unwrap().remove("aiGrant");
+
+		let config: MailConfig = serde_json::from_value(serializedConfig).unwrap();
+
+		assert!(config.aiGrant.events.is_empty());
+		assert!(config.aiGrant.actions.is_empty());
+	}
+
+	#[test]
+	fn mail_config_without_handled_ai_mail_ids_uses_empty_list()
+	{
+		let mut serializedConfig = serde_json::to_value(MailConfig::default()).unwrap();
+		serializedConfig.as_object_mut().unwrap().remove("aiHandledMailIds");
+
+		let config: MailConfig = serde_json::from_value(serializedConfig).unwrap();
+
+		assert!(config.aiHandledMailIds.is_empty());
+	}
+
+	#[test]
+	fn handledAiMailHistoryIsBoundedAndKeepsTheNewestIds()
+	{
+		let mut config = MailConfig::default();
+		for index in 0..=super::MAIL_AI_HANDLED_MAXIMUM
+		{
+			assert!(config.aiHandledMail_add(&format!("handled-{index}")));
+		}
+
+		assert_eq!(config.aiHandledMailIds.len(),super::MAIL_AI_HANDLED_MAXIMUM);
+		assert!(!config.aiHandledMail_isHandled("handled-0"));
+		assert!(config.aiHandledMail_isHandled(&format!("handled-{}",super::MAIL_AI_HANDLED_MAXIMUM)));
 	}
 
 	#[test]
@@ -1633,6 +2256,153 @@ mod tests
 		assert!(blocked.contains("img-src data: blob:;"));
 		assert!(!blocked.contains("img-src data: blob: http: https:;"));
 		assert!(allowed.contains("img-src data: blob: http: https:;"));
+	}
+
+	#[test]
+	fn aiMailIdentityIncludesAccountMailboxUidValidityAndUidButNotPassword()
+	{
+		let connector = aiConnector_get();
+		let reference = Mail::aiEventId_get(&connector,&mailKey_get("Alerts",42,7));
+
+		assert_eq!(reference,Mail::aiEventId_get(&connector,&mailKey_get("Alerts",42,7)));
+		assert_ne!(reference,Mail::aiEventId_get(&connector,&mailKey_get("News",42,7)));
+		assert_ne!(reference,Mail::aiEventId_get(&connector,&mailKey_get("Alerts",43,7)));
+		assert_ne!(reference,Mail::aiEventId_get(&connector,&mailKey_get("Alerts",42,8)));
+
+		let mut changed = connector.clone();
+		changed.password = "rotated-secret".to_string();
+		assert_eq!(reference,Mail::aiEventId_get(&changed,&mailKey_get("Alerts",42,7)));
+		changed.username = "other@example.com".to_string();
+		assert_ne!(reference,Mail::aiEventId_get(&changed,&mailKey_get("Alerts",42,7)));
+		changed = connector.clone();
+		changed.host = "other.example.com".to_string();
+		assert_ne!(reference,Mail::aiEventId_get(&changed,&mailKey_get("Alerts",42,7)));
+	}
+
+	#[test]
+	fn handledAiMailSurvivesSerializationAndSuppressesReloadCandidate()
+	{
+		let connector = aiConnector_get();
+		let handledKey = mailKey_get("Alerts",42,7);
+		let pendingKey = mailKey_get("Alerts",42,8);
+		let mut config = MailConfig {imap: connector.clone(),..Default::default()};
+		assert!(config.aiHandledMail_add(&Mail::aiEventId_get(&connector,&handledKey)));
+		let restored = serde_json::from_str::<MailConfig>(&serde_json::to_string(&config).unwrap()).unwrap();
+
+		let candidates = Mail::aiEventCandidates_filter(
+			&restored,vec![(handledKey,1),(pendingKey.clone(),2)],
+		);
+
+		assert_eq!(candidates,vec![(pendingKey,2)]);
+	}
+
+	#[test]
+	fn aiMailReservationMergesRemoteIdsAndStopsASecondSession()
+	{
+		let connector = aiConnector_get();
+		let firstKey = mailKey_get("Alerts",42,7);
+		let secondKey = mailKey_get("Alerts",42,8);
+		let mail = Mail::default();
+		mail.config.update(|config| {
+			config.imap = connector.clone();
+			config.aiEvent_set(true);
+		});
+		mail.mailsClientCache.update(|cache| {
+			cache.sync_apply(vec![mailboxSync_get("Alerts",42,Vec::new(),vec![7,8])]);
+		});
+		let firstId = Mail::aiEventId_get(&connector,&firstKey);
+		let secondEvent = Mail::aiEvent_get(
+			ModuleID {id: "mail-module".to_string()},&connector,&secondKey,2,
+		);
+		let firstEvent = Mail::aiEvent_get(
+			ModuleID {id: "mail-module".to_string()},&connector,&firstKey,1,
+		);
+		let mut remoteConfig = mail.config.get_untracked();
+		assert!(remoteConfig.aiHandledMail_add(&firstId));
+		let remote = ModuleContent {
+			id: ModuleID {id: "mail-module".to_string()},
+			typeModule: "MAIL".to_string(),
+			timestamp: 42,
+			content: serde_json::to_string(&remoteConfig).unwrap(),
+			..Default::default()
+		};
+		assert_eq!(
+			mail.ai_eventReservation_prepare(&firstEvent,Some(&remote)).unwrap(),
+			AiEventReservation::AlreadyHandled,
+		);
+
+		let AiEventReservation::Prepared(candidate) = mail.ai_eventReservation_prepare(
+			&secondEvent,Some(&remote),
+		).unwrap() else {panic!("the second mail must be merged into the remote reservation")};
+		let candidateConfig = serde_json::from_str::<MailConfig>(&candidate.content).unwrap();
+		assert!(candidateConfig.aiHandledMail_isHandled(&firstId));
+		assert!(candidateConfig.aiHandledMail_isHandled(&secondEvent.eventId));
+
+		let mut claimedRemote = remote;
+		claimedRemote.content = candidate.content;
+		claimedRemote.timestamp = candidate.timestamp;
+		mail.ai_eventReservation_saved(&claimedRemote).unwrap();
+		assert_eq!(
+			mail.ai_eventReservation_prepare(&secondEvent,None).unwrap(),
+			AiEventReservation::AlreadyHandled,
+		);
+	}
+
+	#[test]
+	fn aiMailDateIsExposedAsUtcIso8601()
+	{
+		assert_eq!(Mail::aiDateText_get(0).as_deref(),Some("1970-01-01T00:00:00Z"));
+		assert!(Mail::aiDateText_get(i64::MAX).is_none());
+	}
+
+	#[test]
+	fn mailCachePublishesOnlyNewlyInsertedMails()
+	{
+		let mut cache = MailsContent::default();
+		let first = cache.sync_apply(vec![mailboxSync_get("Alerts",42,Vec::new(),vec![7])]);
+		let repeated = cache.sync_apply(vec![mailboxSync_get("Alerts",42,Vec::new(),vec![7])]);
+		let nextValidity = cache.sync_apply(vec![mailboxSync_get("Alerts",43,Vec::new(),vec![7])]);
+
+		assert_eq!(first,vec![(mailKey_get("Alerts",42,7),0)]);
+		assert!(repeated.is_empty());
+		assert_eq!(nextValidity,vec![(mailKey_get("Alerts",43,7),0)]);
+	}
+
+	#[test]
+	fn mailCacheRetriesOnlyAiEventsRejectedByTheBoundedQueue()
+	{
+		let mut cache = MailsContent::default();
+		let newMails = cache.sync_apply(vec![mailboxSync_get("Alerts",42,Vec::new(),vec![7,8])]);
+		let candidates = cache.aiEventCandidates_take(newMails);
+		let rejectedKey = mailKey_get("Alerts",42,8);
+		let connector = aiConnector_get();
+		let rejected = vec![Mail::aiEvent_get(
+			ModuleID {id: "mail-module".to_string()},&connector,&rejectedKey,0,
+		)];
+
+		cache.aiEvents_rejectedSet(candidates,&rejected,&connector);
+		let repeated = cache.sync_apply(vec![mailboxSync_get("Alerts",42,Vec::new(),vec![7,8])]);
+		let retried = cache.aiEventCandidates_take(repeated);
+
+		assert_eq!(retried,vec![(rejectedKey,0)]);
+		assert!(cache.pendingAiEvents.is_empty());
+	}
+
+	#[test]
+	fn mailModuleKeepsAnAiEventRejectedByTheExecutionBudget()
+	{
+		let mail = Mail::default();
+		let key = mailKey_get("Alerts",42,7);
+		mail.mailsClientCache.update(|cache| {
+			cache.sync_apply(vec![mailboxSync_get("Alerts",42,Vec::new(),vec![7])]);
+		});
+		let event = Mail::aiEvent_get(
+			ModuleID {id: "mail-module".to_string()},&mail.config.get_untracked().imap,&key,123,
+		);
+
+		mail.ai_eventRetry(&event);
+
+		assert_eq!(mail.mailsClientCache.with_untracked(|cache| cache.pendingAiEvents.clone()),vec![(key,123)]);
 	}
 
 	#[test]

@@ -59,6 +59,13 @@ pub async fn API_proxys_imap_getMailContent(config: imap_connector, mail: ImapMa
 }
 
 #[server]
+pub async fn API_proxys_imap_getMailAiContent(config: imap_connector, mail: ImapMailKey) -> Result<String, ImapError>
+{
+	return inner::ImapRequest::new(config,"ai_content").await?
+		.run(move |proxy| proxy.mailAiContent_get(mail)).await;
+}
+
+#[server]
 pub async fn API_proxys_imap_setMailSee(config: imap_connector, mail: ImapMailKey) -> Result<(), ImapError>
 {
 	return inner::ImapRequest::new(config,"seen").await?

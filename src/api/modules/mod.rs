@@ -93,6 +93,50 @@ pub async fn API_module_update(content: ModuleContent, overwrite:bool) -> Result
 	return Ok(ModuleReturnUpdate::OK);
 }
 
+/// Atomically creates or updates one opaque module only when its persisted state still matches the client base.
+/// `i64::MIN` represents an expected absence and never matches an existing module.
+#[server]
+pub async fn API_module_updateIfCurrent(
+	content: ModuleContent,
+	expectedTimestamp: i64,
+) -> Result<ModuleReturnUpdate,ModuleApiError>
+{
+	use crate::api::login::user_back::AuthenticatedUser;
+	use crate::api::modules::components::ModuleErrors;
+	let mut mutation = AuthenticatedUser::mutation_begin().await.map_err(ModuleApiError::fromUserBackError)?;
+	let config = mutation.config_getMut();
+	let mut current = ModuleContent::newFromName(&content.id);
+	match current.retrieve(config)
+	{
+		Ok(()) => {},
+		Err(ModuleErrors::Empty) if expectedTimestamp == i64::MIN => {
+			if (content.timestamp <= 0)
+			{
+				return Err(ModuleApiError::SERVER_ERROR);
+			}
+			return content.update(config,false)
+				.map(|_| ModuleReturnUpdate::OK)
+				.map_err(ModuleApiError::fromModuleError);
+		},
+		Err(ModuleErrors::Empty) => return Err(ModuleApiError::NOT_FOUND),
+		Err(error) => return Err(ModuleApiError::fromModuleError(error)),
+	}
+	if (current.timestamp != expectedTimestamp)
+	{
+		return Ok(ModuleReturnUpdate::OUTDATED(current));
+	}
+	if (content.typeModule != current.typeModule || content.timestamp <= expectedTimestamp)
+	{
+		return Err(ModuleApiError::SERVER_ERROR);
+	}
+	match content.update(config,false)
+	{
+		Ok(()) => return Ok(ModuleReturnUpdate::OK),
+		Err(ModuleErrors::SavedIsNewer) => return Ok(ModuleReturnUpdate::OUTDATED(current)),
+		Err(error) => return Err(ModuleApiError::fromModuleError(error)),
+	}
+}
+
 /// api function that updates module content based on ModuleID and their last fetch
 #[server]
 pub async fn API_modules_update(contents: Vec<ModuleContent>, overwrite:bool) -> Result<HashMap<ModuleID,ModuleReturnUpdate>, ModuleApiError>

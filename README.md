@@ -12,6 +12,7 @@ The project was originally created in PHP in 2013 and is now built in Rust with 
 - Weather forecasts
 - Email reading, attachments and mark-as-read actions through IMAP
 - CalDAV calendars with month/week views and event creation or deletion
+- Encrypted client-side AI configuration and an account-wide Chat workspace with persistent conversations
 - English and French interface selected from the browser language
 
 ![WebHome dashboard](example.png)
@@ -59,6 +60,7 @@ WebHome creates `config/site.json` on first start. User records are stored under
 | `trace_front_log` | `true` in development | Enables bounded browser traces. It is always disabled when `ENV=PROD`. |
 | `imap_allowed_ports` | `[993]` | Non-empty list of TLS IMAP ports users may configure. Invalid values disable IMAP connections until corrected. |
 | `caldav_allowed_origins` | `[]` | Exact origins that Calendar modules may contact directly, for example `["https://calendar.example.com"]`. HTTPS is mandatory in production; HTTP is accepted only with `ENV=DEV` for local development. Paths and wildcards are rejected; any invalid entry disables the complete list. |
+| `llm_allowed_origins` | `[]` | Exact custom or Ollama origins that the browser may contact directly. The same HTTPS, development HTTP and validation rules as `caldav_allowed_origins` apply. Public supported provider origins are built into the CSP. |
 
 Back up the complete `config` directory. It contains the server salt and all persistent user records.
 
@@ -69,6 +71,7 @@ Back up the complete `config` directory. It contains the server salt and all per
 - Allow outbound DNS, HTTPS and configured IMAP traffic. WebHome rejects private and special-purpose proxy destinations.
 - Add client-network rate limiting at the reverse proxy, firewall or CDN. WebHome limits failures per account, but it cannot safely provide a deployment-wide IP limit behind every possible proxy setup.
 - Calendar modules connect directly from the browser. Configure Radicale CORS for the exact WebHome origin, answer `OPTIONS` preflights, allow `GET`, `PROPFIND`, `REPORT`, `PUT` and `DELETE`, allow the `Authorization`, `Content-Type`, `Depth`, `If-Match` and `If-None-Match` request headers, and expose `ETag`. Add the Radicale origin to `caldav_allowed_origins`.
+- LLM connections also run directly in the browser. A custom or Ollama service must allow the WebHome origin through CORS and be listed in `llm_allowed_origins`; HTTPS is mandatory outside local development.
 
 ### Caddy example
 
@@ -92,6 +95,8 @@ Rate limiting is not included in the standard Caddy distribution. Use a firewall
 Persistent module payloads are encrypted in the browser before they are stored by the server. This protects stored content, but it is not protection against a compromised WebHome server, browser origin or browser extension.
 
 CalDAV credentials are part of that encrypted module configuration. Calendar requests and event contents travel directly between the browser and the configured CalDAV origin; WebHome does not proxy or cache them.
+
+LLM credentials are likewise encrypted as account data and are never sent to the WebHome API. The browser decrypts a credential only to call the selected provider directly. This avoids a backend copy but does not protect a credential from a compromised WebHome origin, delivered frontend or browser extension.
 
 When holiday highlighting is enabled, the browser requests public holidays from Nager.Date by country and year. Successful responses are cached in memory for the browser session; no calendar event or WebHome credential is sent to that service.
 

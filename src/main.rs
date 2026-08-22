@@ -91,6 +91,7 @@ async fn main() {
 	let mut trace_front_log = false;
 	let mut allow_registration = false;
 	let mut caldav_allowed_origins = Vec::new();
+	let mut llm_allowed_origins = Vec::new();
 	if let Some(mut siteConfig) = HConfigManager::singleton().get("site")
 	{
 		let config = siteConfig.value_mut();
@@ -99,6 +100,7 @@ async fn main() {
 		helper::preFillConfig(config,"trace_front_log",!production);
 		helper::preFillConfig(config,"imap_allowed_ports",vec![JsonValue::Number(993.0)]);
 		helper::preFillConfig(config,"caldav_allowed_origins",Vec::<JsonValue>::new());
+		helper::preFillConfig(config,"llm_allowed_origins",Vec::<JsonValue>::new());
 		if let Some(JsonValue::Boolean(raw)) = config.value_get("trace_front_log")
 		{
 			trace_front_log = traceFrontLog_enabled(raw,production);
@@ -107,10 +109,15 @@ async fn main() {
 		{
 			allow_registration = raw;
 		}
-		match helper::calDavOrigins_get(config.value_get("caldav_allowed_origins"),!production)
+		match helper::exactOrigins_get(config.value_get("caldav_allowed_origins"),!production)
 		{
 			Ok(origins) => caldav_allowed_origins = origins,
 			Err(()) => HTrace!((Level::WARNING) "caldav_allowed_origins is invalid; no CalDAV origin will be allowed"),
+		}
+		match helper::exactOrigins_get(config.value_get("llm_allowed_origins"),!production)
+		{
+			Ok(origins) => llm_allowed_origins = origins,
+			Err(()) => HTrace!((Level::WARNING) "llm_allowed_origins is invalid; no custom LLM origin will be allowed"),
 		}
 		HTraceError!(config.file_save());
 	}
@@ -127,20 +134,28 @@ async fn main() {
 		&leptos_options,
 		std::env::var_os("LEPTOS_WATCH").is_some(),
 		caldav_allowed_origins,
+		llm_allowed_origins.clone(),
 	);
 	let browserAssetDelivery = BrowserAssetDelivery::new(&leptos_options);
 
 	//session management
 	let session_layer = sessionLayer_get();
+	let routeLlmAllowedOrigins = llm_allowed_origins.clone();
+	let shellLlmAllowedOrigins = llm_allowed_origins.clone();
+	let fallbackLlmAllowedOrigins = llm_allowed_origins;
 
 	let app = Router::new()
 		.leptos_routes(&leptos_options, generate_route_list(move || {
-			App(AppProps { traceFrontLog: trace_front_log, allowRegistration: allow_registration })
+			App(AppProps {
+				traceFrontLog: trace_front_log,
+				allowRegistration: allow_registration,
+				llmAllowedOrigins: routeLlmAllowedOrigins.clone(),
+			})
         }), {
             let leptos_options = leptos_options.clone();
-            move || shell((leptos_options.clone(),trace_front_log,allow_registration))
+			move || shell((leptos_options.clone(),trace_front_log,allow_registration,shellLlmAllowedOrigins.clone()))
         })
-	    .fallback(leptos_axum::file_and_error_handler(move |lo|shell((lo,trace_front_log,allow_registration))))
+	    .fallback(leptos_axum::file_and_error_handler(move |lo|shell((lo,trace_front_log,allow_registration,fallbackLlmAllowedOrigins.clone()))))
 	    .layer(middleware::from_fn(sessionErrorActivity_renew))
 	    .layer(middleware::from_fn(passwordRotationBodyLimit_apply))
 	    .layer(session_layer)
@@ -189,7 +204,7 @@ mod helper {
 		}
 	}
 
-	pub fn calDavOrigins_get(value: Option<JsonValue>,allowHttp: bool) -> Result<Vec<String>,()>
+	pub fn exactOrigins_get(value: Option<JsonValue>,allowHttp: bool) -> Result<Vec<String>,()>
 	{
 		let Some(JsonValue::Array(values)) = value else {return Err(());};
 		if (values.len() > 32) {return Err(());}
@@ -247,25 +262,25 @@ mod helper {
 mod siteConfig_tests
 {
 	use Hconfig::tinyjson::JsonValue;
-	use super::helper::calDavOrigins_get;
+	use super::helper::exactOrigins_get;
 
 	#[test]
 	fn calDavOrigins_acceptOnlyExactHttpsOrigins()
 	{
-		let origins = calDavOrigins_get(Some(JsonValue::Array(vec![
+		let origins = exactOrigins_get(Some(JsonValue::Array(vec![
 			JsonValue::String("https://calendar.example".to_string()),
 			JsonValue::String("https://calendar.example/".to_string()),
 			JsonValue::String("https://calendar.example:8443".to_string()),
 		])),false).unwrap();
 
 		assert_eq!(origins,["https://calendar.example","https://calendar.example:8443"]);
-		assert!(calDavOrigins_get(Some(JsonValue::Array(vec![
+		assert!(exactOrigins_get(Some(JsonValue::Array(vec![
 			JsonValue::String("http://calendar.example".to_string()),
 		])),false).is_err());
-		assert!(calDavOrigins_get(Some(JsonValue::Array(vec![
+		assert!(exactOrigins_get(Some(JsonValue::Array(vec![
 			JsonValue::String("https://calendar.example/path".to_string()),
 		])),false).is_err());
-		assert!(calDavOrigins_get(Some(JsonValue::Array(vec![
+		assert!(exactOrigins_get(Some(JsonValue::Array(vec![
 			JsonValue::String("https://user:secret@calendar.example".to_string()),
 		])),false).is_err());
 	}
@@ -278,10 +293,10 @@ mod siteConfig_tests
 		]));
 
 		assert_eq!(
-			calDavOrigins_get(value(),true).unwrap(),
+			exactOrigins_get(value(),true).unwrap(),
 			["http://192.168.1.20:5232"],
 		);
-		assert!(calDavOrigins_get(value(),false).is_err());
+		assert!(exactOrigins_get(value(),false).is_err());
 	}
 }
 

@@ -9,6 +9,7 @@ use ammonia::{Builder, UrlRelative};
 use base64ct::{Base64, Encoding};
 use imap::types::{Fetch, Fetches, Uid};
 use imap::{Connection, Error, Session};
+use imap_proto::types::{BodyContentCommon,BodyStructure,ContentEncoding,SectionPath};
 use mailparse::{parse_mail, DispositionType, MailHeaderMap, ParsedMail};
 
 use crate::api::proxys::imap_components::{
@@ -22,6 +23,7 @@ use crate::api::proxys::imap_components::{
 	ImapMailContentType,
 	ImapMailKey,
 	ImapSyncRequest,
+	IMAP_AI_CONTENT_MAXIMUM_BYTES,
 };
 use crate::api::proxys::imap_error::ImapError;
 use crate::api::proxys::outbound_policy::ValidatedImapDestination;
@@ -42,6 +44,9 @@ impl ImapLimits
 	const HEADER_MAXIMUM_BYTES: usize = 64 * 1024;
 	const MAILBOX_MAXIMUM: usize = 64;
 	const MAIL_CONTENT_MAXIMUM_BYTES: usize = 16 * 1024 * 1024;
+	const MAIL_AI_PART_MAXIMUM_BYTES: usize = 128 * 1024;
+	const MAIL_AI_STRUCTURE_PART_MAXIMUM: usize = 128;
+	const MAIL_AI_STRUCTURE_DEPTH_MAXIMUM: usize = 16;
 	const MAIL_HEADER_MAXIMUM: usize = 100;
 	const MAIL_RENDERED_CONTENT_MAXIMUM_BYTES: usize = 24 * 1024 * 1024;
 	const MAIL_RENDERED_INLINE_MAXIMUM_BYTES: usize = 8 * 1024 * 1024;
@@ -308,6 +313,54 @@ impl ImapProxy
 		return result;
 	}
 
+	pub(super) fn mailAiContent_get(self, mail: ImapMailKey) -> Result<String, ImapError>
+	{
+		Self::mailKey_validate(&mail)
+			.map_err(|error| error.trace("ai_content","mail_key",None))?;
+		let budget = ImapWorkBudget::new();
+		let (mut session, _) = self.connection_get("ai_content")?;
+		let result = Self::mailAiContentFromSession_get(&mut session,&mail,&budget);
+		let _ = session.logout();
+		return result;
+	}
+
+	fn mailAiContentFromSession_get<T: Read + Write>(
+		session: &mut Session<T>,
+		mail: &ImapMailKey,
+		budget: &ImapWorkBudget,
+	) -> Result<String,ImapError>
+	{
+		budget.active_require()
+			.map_err(|error| error.trace("ai_content","budget",None))?;
+		let mailbox = session.select(&mail.boxName)
+			.map_err(|error| ImapError::fromImapAt(error,"ai_content","mailbox_select",None))?;
+		Self::mailKeyValidity_require(mail,mailbox.uid_validity)
+			.map_err(|error| error.trace("ai_content","uid_validity",None))?;
+		let structures = session.uid_fetch(mail.uid.to_string(),"(BODYSTRUCTURE)")
+			.map_err(|error| ImapError::fromImapAt(error,"ai_content","structure_fetch",None))?;
+		let structure = structures.iter()
+			.find(|message| message.uid == Some(mail.uid))
+			.and_then(Fetch::bodystructure)
+			.ok_or_else(|| ImapError::MAIL_NOT_FOUND.trace("ai_content","structure_missing",None))?;
+		let part = ImapMailParser::aiPart_get(structure)
+			.map_err(|error| error.trace("ai_content","structure_parse",None))?;
+		budget.active_require()
+			.map_err(|error| error.trace("ai_content","body_budget",None))?;
+		let query = part.query_get();
+		let contents = session.uid_fetch(mail.uid.to_string(),query)
+			.map_err(|error| ImapError::fromImapAt(error,"ai_content","body_fetch",None))?;
+		let message = contents.iter().find(|message| message.uid == Some(mail.uid))
+			.ok_or_else(|| ImapError::MAIL_NOT_FOUND.trace("ai_content","body_missing",None))?;
+		let body = part.body_get(message)
+			.ok_or_else(|| ImapError::MAIL_NOT_FOUND.trace("ai_content","part_missing",None))?;
+		if (body.len() > ImapLimits::MAIL_AI_PART_MAXIMUM_BYTES)
+		{
+			return Err(ImapError::RESOURCE_LIMIT.trace("ai_content","body_size",None));
+		}
+		return part.decode(body)
+			.map_err(|error| error.trace("ai_content","body_decode",None));
+	}
+
 	fn mailContentFromSession_get<T: Read + Write>(
 		session: &mut Session<T>,
 		mail: &ImapMailKey,
@@ -500,10 +553,200 @@ impl ImapProxy
 	}
 }
 
+#[derive(Clone,Debug,Eq,PartialEq)]
+enum ImapAiPartSection
+{
+	FullText,
+	Part(Vec<u32>),
+}
+
+#[derive(Clone,Copy,Debug,Eq,PartialEq,Ord,PartialOrd)]
+enum ImapAiPartKind
+{
+	Plain,
+	Html,
+}
+
+#[derive(Clone,Debug,Eq,PartialEq)]
+struct ImapAiPart
+{
+	section: ImapAiPartSection,
+	kind: ImapAiPartKind,
+	charset: String,
+	transferEncoding: &'static str,
+}
+
+impl ImapAiPart
+{
+	fn query_get(&self) -> String
+	{
+		let section = match &self.section
+		{
+			ImapAiPartSection::FullText => "TEXT".to_string(),
+			ImapAiPartSection::Part(path) => path.iter().map(u32::to_string).collect::<Vec<_>>().join("."),
+		};
+		return format!(
+			"(BODY.PEEK[{}]<0.{}>)",
+			section,
+			ImapLimits::MAIL_AI_PART_MAXIMUM_BYTES + 1,
+		);
+	}
+
+	fn body_get<'a>(&self,message: &'a Fetch<'_>) -> Option<&'a [u8]>
+	{
+		return match &self.section
+		{
+			ImapAiPartSection::FullText => message.text(),
+			ImapAiPartSection::Part(path) => message.section(&SectionPath::Part(path.clone(),None)),
+		};
+	}
+
+	fn decode(&self,body: &[u8]) -> Result<String,ImapError>
+	{
+		let headers = format!(
+			"Content-Type: text/{}; charset=\"{}\"\r\nContent-Transfer-Encoding: {}\r\n\r\n",
+			match self.kind {ImapAiPartKind::Plain => "plain",ImapAiPartKind::Html => "html"},
+			self.charset,
+			self.transferEncoding,
+		);
+		let mut raw = Vec::with_capacity(headers.len().saturating_add(body.len()));
+		raw.extend_from_slice(headers.as_bytes());
+		raw.extend_from_slice(body);
+		let parsed = parse_mail(&raw).map_err(|_| ImapError::MAIL_NOT_FOUND)?;
+		let content = parsed.get_body().map_err(|_| ImapError::MAIL_NOT_FOUND)?;
+		let mut content = match self.kind
+		{
+			ImapAiPartKind::Plain => content.trim().to_string(),
+			ImapAiPartKind::Html => ImapMailParser::htmlText_get(
+				&ImapMailParser::html_sanitize(&content,&[])?
+			),
+		};
+		if (content.len() > IMAP_AI_CONTENT_MAXIMUM_BYTES)
+		{
+			const TRUNCATED_MARKER: &str = "\n[WebHome: email content truncated at 64 KiB]";
+			let mut end = IMAP_AI_CONTENT_MAXIMUM_BYTES.saturating_sub(TRUNCATED_MARKER.len());
+			while (!content.is_char_boundary(end)) {end -= 1;}
+			content.truncate(end);
+			content.push_str(TRUNCATED_MARKER);
+		}
+		return Ok(content);
+	}
+}
+
 struct ImapMailParser;
 
 impl ImapMailParser
 {
+	fn aiPart_get(structure: &BodyStructure<'_>) -> Result<ImapAiPart,ImapError>
+	{
+		let mut candidates = Vec::new();
+		let mut path = Vec::new();
+		let mut visited = 0;
+		let mut oversized = false;
+		Self::aiParts_collect(structure,&mut path,&mut candidates,&mut visited,&mut oversized)?;
+		candidates.sort_by(|left,right| left.kind.cmp(&right.kind));
+		return candidates.into_iter().next().ok_or_else(|| {
+			if (oversized) {ImapError::RESOURCE_LIMIT} else {ImapError::MAIL_NOT_FOUND}
+		});
+	}
+
+	fn aiParts_collect(
+		structure: &BodyStructure<'_>,
+		path: &mut Vec<u32>,
+		candidates: &mut Vec<ImapAiPart>,
+		visited: &mut usize,
+		oversized: &mut bool,
+	) -> Result<(),ImapError>
+	{
+		*visited = visited.saturating_add(1);
+		if (*visited > ImapLimits::MAIL_AI_STRUCTURE_PART_MAXIMUM
+			|| path.len() > ImapLimits::MAIL_AI_STRUCTURE_DEPTH_MAXIMUM)
+		{
+			return Err(ImapError::RESOURCE_LIMIT);
+		}
+		match structure
+		{
+			BodyStructure::Text {common,other,..} => {
+				if (Self::aiPart_isAttachment(common)) {return Ok(());}
+				let kind = if (common.ty.subtype.eq_ignore_ascii_case("plain"))
+				{
+					ImapAiPartKind::Plain
+				}
+				else if (common.ty.subtype.eq_ignore_ascii_case("html"))
+				{
+					ImapAiPartKind::Html
+				}
+				else
+				{
+					return Ok(());
+				};
+				if (other.octets as usize > ImapLimits::MAIL_AI_PART_MAXIMUM_BYTES)
+				{
+					*oversized = true;
+					return Ok(());
+				}
+				let transferEncoding = match &other.transfer_encoding
+				{
+					ContentEncoding::SevenBit => "7bit",
+					ContentEncoding::EightBit => "8bit",
+					ContentEncoding::Binary => "binary",
+					ContentEncoding::Base64 => "base64",
+					ContentEncoding::QuotedPrintable => "quoted-printable",
+					ContentEncoding::Other(_) => return Ok(()),
+				};
+				let charset = common.ty.params.as_ref().and_then(|parameters| {
+					return parameters.iter().find(|(name,_)| name.eq_ignore_ascii_case("charset"))
+						.map(|(_,value)| value.as_ref());
+				}).unwrap_or("us-ascii");
+				if (!Self::aiCharset_isValid(charset)) {return Ok(());}
+				let section = if (path.is_empty())
+				{
+					ImapAiPartSection::FullText
+				}
+				else
+				{
+					ImapAiPartSection::Part(path.clone())
+				};
+				candidates.push(ImapAiPart {
+					section,kind,charset: charset.to_string(),transferEncoding,
+				});
+			},
+			BodyStructure::Multipart {bodies,..} => {
+				for (index,body) in bodies.iter().enumerate()
+				{
+					let part = u32::try_from(index).ok().and_then(|index| index.checked_add(1))
+						.ok_or(ImapError::RESOURCE_LIMIT)?;
+					path.push(part);
+					let result = Self::aiParts_collect(body,path,candidates,visited,oversized);
+					path.pop();
+					result?;
+				}
+			},
+			BodyStructure::Basic {..} | BodyStructure::Message {..} => {},
+		}
+		return Ok(());
+	}
+
+	fn aiPart_isAttachment(common: &BodyContentCommon<'_>) -> bool
+	{
+		if (common.disposition.as_ref().is_some_and(|disposition| {
+			return disposition.ty.eq_ignore_ascii_case("attachment")
+				|| disposition.params.as_ref().is_some_and(|parameters| parameters.iter()
+					.any(|(name,_)| name.eq_ignore_ascii_case("filename")));
+		}))
+		{
+			return true;
+		}
+		return common.ty.params.as_ref().is_some_and(|parameters| parameters.iter()
+			.any(|(name,_)| name.eq_ignore_ascii_case("name")));
+	}
+
+	fn aiCharset_isValid(charset: &str) -> bool
+	{
+		return !charset.is_empty() && charset.len() <= 64
+			&& charset.bytes().all(|value| value.is_ascii_alphanumeric() || matches!(value,b'-' | b'_' | b'.'));
+	}
+
 	fn headers_get<T: Read + Write>(
 		session: &mut Session<T>,
 		results: HashSet<Uid>,
@@ -724,6 +967,47 @@ impl ImapMailParser
 			return Err(ImapError::RESOURCE_LIMIT);
 		}
 		return Ok(sanitized);
+	}
+
+	fn htmlText_get(html: &str) -> String
+	{
+		let mut text = String::with_capacity(html.len());
+		let mut inTag = false;
+		let mut quote = None;
+		for character in html.chars()
+		{
+			if (!inTag && character == '<')
+			{
+				inTag = true;
+				quote = None;
+				continue;
+			}
+			if (inTag)
+			{
+				if let Some(activeQuote) = quote
+				{
+					if (character == activeQuote) {quote = None;}
+				}
+				else if (matches!(character,'\'' | '"'))
+				{
+					quote = Some(character);
+				}
+				else if (character == '>')
+				{
+					inTag = false;
+					text.push(' ');
+				}
+				continue;
+			}
+			text.push(character);
+		}
+		let text = text.replace("&nbsp;"," ")
+			.replace("&amp;","&")
+			.replace("&lt;","<")
+			.replace("&gt;",">")
+			.replace("&quot;","\"")
+			.replace("&#39;","'");
+		return text.split_whitespace().collect::<Vec<_>>().join(" ");
 	}
 
 	fn inlineParts_get(parts: &[Attachment]) -> HashMap<String,String>
@@ -1009,6 +1293,30 @@ mod tests
 			).as_bytes().to_vec();
 		}
 
+		fn aiContentResponses_get() -> Vec<u8>
+		{
+			let body = "Appointment body";
+			return format!(
+				concat!(
+					"a1 OK Logged in\r\n",
+					"* FLAGS (\\Seen)\r\n",
+					"* 1 EXISTS\r\n",
+					"* 0 RECENT\r\n",
+					"* OK [UIDVALIDITY 42] UIDs valid\r\n",
+					"a2 OK [READ-WRITE] Select completed\r\n",
+					"* 1 FETCH (UID 7 BODYSTRUCTURE (",
+						"(\"TEXT\" \"HTML\" (\"CHARSET\" \"UTF-8\") NIL NIL \"7BIT\" 40 1 NIL NIL NIL)",
+						"(\"TEXT\" \"PLAIN\" (\"CHARSET\" \"UTF-8\") NIL NIL \"7BIT\" 16 1 NIL NIL NIL)",
+						"(\"APPLICATION\" \"PDF\" (\"NAME\" \"file.pdf\") NIL NIL \"BASE64\" 100000 NIL (\"ATTACHMENT\" (\"FILENAME\" \"file.pdf\")) NIL)",
+						" \"MIXED\" (\"BOUNDARY\" \"fixture\") NIL NIL))\r\n",
+					"a3 OK Fetch completed\r\n",
+					"* 1 FETCH (UID 7 BODY[2]<0> {{{}}}\r\n{})\r\n",
+					"a4 OK Fetch completed\r\n",
+				),
+				body.len(),body,
+			).into_bytes();
+		}
+
 		fn legacyCommands_get() -> String
 		{
 			let headerQuery = format!(
@@ -1194,6 +1502,57 @@ mod tests
 		assert_eq!(commands.lines().count(),1);
 		assert!(!commands.contains("UID STORE"));
 	}
+
+	#[test]
+	fn aiMailContentFetchesOnlyPreferredBoundedTextPart()
+	{
+		let (stream,commands) = RecordingStream::new(MailboxSyncFixture::aiContentResponses_get());
+		let client = imap::Client::new(stream);
+		let mut session = client.login("user","password").unwrap();
+		commands.lock().unwrap().clear();
+		let key = ImapMailKey {boxName: "Alerts".to_string(),uidValidity: 42,uid: 7};
+
+		let content = ImapProxy::mailAiContentFromSession_get(&mut session,&key,&ImapWorkBudget::new()).unwrap();
+		let commands = String::from_utf8(commands.lock().unwrap().clone()).unwrap();
+
+		assert_eq!(content,"Appointment body");
+		assert_eq!(commands.lines().count(),3);
+		assert_eq!(commands.matches("UID FETCH").count(),2);
+		assert!(commands.contains("BODYSTRUCTURE"),"{}",commands);
+		assert!(commands.contains("BODY.PEEK[2]"),"{}",commands);
+		assert!(!commands.contains("BODY.PEEK[]"),"{}",commands);
+		assert!(!commands.contains("BODY.PEEK[1]"),"{}",commands);
+		assert!(!commands.contains("BODY.PEEK[3]"),"{}",commands);
+	}
+
+	#[test]
+		fn aiHtmlTextDropsMarkupScriptsAndRemoteAddresses()
+		{
+		let sanitized = ImapMailParser::html_sanitize(
+			"<script>hidden()</script><p>Appointment &amp; confirmation</p><img src=\"https://tracker.example/pixel\">",
+			&[],
+		).unwrap();
+		let text = ImapMailParser::htmlText_get(&sanitized);
+
+		assert_eq!(text,"Appointment & confirmation");
+			assert!(!text.contains("tracker.example"));
+		}
+
+		#[test]
+		fn aiMailTextIsTruncatedAtTheFinalPlaintextLimit()
+		{
+			let part = ImapAiPart {
+				section: ImapAiPartSection::FullText,
+				kind: ImapAiPartKind::Plain,
+				charset: "utf-8".to_string(),
+				transferEncoding: "8bit",
+			};
+			let content = part.decode("é".repeat(IMAP_AI_CONTENT_MAXIMUM_BYTES).as_bytes()).unwrap();
+
+			assert!(content.len() <= IMAP_AI_CONTENT_MAXIMUM_BYTES);
+			assert!(content.is_char_boundary(content.len()));
+			assert!(content.ends_with("[WebHome: email content truncated at 64 KiB]"));
+		}
 
 	#[test]
 	fn mailParser_extractsTextWithoutRecursiveTraversal()

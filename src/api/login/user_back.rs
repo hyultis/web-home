@@ -1085,7 +1085,10 @@ mod tests
 	use tower_sessions::{MemoryStore, Session, SessionStore};
 
 	use crate::api::modules::components::{ModuleContent, ModuleID};
-	use crate::api::modules::{ApiModuleRetrieve, ApiModuleUpdate, ModuleApiError, ModuleReturnRetrieve};
+	use crate::api::modules::{
+		ApiModuleRetrieve,ApiModuleUpdate,ApiModuleUpdateifcurrent,ModuleApiError,
+		ModuleReturnRetrieve,ModuleReturnUpdate,
+	};
 	use crate::api::login::{ApiUserPreferencesGet, ApiUserPreferencesSet};
 	use crate::api::login::session::SessionCookie;
 	use crate::api::Htrace::ApiHtraceLog;
@@ -1224,6 +1227,7 @@ mod tests
 				.route(ApiUserPreferencesGet::PATH, post(leptos_axum::handle_server_fns))
 				.route(ApiUserPreferencesSet::PATH, post(leptos_axum::handle_server_fns))
 				.route(ApiModuleUpdate::PATH, post(leptos_axum::handle_server_fns))
+				.route(ApiModuleUpdateifcurrent::PATH, post(leptos_axum::handle_server_fns))
 				.route(ApiModuleRetrieve::PATH, post(leptos_axum::handle_server_fns))
 				.route(ApiHtraceLog::PATH, post(leptos_axum::handle_server_fns))
 				.route(ApiProxysWget::PATH, post(leptos_axum::handle_server_fns))
@@ -1288,6 +1292,31 @@ mod tests
 			body.append_pair("overwrite", "true");
 			return router.clone().oneshot(Self::serverRequest_get(
 				ApiModuleUpdate::PATH,
+				body.finish(),
+				cookie,
+			)).await.unwrap();
+		}
+
+		async fn module_updateIfCurrent(
+			router: &Router,
+			cookie: Option<&str>,
+			content: ModuleContent,
+			expectedTimestamp: i64,
+		) -> Response<Body>
+		{
+			let mut body = url::form_urlencoded::Serializer::new(String::new());
+			body.append_pair("content[id]", &content.id.id);
+			body.append_pair("content[typeModule]", &content.typeModule);
+			body.append_pair("content[timestamp]", &content.timestamp.to_string());
+			body.append_pair("content[content]", &content.content);
+			body.append_pair("content[pos][0]", &content.pos[0].to_string());
+			body.append_pair("content[pos][1]", &content.pos[1].to_string());
+			body.append_pair("content[size][0]", &content.size[0].to_string());
+			body.append_pair("content[size][1]", &content.size[1].to_string());
+			body.append_pair("content[depth]", &content.depth.to_string());
+			body.append_pair("expectedTimestamp", &expectedTimestamp.to_string());
+			return router.clone().oneshot(Self::serverRequest_get(
+				ApiModuleUpdateifcurrent::PATH,
 				body.finish(),
 				cookie,
 			)).await.unwrap();
@@ -1522,6 +1551,36 @@ mod tests
 			let cookieB = ModuleAuthorizationTest::cookie_get(&router, 9).await;
 			let updateA = ModuleAuthorizationTest::module_update(&router, Some(&cookieA), contentA.clone()).await;
 			assert_eq!(updateA.status(), StatusCode::OK);
+
+			let conditionalId = ModuleID {id: "conditional-module".to_string()};
+			let conditionalFirst = ModuleContent {
+				id: conditionalId.clone(),
+				typeModule: "TEST".to_string(),
+				timestamp: 300,
+				content: "first-ciphertext".to_string(),
+				..Default::default()
+			};
+			let conditionalCreate = ModuleAuthorizationTest::module_updateIfCurrent(
+				&router,Some(&cookieA),conditionalFirst.clone(),i64::MIN,
+			).await;
+			assert!(matches!(
+				ModuleAuthorizationTest::responseJson_get::<ModuleReturnUpdate>(conditionalCreate).await,
+				ModuleReturnUpdate::OK,
+			));
+			let mut competingCreate = conditionalFirst.clone();
+			competingCreate.timestamp = 301;
+			competingCreate.content = "competing-ciphertext".to_string();
+			let conditionalConflict = ModuleAuthorizationTest::module_updateIfCurrent(
+				&router,Some(&cookieA),competingCreate,i64::MIN,
+			).await;
+			let ModuleReturnUpdate::OUTDATED(current) =
+				ModuleAuthorizationTest::responseJson_get::<ModuleReturnUpdate>(conditionalConflict).await
+			else
+			{
+				panic!("the second expected-absence write was not rejected");
+			};
+			assert_eq!(current.timestamp,conditionalFirst.timestamp);
+			assert_eq!(current.content,conditionalFirst.content);
 
 			let retrieveBeforeWriteB = ModuleAuthorizationTest::module_retrieve(&router, Some(&cookieB), moduleId.clone()).await;
 			assert_eq!(retrieveBeforeWriteB.status(), StatusCode::OK);

@@ -338,6 +338,27 @@ fn http_status_is_success(status: &str) -> bool
 }
 
 #[cfg(any(feature = "hydrate",test))]
+fn eventCreateStatus_validate(status: u16,alreadyExistingIsSuccess: bool) -> Result<(),CalDavError>
+{
+	if (alreadyExistingIsSuccess && status == 412)
+	{
+		return Ok(());
+	}
+	if (matches!(status,201 | 204))
+	{
+		return Ok(());
+	}
+	return Err(match status
+	{
+		401 => CalDavError::Unauthorized,
+		403 => CalDavError::Forbidden,
+		404 => CalDavError::NotFound,
+		409 | 412 => CalDavError::Conflict,
+		_ => CalDavError::InvalidResponse,
+	});
+}
+
+#[cfg(any(feature = "hydrate",test))]
 fn href_resolve(base: &Url, href: &str) -> Result<Url,CalDavError>
 {
 	let href = base.join(href.trim()).map_err(|_| CalDavError::InvalidResponse)?;
@@ -542,9 +563,30 @@ mod browser
 			input: &CalendarCreateInput,
 		) -> Result<(),CalDavError>
 		{
-			let collectionUrl = href_resolve(&self.baseUrl,&collection.href)?;
 			let uid = uuid::Uuid::new_v4().to_string();
-			let built = build_event(input,uid,OffsetDateTime::now_utc())?;
+			return self.event_createWithUid(collection,input,&uid,false).await;
+		}
+
+		pub async fn event_createIdempotent(
+			&self,
+			collection: &CalendarCollection,
+			input: &CalendarCreateInput,
+			uid: &str,
+		) -> Result<(),CalDavError>
+		{
+			return self.event_createWithUid(collection,input,uid,true).await;
+		}
+
+		async fn event_createWithUid(
+			&self,
+			collection: &CalendarCollection,
+			input: &CalendarCreateInput,
+			uid: &str,
+			alreadyExistingIsSuccess: bool,
+		) -> Result<(),CalDavError>
+		{
+			let collectionUrl = href_resolve(&self.baseUrl,&collection.href)?;
+			let built = build_event(input,uid.to_string(),OffsetDateTime::now_utc())?;
 			let resourceUrl = collection_directory_get(&collectionUrl)
 				.join(&format!("{}.ics",built.uid)).map_err(|_| CalDavError::InvalidConfiguration)?;
 			if (!collection_resource_contains(&collectionUrl,&resourceUrl))
@@ -556,7 +598,7 @@ mod browser
 				&[("Content-Type","text/calendar; charset=utf-8"),("If-None-Match","*")],
 				Some(&built.content),CALDAV_MAX_DISCOVERY_BYTES,
 			).await?;
-			return status_expect(response.status,&[201,204]);
+			return eventCreateStatus_validate(response.status,alreadyExistingIsSuccess);
 		}
 
 		pub async fn event_delete_series(&self, event: &CalendarEvent) -> Result<(),CalDavError>
@@ -706,7 +748,7 @@ pub(super) use browser::CalDavClient;
 #[cfg(test)]
 mod tests
 {
-	use super::{CalDavError,collection_resource_contains,href_resolve,multistatus_parse};
+	use super::{CalDavError,collection_resource_contains,eventCreateStatus_validate,href_resolve,multistatus_parse};
 	use url::Url;
 
 	#[test]
@@ -768,5 +810,16 @@ mod tests
 			href_resolve(&base,"https://calendar.invalid/test/").unwrap_err(),
 			CalDavError::InvalidResponse,
 		);
+	}
+
+	#[test]
+	fn idempotentCreateAcceptsOnlyItsOwnPreconditionConflict()
+	{
+		assert!(eventCreateStatus_validate(201,true).is_ok());
+		assert!(eventCreateStatus_validate(204,true).is_ok());
+		assert!(eventCreateStatus_validate(412,true).is_ok());
+		assert_eq!(eventCreateStatus_validate(412,false),Err(CalDavError::Conflict));
+		assert_eq!(eventCreateStatus_validate(409,true),Err(CalDavError::Conflict));
+		assert_eq!(eventCreateStatus_validate(500,true),Err(CalDavError::InvalidResponse));
 	}
 }

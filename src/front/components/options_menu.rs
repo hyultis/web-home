@@ -8,7 +8,7 @@ use leptos_router::hooks;
 use wasm_bindgen::JsCast;
 
 use crate::api::login::components::{AccountPreferencesError, PasswordRotationError};
-use crate::front::modules::module_holder::ModuleHolder;
+use crate::front::modules::module_holder::{ModuleHolder,ModuleHolderEpoch};
 use crate::front::utils::all_front_enum::{AllFrontErrorEnum, AllFrontLoginEnum};
 use crate::front::utils::dialog::{DialogData, DialogManager};
 use crate::front::utils::toaster_helpers::{toastingErr, toastingSuccess};
@@ -16,7 +16,7 @@ use crate::front::utils::translate::TranslateText;
 use crate::front::utils::users_data::{ClientCryptoContext, ClientState};
 
 #[component]
-pub(crate) fn OptionsMenu() -> impl IntoView
+pub(crate) fn OptionsMenu(lifecycleEpoch: ModuleHolderEpoch) -> impl IntoView
 {
 	let clientState = ClientState::expect();
 	let dialogManager = leptos::prelude::expect_context::<DialogManager>();
@@ -45,7 +45,7 @@ pub(crate) fn OptionsMenu() -> impl IntoView
 			.setButtonValidateTitle(Some("FRONTUI_OPTIONS_SAVE"))
 			.setButtonCloseTitle(Some("FRONTUI_OPTIONS_CANCEL"))
 			.setOnValidate(move |_| {
-				if (preferencesSaving.get_untracked())
+				if (preferencesSaving.get_untracked() || !validateState.passwordRotation_canClose())
 				{
 					return false;
 				}
@@ -54,7 +54,7 @@ pub(crate) fn OptionsMenu() -> impl IntoView
 				let toaster = validateToaster.clone();
 				let dialogManager = validateDialog.clone();
 				let navigate = validateNavigate.clone();
-				spawn_local(async move {
+				ModuleHolder::task_spawn(lifecycleEpoch,async move {
 					let result = clientState.preferencesPreview_commit().await;
 					preferencesSaving.set(false);
 					match result

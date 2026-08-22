@@ -10,6 +10,7 @@ pub mod dialog;
 pub mod toaster_helpers;
 pub mod all_front_enum;
 pub mod contentDownloader;
+pub(crate) mod browser;
 mod external_url;
 
 pub(super) use external_url::SafeExternalUrl;

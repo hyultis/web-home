@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use time::{Date, Duration, Month, PrimitiveDateTime, Time};
 use url::Url;
+use crate::front::ai::automation::AiModuleGrant;
 
 pub(super) const CALENDAR_CONFIG_VERSION: u8 = 1;
 pub(super) const CALENDAR_MAX_COLLECTIONS: usize = 16;
@@ -73,6 +74,8 @@ pub(super) struct CalendarConfig
 	pub highlightWeekends: bool,
 	#[serde(default)]
 	pub holidayCountry: String,
+	#[serde(default)]
+	pub aiGrant: AiModuleGrant,
 }
 
 fn calendar_config_version() -> u8
@@ -94,6 +97,7 @@ impl Default for CalendarConfig
 			viewMode: CalendarViewMode::Month,
 			highlightWeekends: false,
 			holidayCountry: String::new(),
+			aiGrant: AiModuleGrant::default(),
 		}
 	}
 }
@@ -487,6 +491,8 @@ mod tests
 		assert!(config.collections.is_empty());
 		assert!(!config.highlightWeekends);
 		assert!(config.holidayCountry.is_empty());
+		assert!(config.aiGrant.events.is_empty());
+		assert!(config.aiGrant.actions.is_empty());
 	}
 
 	#[test]

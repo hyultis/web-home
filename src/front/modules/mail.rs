@@ -21,7 +21,10 @@ use crate::front::ai::automation::{
 	AiEventCausation,AiEventGrant,AiEventReservation,AiEventReservationCandidate,AiExposure,
 	AiExposureFuture,AiExposureRequest,AiModuleGrant,AiNamedValue,AiValue,AiValueDefinition,
 };
-use crate::front::modules::components::{distant_time_simpler, Backable, BoxFuture, Cache, Cacheable, FieldHelper, FieldHelperType, ModuleName, ModuleSizeContrainte, RefreshTime};
+use crate::front::modules::components::{
+	distant_time_simpler,Backable,BoxFuture,Cache,Cacheable,FieldHelper,FieldHelperType,
+	ModuleConfigSession,ModuleConfigViewFn,ModuleName,ModuleSizeContrainte,RefreshTime,
+};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::contentDownloader::download_attachment;
 use crate::front::utils::dialog::{DialogData, DialogManager};
@@ -941,28 +944,37 @@ impl Mail
 			.map(|(key,mail)| (key.clone(),mail.clone()));
 	}
 
-	fn draw_config(getBoxsMailConfig: ArcRwSignal<MailConfig>, getBoxsMailsCache: ArcRwSignal<MailsContent>, update: ArcRwSignal<Cache>, moduleActions: ModuleActionFn) -> AnyView
+	fn draw_config(
+		getBoxsMailConfig: ArcRwSignal<MailConfig>,
+		getBoxsMailsCache: ArcRwSignal<MailsContent>,
+		update: ArcRwSignal<Cache>,
+		moduleActions: ModuleActionFn,
+		session: ModuleConfigSession,
+	) -> AnyView
 	{
 		let getBoxsMailConfigInner = getBoxsMailConfig.clone();
 		let getBoxsMailsCacheInner = getBoxsMailsCache.clone();
 		let getBoxsConfigCache = update.clone();
 		let toaster = expect_toaster();
 		let moduleActionsGetBox = moduleActions.clone();
+		let getBoxsSession = session.clone();
 		let getBoxsFn = move |_| {
+			if (!getBoxsSession.isActive()) {return;}
 			let toaster = toaster.clone();
 			let getBoxsMailConfig = getBoxsMailConfigInner.clone();
 			let getBoxsMailContent = getBoxsMailsCacheInner.clone();
 			let getBoxsConfigCache = getBoxsConfigCache.clone();
 			let moduleActionsTask = moduleActionsGetBox.clone();
+			let taskSession = getBoxsSession.clone();
 			moduleActionsGetBox.task_spawn(async move {
 				let apiResult = API_proxys_imap_listbox(getBoxsMailConfig.get_untracked().imap.clone()).await;
-				if (!moduleActionsTask.lifecycle_isActive())
+				if (!moduleActionsTask.lifecycle_isActive() || !taskSession.isActive())
 				{
 					return;
 				}
 				if let Some(result) = toaster_api(&toaster,apiResult, None).await
 				{
-					if (!moduleActionsTask.lifecycle_isActive())
+					if (!moduleActionsTask.lifecycle_isActive() || !taskSession.isActive())
 					{
 						return;
 					}
@@ -1020,10 +1032,8 @@ impl Mail
 			<div class="module_config module_mail_config">
 				{titleF.draw()}
 				{mailAsTagF.draw()}
-				<div class="module_mail_connection_fields">
-					{hostF.draw()}
-					{portF.draw()}
-				</div>
+				{hostF.draw()}
+				{portF.draw()}
 				{usernameF.draw()}
 				{passwordF.draw()}
 				{
@@ -1689,16 +1699,26 @@ impl Backable for Mail
 		Mail::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>, moduleActions: ModuleActionFn, moduleId: ModuleID) -> ViewFn {
+	fn draw(&self, _editMode: RwSignal<bool>, moduleActions: ModuleActionFn, moduleId: ModuleID) -> ViewFn {
 		let configInner = self.config.clone();
 		let clientCacheInner = self.mailsClientCache.clone();
 		let updateInner = self._update.clone();
 		ViewFn::from(move || {
 			view! {
-				<MailDraw config=configInner.clone() mailsClientCache=clientCacheInner.clone() update=updateInner.clone() editMode=editMode moduleActions=moduleActions.clone() moduleId=moduleId.clone()/>
+				<MailContentDraw config=configInner.clone() mailsClientCache=clientCacheInner.clone() update=updateInner.clone() moduleActions=moduleActions.clone() moduleId=moduleId.clone()/>
 			}.into_any()
 		})
 
+	}
+
+	fn draw_config(&self,moduleActions: ModuleActionFn,_moduleId: ModuleID) -> Option<ModuleConfigViewFn>
+	{
+		let config = self.config.clone();
+		let mailsClientCache = self.mailsClientCache.clone();
+		let update = self._update.clone();
+		return Some(Arc::new(move |session| Mail::draw_config(
+			config.clone(),mailsClientCache.clone(),update.clone(),moduleActions.clone(),session,
+		)));
 	}
 
 	fn refresh_time(&self) -> RefreshTime {
@@ -1788,10 +1808,9 @@ impl Cacheable for Mail
 }
 
 #[component]
-fn MailDraw(config: ArcRwSignal<MailConfig>,
+fn MailContentDraw(config: ArcRwSignal<MailConfig>,
 	            mailsClientCache: ArcRwSignal<MailsContent>,
 	            update: ArcRwSignal<Cache>,
-	            editMode: RwSignal<bool>,
 	            moduleActions: ModuleActionFn,
 	            moduleId: ModuleID) -> impl IntoView
 {
@@ -1828,13 +1847,6 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 
 
 	view!{{move || {
-			let editMode = editMode.get();
-			if(editMode)
-			{
-				Mail::draw_config(config.clone(), mailsClientCache.clone(), update.clone(), moduleActions.clone())
-			}
-			else
-			{
 				let config = config.clone();
 				let mailsCache = mailsClientCache.clone();
 				let mailConfig = config.get();
@@ -1874,7 +1886,10 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 										<tr
 											class="module_mail_row"
 											on:mouseenter={move |event| mailOverlayHovered.set(MailOverlayState::from_event_target(mailOverlayMouse.clone(),mailAiHandled,event.current_target()))}
-											on:mouseleave={move |_| mailOverlayHovered.set(None)}
+											on:mouseleave={move |_| {
+												mailOverlayHovered.set(None);
+												mailOverlayFocused.set(None);
+											}}
 										>
 											<td class="module_mail_date">{distant_time_simpler(mail.date)}</td>
 											{
@@ -1970,7 +1985,6 @@ fn MailDraw(config: ArcRwSignal<MailConfig>,
 					.or_else(|| mailOverlayHovered.get())
 					.map(|state| Mail::utils_mailOverlay(&state))}
 			}.into_any()
-			}
 	}}}.into_any()
 }
 

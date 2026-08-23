@@ -2,7 +2,7 @@ use leptoaster::ToasterContext;
 use leptos::prelude::{ArcRwSignal, RwSignal, ViewFn};
 use strum_macros::EnumDiscriminants;
 use crate::api::modules::components::{ModuleContent, ModuleID};
-use crate::front::modules::components::{moduleContent, Backable, BoxFuture, Cache, Cacheable, ModuleName, ModuleSizeContrainte, RefreshTime};
+use crate::front::modules::components::{moduleContent, Backable, BoxFuture, Cache, Cacheable, ModuleConfigViewFn, ModuleName, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::calendar::Calendar;
 use crate::front::modules::todo::Todo;
 use strum_macros::EnumIter;
@@ -157,6 +157,11 @@ impl Backable for ModuleType {
 
 	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> ViewFn {
 		return self.intoBackable().draw(editMode,moduleActions,moduleId);
+	}
+
+	fn draw_config(&self,moduleActions: ModuleActionFn,moduleId: ModuleID) -> Option<ModuleConfigViewFn>
+	{
+		return self.intoBackable().draw_config(moduleActions,moduleId);
 	}
 
 	fn refresh_time(&self) -> RefreshTime {

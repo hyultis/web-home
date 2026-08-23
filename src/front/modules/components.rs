@@ -1,5 +1,6 @@
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool,Ordering};
 use gloo_timers::callback::Interval;
 use leptoaster::ToasterContext;
 use leptos::ev::Targeted;
@@ -85,6 +86,38 @@ pub trait Cacheable
 
 
 pub type BoxFuture = Pin<Box<dyn Future<Output = ()> + 'static>>;
+pub type ModuleConfigViewFn = Arc<dyn Fn(ModuleConfigSession) -> AnyView + Send + Sync + 'static>;
+
+#[derive(Clone)]
+pub struct ModuleConfigSession
+{
+	active: Arc<AtomicBool>,
+	moduleActions: ModuleActionFn,
+	moduleId: ModuleID,
+}
+
+impl ModuleConfigSession
+{
+	pub(crate) fn new(moduleActions: ModuleActionFn,moduleId: ModuleID) -> Self
+	{
+		return Self {
+			active: Arc::new(AtomicBool::new(true)),
+			moduleActions,
+			moduleId,
+		};
+	}
+
+	pub(crate) fn close(&self)
+	{
+		self.active.store(false,Ordering::Release);
+	}
+
+	pub(crate) fn isActive(&self) -> bool
+	{
+		return self.active.load(Ordering::Acquire)
+			&& self.moduleActions.module_isActive(&self.moduleId);
+	}
+}
 
 pub trait ModuleName
 {
@@ -96,6 +129,10 @@ pub trait Backable
 {
 	fn module_name(&self) -> String;
 	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> ViewFn;
+	fn draw_config(&self,_moduleActions: ModuleActionFn,_moduleId: ModuleID) -> Option<ModuleConfigViewFn>
+	{
+		return None;
+	}
 
 	fn refresh_time(&self) -> RefreshTime;
 	fn refresh(&self, moduleActions: ModuleActionFn, moduleId:ModuleID, toaster: ToasterContext) -> Option<BoxFuture>;

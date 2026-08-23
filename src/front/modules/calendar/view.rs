@@ -4,12 +4,12 @@ use super::caldav::CalDavError;
 #[cfg(feature = "hydrate")]
 use super::caldav::CalDavClient;
 use super::domain::{
-	CALENDAR_MAX_COLLECTIONS,CalendarCollection,CalendarConfig,CalendarCreateInput,CalendarCreateMoment,CalendarEvent,
+	CALENDAR_MAX_COLLECTIONS,CalendarCollection,CalendarConfig,CalendarCreateInput,CalendarCreateMoment,CalendarEditScope,CalendarEvent,
 	CalendarConfigError,CalendarHolidayError,CalendarMoment,CalendarRecurrence,CalendarRecurrenceEnd,
 	CalendarRecurrenceFrequency,CalendarRejectedReason,CalendarViewMode,
 };
 use crate::api::modules::components::ModuleID;
-use crate::front::modules::components::{Cache,FieldHelper,FieldHelperType};
+use crate::front::modules::components::{Cache,FieldHelper,FieldHelperType,ModuleConfigSession};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::dialog::{DialogActionStyle,DialogData,DialogManager};
 use crate::front::utils::toaster_helpers::toastingErr;
@@ -18,10 +18,11 @@ use crate::front::utils::toaster_helpers::toastingSuccess;
 use crate::front::utils::translate::TranslateText;
 use crate::HWebTrace;
 use leptoaster::expect_toaster;
+use leptos::html::Div;
 use leptos::prelude::{
 	ArcRwSignal,AriaAttributes,BindAttribute,ClassAttribute,CollectView,Effect,ElementChild,Get,GetUntracked,
-	GlobalAttributes,IntoAny,OnAttribute,PropAttribute,RwSignal,Set,StyleAttribute,Update,
-	event_target_checked,use_context,
+	GlobalAttributes,IntoAny,NodeRef,NodeRefAttribute,OnAttribute,PropAttribute,RwSignal,Set,StyleAttribute,Update,
+	event_target_checked,on_cleanup,use_context,
 };
 use leptos::{component,view,IntoView};
 use std::collections::{HashMap,HashSet};
@@ -66,47 +67,31 @@ pub(super) fn CalendarDraw(
 		return currentEditMode;
 	});
 
-	view! {{
-		let config = config.clone();
-		let runtime = runtime.clone();
-		let update = update.clone();
-		let moduleActions = moduleActions.clone();
-		let moduleId = moduleId.clone();
-		let dialogManager = dialogManager.clone();
-		move || {
-			if (editMode.get())
-			{
-				return view! {
-					<CalendarConfigDraw
-						config=config.clone()
-						runtime=runtime.clone()
-						update=update.clone()
-						moduleActions=moduleActions.clone()
-					/>
-				}.into_any();
-			}
-			return view! {
-				<CalendarContentDraw
-					config=config.clone()
-					runtime=runtime.clone()
-					update=update.clone()
-					moduleActions=moduleActions.clone()
-					moduleId=moduleId.clone()
-					dialogManager=dialogManager.clone()
-				/>
-			}.into_any();
-		}
-	}}.into_any()
+	view! {
+		<CalendarContentDraw
+			config=config
+			runtime=runtime
+			update=update
+			moduleActions=moduleActions
+			moduleId=moduleId
+			dialogManager=dialogManager
+		/>
+	}.into_any()
 }
 
 #[component]
-fn CalendarConfigDraw(
+pub(super) fn CalendarConfigDraw(
 	config: ArcRwSignal<CalendarConfig>,
 	runtime: ArcRwSignal<CalendarRuntime>,
 	update: ArcRwSignal<Cache>,
 	moduleActions: ModuleActionFn,
+	session: ModuleConfigSession,
 ) -> impl IntoView
 {
+	let cleanupRuntime = runtime.clone();
+	on_cleanup(move || {
+		let _ = cleanupRuntime.try_update(|runtime| runtime.discoveryLoading = false);
+	});
 	let mut titleField = FieldHelper::new(&config,&update,"MODULE_TITLE_CONF",
 		|config| config.get().title,
 		|event,config| config.title = event.target().value());
@@ -163,7 +148,9 @@ fn CalendarConfigDraw(
 	let discoverRuntime = runtime.clone();
 	let discoverActions = moduleActions.clone();
 	let discoverUpdate = update.clone();
+	let discoverSession = session.clone();
 	let discover = move |_| {
+		if (!discoverSession.isActive()) {return;}
 		if let (Some(serverInput),Some(usernameInput),Some(passwordInput)) = (
 			serverInputRef.get(),usernameInputRef.get(),passwordInputRef.get(),
 		)
@@ -191,6 +178,7 @@ fn CalendarConfigDraw(
 		}
 		calendarCollections_discover(
 			discoverConfig.clone(),discoverRuntime.clone(),discoverUpdate.clone(),discoverActions.clone(),
+			discoverSession.clone(),
 		);
 	};
 	let selectedConfig = config.clone();
@@ -348,6 +336,64 @@ fn collectionLabel_fallback(href: &str) -> String
 		.unwrap_or_else(|| "—".to_string());
 }
 
+#[derive(Clone,Copy,Debug,Default,Eq,PartialEq)]
+struct CalendarScrollState
+{
+	period: Option<super::domain::CalendarPeriod>,
+	top: i32,
+	left: i32,
+}
+
+impl CalendarScrollState
+{
+	fn period_apply(&mut self,period: Option<super::domain::CalendarPeriod>)
+	{
+		if (self.period == period) {return;}
+		self.period = period;
+		self.top = 0;
+		self.left = 0;
+	}
+}
+
+#[cfg(feature="hydrate")]
+fn calendarScroll_capture(
+	gridRef: NodeRef<Div>,
+	scrollState: RwSignal<CalendarScrollState>,
+	period: Option<super::domain::CalendarPeriod>,
+)
+{
+	let Some(grid) = gridRef.try_get_untracked().flatten() else {return};
+	scrollState.set(CalendarScrollState {
+		period,
+		top: grid.scroll_top(),
+		left: grid.scroll_left(),
+	});
+}
+
+#[cfg(not(feature="hydrate"))]
+fn calendarScroll_capture(
+	_gridRef: NodeRef<Div>,
+	_scrollState: RwSignal<CalendarScrollState>,
+	_period: Option<super::domain::CalendarPeriod>,
+)
+{
+}
+
+#[cfg(feature="hydrate")]
+fn calendarScroll_restore(gridRef: NodeRef<Div>,scrollState: CalendarScrollState)
+{
+	leptos::leptos_dom::helpers::request_animation_frame(move || {
+		let Some(grid) = gridRef.try_get_untracked().flatten() else {return};
+		grid.set_scroll_top(scrollState.top);
+		grid.set_scroll_left(scrollState.left);
+	});
+}
+
+#[cfg(not(feature="hydrate"))]
+fn calendarScroll_restore(_gridRef: NodeRef<Div>,_scrollState: CalendarScrollState)
+{
+}
+
 #[component]
 fn CalendarContentDraw(
 	config: ArcRwSignal<CalendarConfig>,
@@ -358,6 +404,17 @@ fn CalendarContentDraw(
 	dialogManager: DialogManager,
 ) -> impl IntoView
 {
+	let gridRef = NodeRef::<Div>::new();
+	let scrollState = RwSignal::new(CalendarScrollState::default());
+	let scrollRuntime = runtime.clone();
+	Effect::new(move |_| {
+		let period = scrollRuntime.get().period;
+		let mut state = scrollState.get_untracked();
+		state.period_apply(period);
+		scrollState.set(state);
+		calendarScroll_restore(gridRef,state);
+	});
+
 	let previousRuntime = runtime.clone();
 	let previousConfig = config.clone();
 	let previousActions = moduleActions.clone();
@@ -418,6 +475,7 @@ fn CalendarContentDraw(
 	let weekPressedConfig = config.clone();
 	let labelRuntime = runtime.clone();
 	let statusRuntime = runtime.clone();
+	let gridScrollRuntime = runtime.clone();
 	let viewSwitchLabelId = format!("calendar-view-switch-{}",moduleId.id);
 	let viewSwitchLabelledBy = viewSwitchLabelId.clone();
 
@@ -476,7 +534,13 @@ fn CalendarContentDraw(
 				</div>
 			</div>
 			{move || calendarStatus_view(&statusRuntime.get())}
-			<div class="module_calendar_grid_container">
+			<div
+				class="module_calendar_grid_container"
+				node_ref=gridRef
+				on:scroll=move |_| calendarScroll_capture(
+					gridRef,scrollState,gridScrollRuntime.get_untracked().period,
+				)
+			>
 				{move || calendarGrid_view(
 					gridConfig.clone(),&gridRuntime.get(),gridActions.clone(),gridId.clone(),gridDialog.clone(),
 				)}
@@ -797,6 +861,7 @@ fn calDavError_key(error: CalDavError) -> &'static str
 		CalDavError::ResponseTooLarge | CalDavError::TooManyItems => "MODULE_CALENDAR_ERROR_LIMIT",
 		CalDavError::InvalidResponse | CalDavError::InvalidCalendar => "MODULE_CALENDAR_ERROR_RESPONSE",
 		CalDavError::MissingEtag => "MODULE_CALENDAR_ERROR_ETAG",
+		CalDavError::MoveIncomplete => "MODULE_CALENDAR_ERROR_MOVE_INCOMPLETE",
 	};
 }
 
@@ -881,9 +946,10 @@ fn calendarCollections_discover(
 	runtime: ArcRwSignal<CalendarRuntime>,
 	update: ArcRwSignal<Cache>,
 	moduleActions: ModuleActionFn,
+	session: ModuleConfigSession,
 )
 {
-	if (runtime.get_untracked().discoveryLoading) {return;}
+	if (!session.isActive() || runtime.get_untracked().discoveryLoading) {return;}
 	runtime.update(|runtime| {
 		runtime.discoveryLoading = true;
 		runtime.discoveryError = None;
@@ -894,13 +960,14 @@ fn calendarCollections_discover(
 	let runtimeResult = runtime.clone();
 	let toaster = expect_toaster();
 	let taskActions = moduleActions.clone();
+	let taskSession = session.clone();
 	moduleActions.task_spawn(async move {
 		let result = match CalDavClient::new(&configSnapshot)
 		{
 			Ok(client) => client.collections_discover().await,
 			Err(error) => Err(error),
 		};
-		if (!taskActions.lifecycle_isActive()) {return;}
+		if (!taskActions.lifecycle_isActive() || !taskSession.isActive()) {return;}
 		if let Ok(collections) = &result
 		{
 			let metadataChanged = configSignal.try_update(|config| {
@@ -945,6 +1012,7 @@ fn calendarCollections_discover(
 	_runtime: ArcRwSignal<CalendarRuntime>,
 	_update: ArcRwSignal<Cache>,
 	_moduleActions: ModuleActionFn,
+	_session: ModuleConfigSession,
 )
 {
 }
@@ -1264,15 +1332,9 @@ fn calendarEventDetails_open(
 	dialogManager: DialogManager,
 )
 {
-	let recurrenceState = RwSignal::new(if (event.recurrent)
-	{
-		CalendarEventRecurrenceState::Series
-	}
-	else
-	{
-		CalendarEventRecurrenceState::Loading
-	});
-	let recurrenceMustLoad = !event.recurrent;
+	let recurrenceState = ArcRwSignal::new(CalendarEventRecurrenceState::Loading);
+	let bodyRecurrenceState = recurrenceState.clone();
+	let resolveRecurrenceState = recurrenceState.clone();
 	let recurrenceEvent = event.clone();
 	let recurrenceConfig = config.clone();
 	let recurrenceActions = moduleActions.clone();
@@ -1284,6 +1346,7 @@ fn calendarEventDetails_open(
 	let dialog = DialogData::new()
 		.setTitle("MODULE_CALENDAR_EVENT_DETAILS")
 		.setBody(move || {
+			let actionsRecurrenceState = bodyRecurrenceState.clone();
 			let actionsEvent = bodyEvent.clone();
 			let actionsConfig = bodyConfig.clone();
 			let actions = bodyActions.clone();
@@ -1316,7 +1379,7 @@ fn calendarEventDetails_open(
 					})}
 					<div class="module_calendar_event_actions">
 						{move || calendarEventActions_view(
-							recurrenceState,actionsEvent.clone(),actionsConfig.clone(),actions.clone(),
+							actionsRecurrenceState.clone(),actionsEvent.clone(),actionsConfig.clone(),actions.clone(),
 							actionsId.clone(),actionsDialog.clone(),
 						)}
 					</div>
@@ -1325,24 +1388,21 @@ fn calendarEventDetails_open(
 		})
 		.setButtonValidateTitle(None::<String>);
 	dialogManager.open(dialog);
-	if (recurrenceMustLoad)
-	{
-		calendarEventRecurrence_resolve(recurrenceEvent,recurrenceConfig,recurrenceState,recurrenceActions);
-	}
+	calendarEventRecurrence_resolve(recurrenceEvent,recurrenceConfig,resolveRecurrenceState,recurrenceActions);
 }
 
-#[derive(Clone,Copy)]
+#[derive(Clone)]
 #[cfg_attr(not(feature = "hydrate"),allow(dead_code))]
 enum CalendarEventRecurrenceState
 {
 	Loading,
 	Single,
-	Series,
+	Series(CalendarEvent),
 	Error(CalDavError),
 }
 
 fn calendarEventActions_view(
-	recurrenceState: RwSignal<CalendarEventRecurrenceState>,
+	recurrenceState: ArcRwSignal<CalendarEventRecurrenceState>,
 	event: CalendarEvent,
 	config: ArcRwSignal<CalendarConfig>,
 	moduleActions: ModuleActionFn,
@@ -1359,18 +1419,45 @@ fn calendarEventActions_view(
 			<p class="module_calendar_dialog_notice module_calendar_status--error" role="alert"><TranslateText key={calDavError_key(error)}/></p>
 		}.into_any(),
 		CalendarEventRecurrenceState::Single => view! {
+			<button type="button" on:click={
+				let event = event.clone();
+				let config = config.clone();
+				let moduleActions = moduleActions.clone();
+				let moduleId = moduleId.clone();
+				let dialogManager = dialogManager.clone();
+				move |_| calendarEventEdit_open(
+					CalendarEditScope::Event,event.clone(),config.clone(),moduleActions.clone(),moduleId.clone(),dialogManager.clone(),
+				)
+			}><TranslateText key="MODULE_CALENDAR_EDIT_EVENT"/></button>
 			<button type="button" class="danger" on:click=move |_| calendarDeleteConfirmation_open(
 				CalendarDeleteScope::Event,event.clone(),config.clone(),moduleActions.clone(),moduleId.clone(),dialogManager.clone(),
 			)><TranslateText key="MODULE_CALENDAR_DELETE_EVENT"/></button>
 		}.into_any(),
-		CalendarEventRecurrenceState::Series =>
+		CalendarEventRecurrenceState::Series(masterEvent) =>
 		{
+			let editOccurrenceEvent = event.clone();
+			let editOccurrenceConfig = config.clone();
+			let editOccurrenceActions = moduleActions.clone();
+			let editOccurrenceId = moduleId.clone();
+			let editOccurrenceDialog = dialogManager.clone();
+			let editSeriesConfig = config.clone();
+			let editSeriesActions = moduleActions.clone();
+			let editSeriesId = moduleId.clone();
+			let editSeriesDialog = dialogManager.clone();
 			let occurrenceEvent = event.clone();
 			let occurrenceConfig = config.clone();
 			let occurrenceActions = moduleActions.clone();
 			let occurrenceId = moduleId.clone();
 			let occurrenceDialog = dialogManager.clone();
 			view! {
+				<button type="button" on:click=move |_| calendarEventEdit_open(
+					CalendarEditScope::Occurrence,editOccurrenceEvent.clone(),editOccurrenceConfig.clone(),
+					editOccurrenceActions.clone(),editOccurrenceId.clone(),editOccurrenceDialog.clone(),
+				)><TranslateText key="MODULE_CALENDAR_EDIT_OCCURRENCE"/></button>
+				<button type="button" on:click=move |_| calendarEventEdit_open(
+					CalendarEditScope::Series,masterEvent.clone(),editSeriesConfig.clone(),
+					editSeriesActions.clone(),editSeriesId.clone(),editSeriesDialog.clone(),
+				)><TranslateText key="MODULE_CALENDAR_EDIT_SERIES"/></button>
 				<button type="button" class="danger" on:click=move |_| calendarDeleteConfirmation_open(
 					CalendarDeleteScope::Occurrence,occurrenceEvent.clone(),occurrenceConfig.clone(),occurrenceActions.clone(),occurrenceId.clone(),occurrenceDialog.clone(),
 				)><TranslateText key="MODULE_CALENDAR_DELETE_OCCURRENCE"/></button>
@@ -1380,6 +1467,167 @@ fn calendarEventActions_view(
 			}.into_any()
 		},
 	};
+}
+
+#[derive(Clone)]
+struct CalendarEditFormSignals
+{
+	title: ArcRwSignal<String>,
+	description: ArcRwSignal<String>,
+	location: ArcRwSignal<String>,
+	allDay: ArcRwSignal<bool>,
+	allDayStart: ArcRwSignal<String>,
+	allDayEnd: ArcRwSignal<String>,
+	timedStart: ArcRwSignal<String>,
+	timedEnd: ArcRwSignal<String>,
+	collectionHref: ArcRwSignal<String>,
+}
+
+impl CalendarEditFormSignals
+{
+	fn new(event: &CalendarEvent) -> Self
+	{
+		let today = browser_today_get();
+		let (allDay,allDayStart,allDayEnd,timedStart,timedEnd) = match (&event.start,&event.end)
+		{
+			(CalendarMoment::AllDay(start),CalendarMoment::AllDay(end)) =>
+			{
+				let inclusiveEnd = end.previous_day().filter(|end| end >= start).unwrap_or(*start);
+				(
+					true,dateInput_format(*start),dateInput_format(inclusiveEnd),
+					format!("{}T09:00",dateInput_format(*start)),format!("{}T10:00",dateInput_format(*start)),
+				)
+			},
+			(CalendarMoment::Timed(start),CalendarMoment::Timed(end)) =>
+			{
+				(
+					false,dateInput_format(today),dateInput_format(today),
+					calendarTimedInput_format(*start),calendarTimedInput_format(*end),
+				)
+			},
+			_ =>
+			{
+				(
+					false,dateInput_format(today),dateInput_format(today),
+					format!("{}T09:00",dateInput_format(today)),format!("{}T10:00",dateInput_format(today)),
+				)
+			},
+		};
+		return Self {
+			title: ArcRwSignal::new(event.title.clone()),
+			description: ArcRwSignal::new(event.description.clone()),
+			location: ArcRwSignal::new(event.location.clone()),
+			allDay: ArcRwSignal::new(allDay),
+			allDayStart: ArcRwSignal::new(allDayStart),
+			allDayEnd: ArcRwSignal::new(allDayEnd),
+			timedStart: ArcRwSignal::new(timedStart),
+			timedEnd: ArcRwSignal::new(timedEnd),
+			collectionHref: ArcRwSignal::new(event.identity.collectionHref.clone()),
+		};
+	}
+
+	fn input_get(&self) -> Option<CalendarCreateInput>
+	{
+		return calendarCreateInput_get(
+			self.title.get_untracked(),self.description.get_untracked(),self.location.get_untracked(),
+			self.allDay.get_untracked(),self.allDayStart.get_untracked(),self.allDayEnd.get_untracked(),
+			self.timedStart.get_untracked(),self.timedEnd.get_untracked(),
+			false,"WEEKLY".to_string(),"1".to_string(),"NEVER".to_string(),
+			self.allDayStart.get_untracked(),"1".to_string(),
+		);
+	}
+}
+
+fn calendarEventEdit_open(
+	editScope: CalendarEditScope,
+	event: CalendarEvent,
+	config: ArcRwSignal<CalendarConfig>,
+	moduleActions: ModuleActionFn,
+	moduleId: ModuleID,
+	dialogManager: DialogManager,
+)
+{
+	let configSnapshot = config.get_untracked();
+	let signals = CalendarEditFormSignals::new(&event);
+	let collections = configSnapshot.collections.clone();
+	let pending = ArcRwSignal::new(false);
+	let bodySignals = signals.clone();
+	let bodyCollections = collections.clone();
+	let bodyPending = pending.clone();
+	let validateSignals = signals.clone();
+	let validatePending = pending.clone();
+	let closePending = pending.clone();
+	let dialog = DialogData::new()
+		.setTitle("MODULE_CALENDAR_EDIT_TITLE")
+		.setIsLarger(true)
+		.setBody(move || calendarEventEditForm_view(
+			bodySignals.clone(),bodyCollections.clone(),bodyPending.clone(),editScope,
+		))
+		.setButtonValidateTitle(Some("MODULE_CALENDAR_UPDATE_ACTION"))
+		.setOnValidate({
+			let config = config.clone();
+			let moduleActions = moduleActions.clone();
+			let moduleId = moduleId.clone();
+			let dialogManager = dialogManager.clone();
+			move |_| {
+				if (validatePending.get_untracked()) {return false;}
+				let Some(input) = validateSignals.input_get()
+				else
+				{
+					let toaster = expect_toaster();
+					moduleActions.task_spawn(async move {
+						toastingErr(&toaster,"MODULE_CALENDAR_UPDATE_INVALID").await;
+					});
+					return false;
+				};
+				validatePending.set(true);
+				calendarEvent_update(
+					editScope,event.clone(),config.clone(),validateSignals.collectionHref.get_untracked(),input,validatePending.clone(),
+					moduleActions.clone(),moduleId.clone(),dialogManager.clone(),
+				);
+				return false;
+			}
+		})
+		.setCanClose(move || !closePending.get());
+	dialogManager.open(dialog);
+}
+
+fn calendarEventEditForm_view(
+	signals: CalendarEditFormSignals,
+	collections: Vec<CalendarCollection>,
+	pending: ArcRwSignal<bool>,
+	editScope: CalendarEditScope,
+) -> leptos::prelude::AnyView
+{
+	// Arena handles belong to the edit dialog while the Arc signals remain owned by DialogData.
+	let title = RwSignal::from(&signals.title);
+	let description = RwSignal::from(&signals.description);
+	let location = RwSignal::from(&signals.location);
+	let allDay = RwSignal::from(&signals.allDay);
+	let allDayStart = RwSignal::from(&signals.allDayStart);
+	let allDayEnd = RwSignal::from(&signals.allDayEnd);
+	let timedStart = RwSignal::from(&signals.timedStart);
+	let timedEnd = RwSignal::from(&signals.timedEnd);
+	let collectionHref = RwSignal::from(&signals.collectionHref);
+	let scopeKey = match editScope
+	{
+		CalendarEditScope::Event => "MODULE_CALENDAR_EDIT_EVENT_SCOPE",
+		CalendarEditScope::Occurrence => "MODULE_CALENDAR_EDIT_OCCURRENCE_SCOPE",
+		CalendarEditScope::Series => "MODULE_CALENDAR_EDIT_SERIES_SCOPE",
+	};
+	return view! {
+		<div class="module_calendar_create_form">
+			<p class="module_calendar_dialog_notice"><TranslateText key={scopeKey}/></p>
+			{calendarCreateIdentity_view(title,collectionHref,collections)}
+			{calendarCreatePeriod_view(
+				allDay,allDayStart,allDayEnd,timedStart,timedEnd,
+			)}
+			{calendarCreateDetails_view(location,description)}
+			{move || pending.get().then(|| view! {
+				<p class="module_calendar_dialog_notice" role="status"><TranslateText key="MODULE_CALENDAR_UPDATING"/></p>
+			})}
+		</div>
+	}.into_any();
 }
 
 #[derive(Clone,Copy)]
@@ -1557,6 +1805,26 @@ fn dateInput_format(date: Date) -> String
 }
 
 #[cfg(feature = "hydrate")]
+fn calendarTimedInput_format(timestamp: i64) -> String
+{
+	let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(timestamp as f64 * 1_000.0));
+	return format!(
+		"{:04}-{:02}-{:02}T{:02}:{:02}",
+		date.get_full_year(),date.get_month() + 1,date.get_date(),date.get_hours(),date.get_minutes(),
+	);
+}
+
+#[cfg(not(feature = "hydrate"))]
+fn calendarTimedInput_format(timestamp: i64) -> String
+{
+	let Ok(dateTime) = OffsetDateTime::from_unix_timestamp(timestamp) else {return String::new()};
+	return format!(
+		"{:04}-{:02}-{:02}T{:02}:{:02}",
+		dateTime.year(),u8::from(dateTime.month()),dateTime.day(),dateTime.hour(),dateTime.minute(),
+	);
+}
+
+#[cfg(feature = "hydrate")]
 fn browserLocalDayEnd_timestamp(date: Date) -> Option<i64>
 {
 	let date = js_sys::Date::new_with_year_month_day_hr_min_sec(
@@ -1576,7 +1844,7 @@ fn browserLocalDayEnd_timestamp(date: Date) -> Option<i64>
 fn calendarEventRecurrence_resolve(
 	event: CalendarEvent,
 	config: ArcRwSignal<CalendarConfig>,
-	recurrenceState: RwSignal<CalendarEventRecurrenceState>,
+	recurrenceState: ArcRwSignal<CalendarEventRecurrenceState>,
 	moduleActions: ModuleActionFn,
 )
 {
@@ -1585,14 +1853,14 @@ fn calendarEventRecurrence_resolve(
 	moduleActions.task_spawn(async move {
 		let result = match CalDavClient::new(&config)
 		{
-			Ok(client) => client.event_recurrence_get(&event).await,
+			Ok(client) => client.event_master_get(&event,&browser::timezone_get()).await,
 			Err(error) => Err(error),
 		};
 		if (!taskActions.lifecycle_isActive()) {return;}
 		recurrenceState.set(match result
 		{
-			Ok(true) => CalendarEventRecurrenceState::Series,
-			Ok(false) => CalendarEventRecurrenceState::Single,
+			Ok(masterEvent) if masterEvent.recurrent => CalendarEventRecurrenceState::Series(masterEvent),
+			Ok(_) => CalendarEventRecurrenceState::Single,
 			Err(error) => CalendarEventRecurrenceState::Error(error),
 		});
 	});
@@ -1602,7 +1870,7 @@ fn calendarEventRecurrence_resolve(
 fn calendarEventRecurrence_resolve(
 	_event: CalendarEvent,
 	_config: ArcRwSignal<CalendarConfig>,
-	recurrenceState: RwSignal<CalendarEventRecurrenceState>,
+	recurrenceState: ArcRwSignal<CalendarEventRecurrenceState>,
 	_moduleActions: ModuleActionFn,
 )
 {
@@ -1652,6 +1920,61 @@ fn calendarEvent_create(
 	_collectionHref: String,
 	_input: CalendarCreateInput,
 	pending: RwSignal<bool>,
+	_moduleActions: ModuleActionFn,
+	_moduleId: ModuleID,
+	_dialogManager: DialogManager,
+)
+{
+	pending.set(false);
+}
+
+#[cfg(feature = "hydrate")]
+fn calendarEvent_update(
+	editScope: CalendarEditScope,
+	event: CalendarEvent,
+	config: ArcRwSignal<CalendarConfig>,
+	collectionHref: String,
+	input: CalendarCreateInput,
+	pending: ArcRwSignal<bool>,
+	moduleActions: ModuleActionFn,
+	moduleId: ModuleID,
+	dialogManager: DialogManager,
+)
+{
+	let config = config.get_untracked();
+	let collection = config.collections.iter().find(|collection| collection.href == collectionHref).cloned();
+	let toaster = expect_toaster();
+	let taskActions = moduleActions.clone();
+	moduleActions.task_spawn(async move {
+		let result = match (CalDavClient::new(&config),collection)
+		{
+			(Ok(client),Some(collection)) => client.event_update(&event,&collection,&input,editScope).await,
+			(Err(error),_) => Err(error),
+			(_,None) => Err(CalDavError::InvalidConfiguration),
+		};
+		pending.set(false);
+		if (!taskActions.lifecycle_isActive()) {return;}
+		match result
+		{
+			Ok(()) =>
+			{
+				dialogManager.clear();
+				(taskActions.refreshFn)(moduleId);
+				toastingSuccess(&toaster,"MODULE_CALENDAR_UPDATE_SUCCESS").await;
+			},
+			Err(error) => toastingErr(&toaster,calDavError_key(error)).await,
+		}
+	});
+}
+
+#[cfg(not(feature = "hydrate"))]
+fn calendarEvent_update(
+	_editScope: CalendarEditScope,
+	_event: CalendarEvent,
+	_config: ArcRwSignal<CalendarConfig>,
+	_collectionHref: String,
+	_input: CalendarCreateInput,
+	pending: ArcRwSignal<bool>,
 	_moduleActions: ModuleActionFn,
 	_moduleId: ModuleID,
 	_dialogManager: DialogManager,
@@ -1730,10 +2053,11 @@ fn eventMoment_label(moment: &CalendarMoment) -> String
 #[cfg(test)]
 mod tests
 {
-	use super::event_overlapsLocalDate;
+	use super::{CalendarEditFormSignals,CalendarScrollState,event_overlapsLocalDate};
 	use crate::front::modules::calendar::domain::{
-		CalendarEvent,CalendarEventIdentity,CalendarMoment,
+		CalendarEvent,CalendarEventIdentity,CalendarMoment,CalendarPeriod,CalendarViewMode,
 	};
+	use leptos::prelude::{GetUntracked,Owner};
 	use time::{Date,Month,PrimitiveDateTime,Time};
 
 	#[test]
@@ -1762,6 +2086,54 @@ mod tests
 		};
 
 		assert!(event_overlapsLocalDate(&event,date));
+	}
+
+	#[test]
+	fn calendarScrollState_preservesScrollOnlyForTheSamePeriod()
+	{
+		let anchor = Date::from_calendar_date(2026,Month::August,23).unwrap();
+		let month = CalendarPeriod::from_anchor(anchor,CalendarViewMode::Month);
+		let week = CalendarPeriod::from_anchor(anchor,CalendarViewMode::Week);
+		let mut state = CalendarScrollState::default();
+
+		state.period_apply(Some(month));
+		state.top = 120;
+		state.left = 35;
+		state.period_apply(Some(month));
+		assert_eq!((state.top,state.left),(120,35));
+
+		state.period_apply(Some(week));
+		assert_eq!((state.top,state.left),(0,0));
+	}
+
+	#[test]
+	fn editFormSignals_surviveTheDetailsDialogOwnerCleanup()
+	{
+		let owner = Owner::new();
+		let event = CalendarEvent {
+			identity: CalendarEventIdentity {
+				collectionHref: "https://calendar.invalid/test/".to_string(),
+				resourceHref: "https://calendar.invalid/test/recurrent.ics".to_string(),
+				uid: "recurrent".to_string(),
+				occurrenceId: Some("20260823T100000".to_string()),
+			},
+			collectionName: "Test".to_string(),
+			collectionColor: None,
+			title: "Occurrence".to_string(),
+			description: String::new(),
+			location: String::new(),
+			start: CalendarMoment::Timed(1_777_197_600),
+			end: CalendarMoment::Timed(1_777_201_200),
+			occurrence: None,
+			recurrent: true,
+			etag: None,
+		};
+		let signals = owner.with(|| CalendarEditFormSignals::new(&event));
+
+		owner.cleanup();
+
+		assert_eq!(signals.collectionHref.get_untracked(),event.identity.collectionHref);
+		assert_eq!(signals.title.get_untracked(),"Occurrence");
 	}
 }
 

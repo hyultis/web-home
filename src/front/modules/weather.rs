@@ -1,7 +1,7 @@
 use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::front::modules::components::{
-	Backable, BoxFuture, Cache, Cacheable, FieldHelper, ModuleName, ModuleSizeContrainte,
-	RefreshTime,
+	Backable, BoxFuture, Cache, Cacheable, FieldHelper, ModuleConfigSession, ModuleConfigViewFn,
+	ModuleName, ModuleSizeContrainte, RefreshTime,
 };
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::draw_title_if_present;
@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use simd_json::borrowed::Value;
 use simd_json::prelude::ValueAsScalar;
 use std::collections::HashMap;
+use std::sync::Arc;
 use time::{Date, Duration, OffsetDateTime, UtcOffset};
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::{JsCast, JsValue};
@@ -123,16 +124,24 @@ impl Backable for Weather
 		Weather::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>, _moduleActions: ModuleActionFn, _: ModuleID) -> ViewFn
+	fn draw(&self, _editMode: RwSignal<bool>, _moduleActions: ModuleActionFn, _: ModuleID) -> ViewFn
 	{
 		let contentInner = self.weatherContent.clone();
-		let updateInner = self._update.clone();
 		let configInner = self.config.clone();
 		ViewFn::from(move || {
 			view! {
-				<WeatherDraw config=configInner.clone() content=contentInner.clone() update=updateInner.clone() editMode=editMode/>
+				<WeatherContentDraw config=configInner.clone() content=contentInner.clone()/>
 			}.into_any()
 		})
+	}
+
+	fn draw_config(&self,_moduleActions: ModuleActionFn,_moduleId: ModuleID) -> Option<ModuleConfigViewFn>
+	{
+		let config = self.config.clone();
+		let update = self._update.clone();
+		return Some(Arc::new(move |session| view! {
+			<WeatherConfigDraw config=config.clone() update=update.clone() session/>
+		}.into_any()));
 	}
 
 	fn refresh_time(&self) -> RefreshTime
@@ -288,6 +297,45 @@ impl Into<WeatherApiResultOneDay> for WeatherApiResultOneDayByHour
 	}
 }
 
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+struct WeatherWmoPresentation
+{
+	image: &'static str,
+	translationKey: &'static str,
+}
+
+impl WeatherWmoPresentation
+{
+	fn from_code(code: u8) -> Self
+	{
+		return match code
+		{
+			0 => Self::new("sun","MODULE_WEATHER_SUN"),
+			1 | 2 => Self::new("cloudy","MODULE_WEATHER_CLOUDY"),
+			3 => Self::new("cloud","MODULE_WEATHER_CLOUD"),
+			45 | 48 => Self::new("fog","MODULE_WEATHER_FOG"),
+			51 | 53 | 55 => Self::new("cloudy_rain","MODULE_WEATHER_DRIZZLE"),
+			56 | 57 => Self::new("light_snow","MODULE_WEATHER_FREEZING_DRIZZLE"),
+			61 | 63 | 65 => Self::new("rain","MODULE_WEATHER_RAIN"),
+			66 | 67 => Self::new("light_snow","MODULE_WEATHER_FREEZING_RAIN"),
+			71 => Self::new("light_snow","MODULE_WEATHER_LIGHT_SNOW"),
+			73 | 75 => Self::new("snow","MODULE_WEATHER_SNOW"),
+			77 => Self::new("snow_grain","MODULE_WEATHER_SNOW_GRAIN"),
+			80 | 81 | 82 => Self::new("rain","MODULE_WEATHER_RAIN_SHOWERS"),
+			85 => Self::new("light_snow","MODULE_WEATHER_SNOW_SHOWERS"),
+			86 => Self::new("snow","MODULE_WEATHER_SNOW_SHOWERS"),
+			95 => Self::new("storm","MODULE_WEATHER_STORM"),
+			96 | 99 => Self::new("heavystorm","MODULE_WEATHER_HEAVYSTORM"),
+			_ => Self::new("cloud","MODULE_WEATHER_UNKNOWN"),
+		};
+	}
+
+	const fn new(image: &'static str,translationKey: &'static str) -> Self
+	{
+		Self {image,translationKey}
+	}
+}
+
 #[derive(Debug, Clone)]
 struct WeatherApiResultOneDay
 {
@@ -303,28 +351,12 @@ impl WeatherApiResultOneDay
 {
 	pub fn codeIntoImg(&self) -> &'static str
 	{
-		match self.code
-		{
-			0 => "sun",
-			1 | 2 | 3 => "cloudy",
-			45 | 48 => "fog",
-			51 | 53 | 55 => "cloudy_rain",
-			56 | 57 => "light_snow",
-			61 | 63 | 65 => "cloudy_rain",
-			66 | 67 => "light_snow",
-			71 | 73 | 75 => "snow",
-			77 => "snow_grain",
-			80 | 81 | 82 => "rain",
-			85 | 86 => "snow",
-			95 => "storm",
-			96 | 99 => "heavystorm",
-			_ => "sun",
-		}
+		return WeatherWmoPresentation::from_code(self.code).image;
 	}
 
-	pub fn codeIntoTranslate(&self) -> String
+	pub fn codeIntoTranslate(&self) -> &'static str
 	{
-		return format!("MODULE_WEATHER_{}", self.codeIntoImg().to_uppercase());
+		return WeatherWmoPresentation::from_code(self.code).translationKey;
 	}
 }
 
@@ -623,7 +655,8 @@ fn weatherHour_isDisplayed(hour: u8) -> bool
 #[cfg(test)]
 mod weatherHour_tests
 {
-	use super::weatherHour_isDisplayed;
+	use super::{WeatherWmoPresentation,weatherHour_isDisplayed};
+	use std::path::Path;
 
 	#[test]
 	fn displayedRange_isInclusiveFromEightToTwentyTwo()
@@ -632,6 +665,34 @@ mod weatherHour_tests
 		assert!(weatherHour_isDisplayed(8));
 		assert!(weatherHour_isDisplayed(22));
 		assert!(!weatherHour_isDisplayed(23));
+	}
+
+	#[test]
+	fn officialWmoCodes_haveKnownPresentationsAndExistingAssets()
+	{
+		let officialCodes = [
+			0,1,2,3,45,48,51,53,55,56,57,61,63,65,66,67,71,73,75,77,80,81,82,85,86,95,96,99,
+		];
+		for code in officialCodes
+		{
+			let presentation = WeatherWmoPresentation::from_code(code);
+			assert_ne!(presentation.translationKey,"MODULE_WEATHER_UNKNOWN","missing WMO code {code}");
+			let asset = Path::new(env!("CARGO_MANIFEST_DIR"))
+				.join("static/public/weather")
+				.join(format!("{}.png",presentation.image));
+			assert!(asset.is_file(),"missing weather asset {}",asset.display());
+		}
+	}
+
+	#[test]
+	fn wmoCloudAndFrozenPrecipitation_useDistinctPresentations()
+	{
+		assert_eq!(WeatherWmoPresentation::from_code(2).image,"cloudy");
+		assert_eq!(WeatherWmoPresentation::from_code(3).image,"cloud");
+		assert_eq!(WeatherWmoPresentation::from_code(56).translationKey,"MODULE_WEATHER_FREEZING_DRIZZLE");
+		assert_eq!(WeatherWmoPresentation::from_code(66).translationKey,"MODULE_WEATHER_FREEZING_RAIN");
+		assert_eq!(WeatherWmoPresentation::from_code(250).translationKey,"MODULE_WEATHER_UNKNOWN");
+		assert_eq!(WeatherWmoPresentation::from_code(250).image,"cloud");
 	}
 }
 
@@ -681,111 +742,114 @@ fn json_read_hourly_units(result: &mut WeatherApiResult, json: &Value)
 }
 
 #[component]
-fn WeatherDraw(
+fn WeatherConfigDraw(
+	config: ArcRwSignal<WeatherConfig>,
+	update: ArcRwSignal<Cache>,
+	session: ModuleConfigSession,
+) -> impl IntoView
+{
+	let configLocate = config.clone();
+	let updateLocate = update.clone();
+	let locateSession = session.clone();
+	let locateFn = move |_| {
+		if (!locateSession.isActive()) {return;}
+		let Some(window) = window() else {return};
+		let navigator = window.navigator();
+		let Ok(geolocation) = navigator.geolocation() else {return};
+
+		let configLocate = configLocate.clone();
+		let updateLocate = updateLocate.clone();
+		let successSession = locateSession.clone();
+		let on_success = Closure::once(move |pos: Position| {
+			if (!successSession.isActive()) {return;}
+			configLocate.update(|conf| {
+				conf.longitude = pos.coords().longitude();
+				conf.latitude = pos.coords().latitude();
+			});
+			updateLocate.update(|cache| cache.update());
+		});
+		let errorSession = locateSession.clone();
+		let on_error = Closure::once(move |err: PositionError| {
+			if (!errorSession.isActive()) {return;}
+			HWebTrace!("error : {:?}", err);
+		});
+
+		let _ = geolocation.get_current_position_with_error_callback(on_success.as_ref().unchecked_ref(), Some(on_error.as_ref().unchecked_ref()));
+		on_success.forget();
+		on_error.forget();
+	};
+
+	let mut titleF = FieldHelper::new(&config,&update,"MODULE_TITLE_CONF",
+		|d| d.get().title,
+		|ev,inner| inner.title = ev.target().value());
+	titleF.setFullSize();
+	let latitudeF = FieldHelper::new(&config,&update,"MODULE_WEATHER_LATITUDE",
+		|d| d.get().latitude.to_string(),
+		|ev,inner| inner.latitude = ev.target().value().parse::<f64>().unwrap_or(0.0));
+	let longitudeF = FieldHelper::new(&config,&update,"MODULE_WEATHER_LONGITUDE",
+		|d| d.get().longitude.to_string(),
+		|ev,inner| inner.longitude = ev.target().value().parse::<f64>().unwrap_or(0.0));
+	let maxdayF = FieldHelper::new(&config,&update,"MODULE_WEATHER_MAXDAY",
+		|d| d.get().maxday.to_string(),
+		|ev,inner| inner.maxday = ev.target().value().parse::<u8>().unwrap_or(0));
+	view!{
+		<div class="module_config module_weather_config">
+			{titleF.draw()}
+			<div class="module_weather_position_fields">
+				{latitudeF.draw()}
+				{longitudeF.draw()}
+			</div>
+			<div class="module_config_actions">
+				<button type="button" on:click={locateFn}><Translate key="MODULE_WEATHER_LOCATE"/></button>
+			</div>
+			{maxdayF.draw()}
+		</div>
+	}
+}
+
+#[component]
+fn WeatherContentDraw(
 	config: ArcRwSignal<WeatherConfig>,
 	content: ArcRwSignal<Option<WeatherApiResult>>,
-	update: ArcRwSignal<Cache>,
-	editMode: RwSignal<bool>,
 ) -> impl IntoView
 {
 	view!{{move || {
-		let editMode = editMode.get();
-			if editMode
-			{
-				let configLocate = config.clone();
-				let locateFn = move |_| {
-
-					let Some(window) = window() else {return};
-					let navigator = window.navigator();
-
-		            let Ok(geolocation) = navigator.geolocation() else {return};
-
-					let configLocate = configLocate.clone();
-					let on_success = Closure::once(move |pos: Position| {
-						configLocate.update(|conf| {
-							conf.longitude = pos.coords().longitude();
-							conf.latitude = pos.coords().latitude();
-						});
-				    });
-
-				    // ERROR
-				    let on_error = Closure::once(move |err: PositionError| {
-						HWebTrace!("error : {:?}", err);
-				        // TODO
-				    });
-
-					let _ = geolocation.get_current_position_with_error_callback(on_success.as_ref().unchecked_ref(), Some(on_error.as_ref().unchecked_ref()));
-
-				    on_success.forget();
-				    on_error.forget();
-				};
-
-				let mut titleF = FieldHelper::new(&config,&update,"MODULE_TITLE_CONF",
-		                                  |d| d.get().title,
-		                                  |ev,inner| inner.title = ev.target().value());
-				titleF.setFullSize();
-				let latitudeF = FieldHelper::new(&config,&update,"MODULE_WEATHER_LATITUDE",
-		                                  |d| d.get().latitude.to_string(),
-		                                  |ev,inner| inner.latitude = ev.target().value().parse::<f64>().unwrap_or(0.0));
-				let longitudeF = FieldHelper::new(&config,&update,"MODULE_WEATHER_LONGITUDE",
-		                                  |d| d.get().longitude.to_string(),
-		                                  |ev,inner| inner.longitude = ev.target().value().parse::<f64>().unwrap_or(0.0));
-				let maxdayF = FieldHelper::new(&config,&update,"MODULE_WEATHER_MAXDAY",
-		                                  |d| d.get().maxday.to_string(),
-		                                  |ev,inner| inner.maxday = ev.target().value().parse::<u8>().unwrap_or(0));
-				view!{
-				<div class="module_config module_weather_config">
-					{titleF.draw()}
-					<div class="module_weather_position_fields">
-						{latitudeF.draw()}
-						{longitudeF.draw()}
-					</div>
-					<div class="module_config_actions">
-						<button type="button" on:click={locateFn}><Translate key="MODULE_WEATHER_LOCATE"/></button>
-					</div>
-					{maxdayF.draw()}
-				</div>
-				}.into_any()
-			}
-			else
-			{
-				let config = config.clone();
-				view!{
-					{draw_title_if_present(config.get().title.clone())}
-					<div class="module_weather">{
-					content.get().map(|haveContent| {
-						let units = haveContent.unit.clone();
-						haveContent.days.iter().map(|days| {
-							view!{
-								<div class="day" tabindex="0">
-									<span class="module_weather_date">{format!("{:0>2}",days.day.day())}/{format!("{:0>2}",days.day.month() as u8)}</span>
-									<img class="module_weather_icon" src={format!("weather/{}.png",days.codeIntoImg())} alt="" />
-									<span class="module_weather_condition"><Translate key={days.codeIntoTranslate()}/></span>
-									<div class="module_weather_summary">
-										<span class="module_weather_temperatures">
-											<span class="module_weather_temperature module_weather_temperature--minimum" style={Weather::celsiusToColor(days.temp_min)}>
-												<span class="visually_hidden"><TranslateText key="MODULE_WEATHER_MINIMUM_TEMPERATURE"/></span>{days.temp_min}{units.clone().temp}
-											</span>
-											<span class="module_weather_temperature module_weather_temperature--maximum" style={Weather::celsiusToColor(days.temp_max)}>
-												<span class="visually_hidden"><TranslateText key="MODULE_WEATHER_MAXIMUM_TEMPERATURE"/></span>{days.temp_max}{units.clone().temp}
-											</span>
-										</span>
-										<div class="module_weather_secondary">
-											<span class="module_weather_details">
-												<i class="iconoir-wind" aria-hidden="true"/>
-												<span class="visually_hidden"><TranslateText key="MODULE_WEATHER_WIND"/></span>{" "}{days.wind_max}{units.clone().wind}
-											</span>
-											<span class="module_weather_details">
-												<i class="iconoir-heavy-rain" aria-hidden="true"/>
-												<span class="visually_hidden"><TranslateText key="MODULE_WEATHER_PRECIPITATION"/></span>{" "}{days.precipitation}{units.clone().precipitation}
-											</span>
-										</div>
-									</div>
+		let config = config.clone();
+		view!{
+			{draw_title_if_present(config.get().title.clone())}
+			<div class="module_weather">{
+			content.get().map(|haveContent| {
+				let units = haveContent.unit.clone();
+				haveContent.days.iter().map(|days| {
+					view!{
+						<div class="day" tabindex="0">
+							<span class="module_weather_date">{format!("{:0>2}",days.day.day())}/{format!("{:0>2}",days.day.month() as u8)}</span>
+							<img class="module_weather_icon" src={format!("weather/{}.png",days.codeIntoImg())} alt="" />
+							<span class="module_weather_condition"><Translate key={days.codeIntoTranslate()}/></span>
+							<div class="module_weather_summary">
+								<span class="module_weather_temperatures">
+									<span class="module_weather_temperature module_weather_temperature--minimum" style={Weather::celsiusToColor(days.temp_min)}>
+										<span class="visually_hidden"><TranslateText key="MODULE_WEATHER_MINIMUM_TEMPERATURE"/></span>{days.temp_min}{units.clone().temp}
+									</span>
+									<span class="module_weather_temperature module_weather_temperature--maximum" style={Weather::celsiusToColor(days.temp_max)}>
+										<span class="visually_hidden"><TranslateText key="MODULE_WEATHER_MAXIMUM_TEMPERATURE"/></span>{days.temp_max}{units.clone().temp}
+									</span>
+								</span>
+								<div class="module_weather_secondary">
+									<span class="module_weather_details">
+										<i class="iconoir-wind" aria-hidden="true"/>
+										<span class="visually_hidden"><TranslateText key="MODULE_WEATHER_WIND"/></span>{" "}{days.wind_max}{units.clone().wind}
+									</span>
+									<span class="module_weather_details">
+										<i class="iconoir-heavy-rain" aria-hidden="true"/>
+										<span class="visually_hidden"><TranslateText key="MODULE_WEATHER_PRECIPITATION"/></span>{" "}{days.precipitation}{units.clone().precipitation}
+									</span>
 								</div>
-							}
-						}).collect_view()
-					})
-				}</div>}.into_any()
-			}
-		}}}.into_any()
+							</div>
+						</div>
+					}
+				}).collect_view()
+			})
+		}</div>}.into_any()
+	}}}.into_any()
 }

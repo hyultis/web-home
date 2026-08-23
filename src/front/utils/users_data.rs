@@ -4,7 +4,7 @@ use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use argon2::Config;
 use base64ct::{Base64, Encoding};
 use leptos::prelude::codee::string::JsonSerdeCodec;
-use leptos::prelude::{expect_context, Get, GetUntracked, RwSignal, Set, Signal, WriteSignal};
+use leptos::prelude::{expect_context, Effect, Get, GetUntracked, RwSignal, Set, Signal, WriteSignal};
 use leptos_use::{use_cookie_with_options, SameSite, UseCookieOptions};
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +12,7 @@ use crate::api::login::{API_user_login, API_user_logout, API_user_passwordRotati
 use crate::api::login::components::{AccountPreferencesError, PasswordRotationContent, PasswordRotationError, PasswordRotationFinalize};
 use crate::front::utils::all_front_enum::AllFrontLoginEnum;
 use crate::global_security::{generate_salt_raw, hash};
+use crate::HWebTrace;
 
 const COOKIE_MAX_AGE: i64 = 24 * 3600 * 1000;
 #[cfg(any(not(feature="ssr"),test))]
@@ -765,12 +766,34 @@ impl LegacyUserData
 	}
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ClientDisconnectReason
+{
+	LOCAL_CONNECTION_CLOSED,
+	LOCAL_CRYPTO_REMOVED,
+}
+
+impl ClientDisconnectReason
+{
+	pub(crate) fn traceKey_get(self) -> &'static str
+	{
+		return match self
+		{
+			Self::LOCAL_CONNECTION_CLOSED => "local_connection_closed",
+			Self::LOCAL_CRYPTO_REMOVED => "local_crypto_removed",
+		};
+	}
+}
+
 /// Owns the browser stores involved in the local user state and migration.
 #[derive(Clone)]
 pub(crate) struct ClientState
 {
-	preferences: Signal<Option<UserPreferences>>,
-	setPreferences: WriteSignal<Option<UserPreferences>>,
+	preferences: RwSignal<UserPreferences>,
+	preferencesMirror: Signal<Option<UserPreferences>>,
+	setPreferencesMirror: WriteSignal<Option<UserPreferences>>,
+	preferencesMirrorReady: RwSignal<bool>,
+	connection: RwSignal<bool>,
 	preferencesPreview: RwSignal<Option<PreferencesPreview>>,
 	passwordRotationRunning: RwSignal<bool>,
 	crypto: ClientCryptoStorage,
@@ -784,8 +807,12 @@ impl ClientState
 {
 	pub(crate) fn new() -> Self
 	{
-		let (preferences, setPreferences) = UserPreferences::cookie_signalGet();
+		let (preferencesMirror, setPreferencesMirror) = UserPreferences::cookie_signalGet();
 		let crypto = ClientCryptoStorage::new();
+		let initialPreferences = preferencesMirror.get_untracked().unwrap_or_default();
+		let initialConnection = preferencesMirror.get_untracked()
+			.map(|preferences| preferences.connected)
+			.unwrap_or_else(|| crypto.get().is_some());
 		#[cfg(not(feature="ssr"))]
 		{
 			let storageCrypto = crypto.clone();
@@ -798,9 +825,12 @@ impl ClientState
 		}
 		let (legacyCrypto, setLegacyCrypto) = ClientCryptoContext::legacyCookie_signalGet();
 		let (legacy, setLegacy) = LegacyUserData::cookie_signalGet();
-		return Self {
-			preferences,
-			setPreferences,
+		let clientState = Self {
+			preferences: RwSignal::new(initialPreferences),
+			preferencesMirror,
+			setPreferencesMirror,
+			preferencesMirrorReady: RwSignal::new(false),
+			connection: RwSignal::new(initialConnection),
 			preferencesPreview: RwSignal::new(None),
 			passwordRotationRunning: RwSignal::new(false),
 			crypto,
@@ -809,6 +839,19 @@ impl ClientState
 			legacy,
 			setLegacy,
 		};
+		let mirrorState = clientState.clone();
+		Effect::new(move || {
+			if (!mirrorState.preferencesMirrorReady.get())
+			{
+				return;
+			}
+			let mirror = mirrorState.preferencesMirror.get();
+			if (mirrorState.preferencesMirror_reconcile(mirror))
+			{
+				HWebTrace!("client preference mirror restored");
+			}
+		});
+		return clientState;
 	}
 
 	pub(crate) fn expect() -> Self
@@ -819,6 +862,8 @@ impl ClientState
 	pub(crate) fn initialize(&self, defaultLang: impl Into<String>) -> Result<(), ClientCryptoError>
 	{
 		let defaultLang = defaultLang.into();
+		let preferencesMirror = self.preferencesMirror.get_untracked();
+		let preferencesMirrorWasMissing = preferencesMirror.is_none();
 		let legacy = self.legacy.get_untracked();
 		let legacyHadCrypto = legacy.as_ref().and_then(|legacy| legacy.userSalt.as_ref()).is_some();
 		let (legacyPreferences, legacyCrypto) = match legacy.clone()
@@ -830,27 +875,29 @@ impl ClientState
 			None => (None, None),
 		};
 
-		if let Some(mut preferences) = self.preferences.get_untracked()
-		{
-			if (preferences.normalize())
-			{
-				self.setPreferences.set(Some(preferences));
-			}
-		}
-		else
-		{
-			self.setPreferences.set(Some(legacyPreferences.unwrap_or_else(|| UserPreferences::new(defaultLang))));
-		}
-
 		let scopedCrypto = self.legacyCrypto.get_untracked();
+		let localCryptoAvailable = self.crypto.get().is_some()
+			|| scopedCrypto.is_some()
+			|| legacyCrypto.is_some();
+		let mut preferences = preferencesMirror
+			.or(legacyPreferences)
+			.unwrap_or_else(|| UserPreferences::new(defaultLang));
+		preferences.normalize();
+		let connection = preferences.connected
+			|| (preferencesMirrorWasMissing && localCryptoAvailable);
+		self.connection.set(connection);
+		preferences.connected = connection;
+		self.preferences_set(preferences);
+		self.preferencesMirrorReady.set(true);
+
 		if (!self.login_isConnected_untracked())
 		{
-			let mut preferences = self.preferences.get_untracked().unwrap_or_default();
+			let mut preferences = self.preferences.get_untracked();
 			if (preferences.primaryHue != PrimaryHue::default())
 			{
 				preferences.primaryHue = PrimaryHue::default();
 				preferences.valUpdate();
-				self.setPreferences.set(Some(preferences));
+				self.preferences_set(preferences);
 			}
 			let clearResult = if (self.crypto.get().is_some() || self.crypto.error_get().is_some())
 			{
@@ -890,7 +937,7 @@ impl ClientState
 
 	pub(crate) async fn login_apply(&self, crypto: ClientCryptoContext) -> Result<Option<AccountPreferencesError>, AccountPreferencesError>
 	{
-		let currentPreferences = self.preferences.get_untracked().unwrap_or_default();
+		let currentPreferences = self.preferences.get_untracked();
 		let accountPreferencesResult = match API_user_preferences_get().await
 		{
 			Ok(Some(content)) => {
@@ -923,12 +970,13 @@ impl ClientState
 			let _ = error;
 			return Err(AccountPreferencesError::STORAGE_FAILED);
 		}
-		let mut preferences = self.preferences.get_untracked().unwrap_or_default();
+		self.connection.set(true);
+		let mut preferences = self.preferences.get_untracked();
 		preferences.lang = accountPreferences.lang;
 		preferences.primaryHue = accountPreferences.primaryHue;
 		preferences.connected = true;
 		preferences.valUpdate();
-		self.setPreferences.set(Some(preferences));
+		self.preferences_set(preferences);
 		return Ok(warning);
 	}
 
@@ -936,35 +984,31 @@ impl ClientState
 	{
 		let clearResult = self.crypto.clear();
 		let legacyClearResult = self.legacyCookies_clear();
-		let mut preferences = self.preferences.get_untracked().unwrap_or_default();
+		self.connection.set(false);
+		let mut preferences = self.preferences.get_untracked();
 		preferences.primaryHue = PrimaryHue::default();
 		preferences.connected = false;
 		preferences.valUpdate();
 		self.preferencesPreview.set(None);
-		self.setPreferences.set(Some(preferences));
+		self.preferences_set(preferences);
 		return clearResult.and(legacyClearResult);
 	}
 
 	pub(crate) fn refresh(&self)
 	{
-		let mut preferences = self.preferences.get_untracked().unwrap_or_default();
+		let mut preferences = self.preferences.get_untracked();
 		preferences.valUpdate();
-		self.setPreferences.set(Some(preferences));
-	}
-
-	pub(crate) fn login_isConnected(&self) -> bool
-	{
-		return self.preferences.get().map(|preferences| preferences.connected).unwrap_or(false);
+		self.preferences_set(preferences);
 	}
 
 	pub(crate) fn login_isConnected_untracked(&self) -> bool
 	{
-		return self.preferences.get_untracked().map(|preferences| preferences.connected).unwrap_or(false);
+		return self.connection.get_untracked();
 	}
 
-	pub(crate) fn crypto_isAvailable(&self) -> bool
+	pub(crate) fn disconnectReason_get(&self) -> Option<ClientDisconnectReason>
 	{
-		return self.crypto.isAvailable();
+		return Self::disconnectReason_resolve(self.connection.get(),self.crypto.isAvailable());
 	}
 
 	pub(crate) fn crypto_get(&self) -> Option<ClientCryptoContext>
@@ -1117,7 +1161,7 @@ impl ClientState
 		{
 			return preview.lang;
 		}
-		return self.preferences.get().map(|preferences| preferences.lang).unwrap_or_else(|| "EN".to_string());
+		return self.preferences.get().lang;
 	}
 
 	pub(crate) fn lang_get_untracked(&self) -> String
@@ -1126,7 +1170,7 @@ impl ClientState
 		{
 			return preview.lang;
 		}
-		return self.preferences.get_untracked().map(|preferences| preferences.lang).unwrap_or_else(|| "EN".to_string());
+		return self.preferences.get_untracked().lang;
 	}
 
 	pub(crate) fn primaryHue_get(&self) -> u16
@@ -1135,12 +1179,12 @@ impl ClientState
 		{
 			return preview.primaryHue.get();
 		}
-		return self.preferences.get().map(|preferences| preferences.primaryHue.get()).unwrap_or(PrimaryHue::DEFAULT);
+		return self.preferences.get().primaryHue.get();
 	}
 
 	pub(crate) fn preferencesPreview_begin(&self)
 	{
-		let preferences = self.preferences.get_untracked().unwrap_or_default();
+		let preferences = self.preferences.get_untracked();
 		self.preferencesPreview.set(Some(PreferencesPreview::fromPreferences(&preferences)));
 	}
 
@@ -1175,11 +1219,11 @@ impl ClientState
 		let content = crypto.encrypt(&plaintext).map_err(|_| AccountPreferencesError::CRYPTO_FAILED)?;
 		API_user_preferences_set(content).await?;
 
-		let mut preferences = self.preferences.get_untracked().unwrap_or_default();
+		let mut preferences = self.preferences.get_untracked();
 		preferences.lang = accountPreferences.lang;
 		preferences.primaryHue = accountPreferences.primaryHue;
 		preferences.valUpdate();
-		self.setPreferences.set(Some(preferences));
+		self.preferences_set(preferences);
 		self.preferencesPreview.set(None);
 		return Ok(());
 	}
@@ -1187,6 +1231,41 @@ impl ClientState
 	pub(crate) fn preferencesPreview_cancel(&self)
 	{
 		self.preferencesPreview.set(None);
+	}
+
+	fn preferences_set(&self, mut preferences: UserPreferences)
+	{
+		preferences.connected = self.connection.get_untracked();
+		self.preferences.set(preferences.clone());
+		self.setPreferencesMirror.set(Some(preferences));
+	}
+
+	fn preferencesMirror_reconcile(&self, mirror: Option<UserPreferences>) -> bool
+	{
+		let Some(mut preferences) = mirror else {
+			let mut preferences = self.preferences.get_untracked();
+			preferences.connected = self.connection.get_untracked();
+			self.preferences.set(preferences.clone());
+			self.setPreferencesMirror.set(Some(preferences));
+			return true;
+		};
+		preferences.connected = self.connection.get_untracked();
+		preferences.normalize();
+		self.preferences.set(preferences);
+		return false;
+	}
+
+	fn disconnectReason_resolve(connectionAvailable: bool, cryptoAvailable: bool) -> Option<ClientDisconnectReason>
+	{
+		if (!connectionAvailable)
+		{
+			return Some(ClientDisconnectReason::LOCAL_CONNECTION_CLOSED);
+		}
+		if (!cryptoAvailable)
+		{
+			return Some(ClientDisconnectReason::LOCAL_CRYPTO_REMOVED);
+		}
+		return None;
 	}
 
 	fn legacyCookies_clear(&self) -> Result<(), ClientCryptoError>
@@ -1231,7 +1310,7 @@ mod tests
 	use leptos::prelude::{GetUntracked, Owner, Set};
 	use crate::api::login::components::{AccountPreferencesError, PasswordRotationContent, PasswordRotationFinalize};
 	use crate::api::modules::components::ModuleID;
-	use super::{AccountPreferences, ClientCryptoContext, ClientCryptoPending, ClientCryptoStorage, ClientCryptoStorageCompatibility, ClientState, LegacyUserData, PreferencesPreview, PrimaryHue, UserPreferences, CLIENT_CRYPTO_STORAGE_KEY, LEGACY_COOKIE_NAME, LEGACY_CRYPTO_COOKIE_NAME, LEGACY_CRYPTO_COOKIE_PATH, ROOT_COOKIE_PATH};
+	use super::{AccountPreferences, ClientCryptoContext, ClientCryptoPending, ClientCryptoStorage, ClientCryptoStorageCompatibility, ClientDisconnectReason, ClientState, LegacyUserData, PreferencesPreview, PrimaryHue, UserPreferences, CLIENT_CRYPTO_STORAGE_KEY, LEGACY_COOKIE_NAME, LEGACY_CRYPTO_COOKIE_NAME, LEGACY_CRYPTO_COOKIE_PATH, ROOT_COOKIE_PATH};
 
 	fn cookiePath_matches(cookiePath: &str, requestPath: &str) -> bool
 	{
@@ -1435,26 +1514,148 @@ mod tests
 		let owner = Owner::new();
 		owner.with(|| {
 			let clientState = ClientState::new();
-			clientState.setPreferences.set(Some(UserPreferences {
+			clientState.connection.set(true);
+			clientState.preferences_set(UserPreferences {
 				lang: "FR".to_string(),
 				primaryHue: PrimaryHue::new(42).unwrap(),
 				connected: true,
 				updateVal: 3,
-			}));
+			});
 			clientState.preferencesPreview_begin();
 			clientState.crypto.set(ClientCryptoContext::test_get()).unwrap();
 
 			clientState.local_clear().unwrap();
 
-			let preferences = clientState.preferences.get_untracked().unwrap();
+			let preferences = clientState.preferences.get_untracked();
 			assert_eq!(preferences.lang,"FR");
 			assert_eq!(preferences.primaryHue,PrimaryHue::default());
 			assert!(!preferences.connected);
 			assert_eq!(preferences.updateVal,4);
+			assert!(!clientState.login_isConnected_untracked());
 			assert!(clientState.preferencesPreview.get_untracked().is_none());
 			assert!(clientState.crypto.get().is_none());
 		});
 		owner.cleanup();
+	}
+
+	#[test]
+	fn missingPreferenceMirror_recoversFromLocalCrypto()
+	{
+		let owner = Owner::new();
+		owner.with(|| {
+			let clientState = ClientState::new();
+			clientState.crypto.set(ClientCryptoContext::test_get()).unwrap();
+			clientState.setPreferencesMirror.set(None);
+
+			clientState.initialize("FR").unwrap();
+
+			let preferences = clientState.preferences.get_untracked();
+			assert!(clientState.login_isConnected_untracked());
+			assert!(clientState.crypto.get().is_some());
+			assert_eq!(preferences.lang,"FR");
+			assert!(preferences.connected);
+			assert!(clientState.preferencesMirror.get_untracked().is_some());
+		});
+		owner.cleanup();
+	}
+
+	#[test]
+	fn disconnectedPreferenceMirror_remainsFailClosed()
+	{
+		let owner = Owner::new();
+		owner.with(|| {
+			let clientState = ClientState::new();
+			clientState.crypto.set(ClientCryptoContext::test_get()).unwrap();
+			clientState.setPreferencesMirror.set(Some(UserPreferences {
+				lang: "FR".to_string(),
+				primaryHue: PrimaryHue::new(42).unwrap(),
+				connected: false,
+				updateVal: 4,
+			}));
+
+			clientState.initialize("EN").unwrap();
+
+			let preferences = clientState.preferences.get_untracked();
+			assert!(!clientState.login_isConnected_untracked());
+			assert!(clientState.crypto.get().is_none());
+			assert_eq!(preferences.lang,"FR");
+			assert_eq!(preferences.primaryHue,PrimaryHue::default());
+			assert!(!preferences.connected);
+		});
+		owner.cleanup();
+	}
+
+	#[test]
+	fn preferenceMirrorExpiration_preservesRuntimeSessionAndPreferences()
+	{
+		let owner = Owner::new();
+		owner.with(|| {
+			let clientState = ClientState::new();
+			clientState.connection.set(true);
+			clientState.crypto.set(ClientCryptoContext::test_get()).unwrap();
+			clientState.preferences_set(UserPreferences {
+				lang: "FR".to_string(),
+				primaryHue: PrimaryHue::new(42).unwrap(),
+				connected: true,
+				updateVal: 7,
+			});
+
+			assert!(clientState.preferencesMirror_reconcile(None));
+
+			let preferences = clientState.preferences.get_untracked();
+			assert!(clientState.login_isConnected_untracked());
+			assert!(clientState.crypto.get().is_some());
+			assert_eq!(preferences.lang,"FR");
+			assert_eq!(preferences.primaryHue,PrimaryHue::new(42).unwrap());
+			assert!(clientState.preferencesMirror.get_untracked().is_some());
+		});
+		owner.cleanup();
+	}
+
+	#[test]
+	fn preferenceMirrorUpdate_cannotChangeRuntimeConnection()
+	{
+		let owner = Owner::new();
+		owner.with(|| {
+			let clientState = ClientState::new();
+			clientState.connection.set(true);
+			clientState.crypto.set(ClientCryptoContext::test_get()).unwrap();
+			clientState.preferencesMirror_reconcile(Some(UserPreferences {
+				lang: "FR".to_string(),
+				primaryHue: PrimaryHue::new(42).unwrap(),
+				connected: false,
+				updateVal: 8,
+			}));
+
+			assert!(clientState.login_isConnected_untracked());
+			assert!(clientState.preferences.get_untracked().connected);
+
+			clientState.connection.set(false);
+			clientState.preferencesMirror_reconcile(Some(UserPreferences {
+				lang: "EN".to_string(),
+				primaryHue: PrimaryHue::new(84).unwrap(),
+				connected: true,
+				updateVal: 9,
+			}));
+
+			assert!(!clientState.login_isConnected_untracked());
+			assert!(!clientState.preferences.get_untracked().connected);
+		});
+		owner.cleanup();
+	}
+
+	#[test]
+	fn disconnectReason_requiresLocalClosureOrCryptoRemoval()
+	{
+		assert_eq!(ClientState::disconnectReason_resolve(true,true),None);
+		assert_eq!(
+			ClientState::disconnectReason_resolve(false,true),
+			Some(ClientDisconnectReason::LOCAL_CONNECTION_CLOSED),
+		);
+		assert_eq!(
+			ClientState::disconnectReason_resolve(true,false),
+			Some(ClientDisconnectReason::LOCAL_CRYPTO_REMOVED),
+		);
 	}
 
 	#[test]

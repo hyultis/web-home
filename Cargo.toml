@@ -20,7 +20,7 @@ tower-http = { version = "0.6", features = ["fs"], optional = true }
 tower-sessions = "0.15"
 wasm-bindgen = "=0.2.112"
 # lock to wasm-bindgen version
-web-sys = { version = "=0.3.89", features = ["AbortController", "AbortSignal", "BlobPropertyBag", "ClipboardEvent", "CompositionEvent", "DataTransfer", "Document", "DomRect", "Element", "Headers", "HtmlDocument", "HtmlElement", "InputEvent", "KeyboardEvent", "Node", "NodeList", "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamReadResult", "ReferrerPolicy", "Request", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "Selection", "Storage", "Window"] }
+web-sys = { version = "=0.3.89", features = ["AbortController", "AbortSignal", "BlobPropertyBag", "ClipboardEvent", "CompositionEvent", "DataTransfer", "Document", "DomRect", "Element", "Headers", "HtmlDocument", "HtmlElement", "InputEvent", "KeyboardEvent", "Node", "NodeList", "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamReadResult", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "Selection", "Storage", "Window"] }
 wasm-bindgen-futures = "0.4.54"
 js-sys = "0.3.81"
 # end of locked stuff

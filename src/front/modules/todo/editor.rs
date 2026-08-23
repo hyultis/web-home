@@ -22,6 +22,96 @@ use super::MAX_LENGTH;
 use super::document::{TodoBlock,TodoBlockId,TodoBlockKind,TodoEditorDocument,TodoEnterResult,TodoInline};
 
 const SAVE_DELAY_MS: f64 = 5000.0;
+const HISTORY_LIMIT: usize = 128;
+
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+struct TodoEditorCaret
+{
+	blockId: TodoBlockId,
+	byteIndex: usize,
+}
+
+#[derive(Clone,Debug,Eq,PartialEq)]
+struct TodoEditorHistorySnapshot
+{
+	document: TodoEditorDocument,
+	caret: TodoEditorCaret,
+}
+
+#[derive(Clone,Debug,Eq,PartialEq)]
+struct TodoEditorHistoryEntry
+{
+	before: TodoEditorHistorySnapshot,
+	after: TodoEditorHistorySnapshot,
+}
+
+#[derive(Clone,Debug,Default,Eq,PartialEq)]
+struct TodoEditorHistory
+{
+	pending: Option<TodoEditorHistorySnapshot>,
+	undo: Vec<TodoEditorHistoryEntry>,
+	redo: Vec<TodoEditorHistoryEntry>,
+}
+
+impl TodoEditorHistory
+{
+	fn begin(&mut self,document: TodoEditorDocument,caret: TodoEditorCaret)
+	{
+		if (self.pending.is_none())
+		{
+			self.pending = Some(TodoEditorHistorySnapshot {document,caret});
+		}
+	}
+
+	fn cancel(&mut self)
+	{
+		self.pending = None;
+	}
+
+	fn clear(&mut self)
+	{
+		self.pending = None;
+		self.undo.clear();
+		self.redo.clear();
+	}
+
+	fn commit(&mut self,document: TodoEditorDocument,caret: TodoEditorCaret)
+	{
+		let Some(before) = self.pending.take() else {return};
+		if (before.document == document) {return;}
+		if (self.undo.len() >= HISTORY_LIMIT)
+		{
+			self.undo.remove(0);
+		}
+		self.undo.push(TodoEditorHistoryEntry {
+			before,
+			after: TodoEditorHistorySnapshot {document,caret},
+		});
+		self.redo.clear();
+	}
+
+	fn undo_take(&mut self) -> Option<TodoEditorHistorySnapshot>
+	{
+		self.pending = None;
+		let entry = self.undo.pop()?;
+		let snapshot = entry.before.clone();
+		self.redo.push(entry);
+		return Some(snapshot);
+	}
+
+	fn redo_take(&mut self) -> Option<TodoEditorHistorySnapshot>
+	{
+		self.pending = None;
+		let entry = self.redo.pop()?;
+		let snapshot = entry.after.clone();
+		if (self.undo.len() >= HISTORY_LIMIT)
+		{
+			self.undo.remove(0);
+		}
+		self.undo.push(entry);
+		return Some(snapshot);
+	}
+}
 
 #[derive(Clone)]
 struct TodoEditorRuntime
@@ -32,6 +122,7 @@ struct TodoEditorRuntime
 	dirty: ArcRwSignal<bool>,
 	revision: ArcRwSignal<u64>,
 	linksRevision: ArcRwSignal<u64>,
+	history: ArcRwSignal<TodoEditorHistory>,
 	moduleActions: ModuleActionFn,
 	moduleId: ModuleID,
 }
@@ -61,6 +152,14 @@ struct TodoEditorSelection
 
 impl TodoEditorSelection
 {
+	fn caret_get(&self) -> TodoEditorCaret
+	{
+		return TodoEditorCaret {
+			blockId: self.focusBlockId,
+			byteIndex: self.focusByte,
+		};
+	}
+
 	fn single_get(&self) -> Option<(TodoBlockId,HtmlElement,usize,usize)>
 	{
 		if (self.anchorBlockId!=self.focusBlockId || self.anchorElement!=self.focusElement)
@@ -88,6 +187,7 @@ impl TodoEditorRuntime
 			dirty: ArcRwSignal::new(false),
 			revision: ArcRwSignal::new(0),
 			linksRevision: ArcRwSignal::new(0),
+			history: ArcRwSignal::new(TodoEditorHistory::default()),
 			moduleActions,
 			moduleId,
 		};
@@ -112,6 +212,7 @@ impl TodoEditorRuntime
 		{
 			return;
 		}
+		self.history.update(TodoEditorHistory::clear);
 		self.document.set(TodoEditorDocument::source_parse(&source));
 		self.dirty.set(false);
 		self.revision.update(|revision| *revision=revision.wrapping_add(1));
@@ -132,6 +233,39 @@ impl TodoEditorRuntime
 		self.revision.update(|revision| *revision=revision.wrapping_add(1));
 	}
 
+	fn history_begin(&self,caret: TodoEditorCaret)
+	{
+		let document = self.document.get_untracked();
+		self.history.update(|history| history.begin(document,caret));
+	}
+
+	fn history_cancel(&self)
+	{
+		self.history.update(TodoEditorHistory::cancel);
+	}
+
+	fn history_commit(&self,caret: TodoEditorCaret)
+	{
+		let document = self.document.get_untracked();
+		self.history.update(|history| history.commit(document,caret));
+	}
+
+	fn history_restore(&self,redo: bool) -> Option<TodoEditorCaret>
+	{
+		let snapshot = self.history.try_update(|history| if (redo)
+		{
+			history.redo_take()
+		}
+		else
+		{
+			history.undo_take()
+		}).flatten()?;
+		self.document.set(snapshot.document);
+		self.source_sync();
+		self.rebuild_apply();
+		return Some(snapshot.caret);
+	}
+
 	fn block_textInput(
 		&self,
 		id: TodoBlockId,
@@ -141,6 +275,7 @@ impl TodoEditorRuntime
 		shortcutSeparatorInserted: bool,
 	) -> TodoEditorInputResult
 	{
+		self.history_begin(TodoEditorCaret {blockId: id,byteIndex: caretByte});
 		let rawText = rawText.replace("\r\n","\n").replace('\r',"\n");
 		if (rawText.contains('\n') && !isComposing)
 		{
@@ -169,6 +304,7 @@ impl TodoEditorRuntime
 			let text = document.block_get(id).map(|block| block.text_get().to_string()).unwrap_or_default();
 			return (changed || shortcutApplied,shortcutApplied,text);
 		}) else {
+			if (!isComposing) {self.history_cancel();}
 			return TodoEditorInputResult {text: oldText,focus: None};
 		};
 
@@ -179,13 +315,22 @@ impl TodoEditorRuntime
 		if (shortcutApplied)
 		{
 			self.rebuild_apply();
+			if (!isComposing)
+			{
+				self.history_commit(TodoEditorCaret {blockId: id,byteIndex: 0});
+			}
 			return TodoEditorInputResult {text,focus: Some((id,0))};
+		}
+		if (!isComposing)
+		{
+			self.history_commit(TodoEditorCaret {blockId: id,byteIndex: caretByte.min(text.len())});
 		}
 		return TodoEditorInputResult {text,focus: None};
 	}
 
 	fn block_shortcutSpace(&self,id: TodoBlockId,visibleText: &str,markerEnd: usize) -> bool
 	{
+		self.history_begin(TodoEditorCaret {blockId: id,byteIndex: markerEnd});
 		let previousDocument = self.document.get_untracked();
 		let applied = self.document.try_update(|document| {
 			if (!document.block_shortcutSpace_apply(id,visibleText,markerEnd))
@@ -201,10 +346,12 @@ impl TodoEditorRuntime
 		}).unwrap_or(false);
 		if (!applied)
 		{
+			self.history_cancel();
 			return false;
 		}
 		self.source_sync();
 		self.rebuild_apply();
+		self.history_commit(TodoEditorCaret {blockId: id,byteIndex: 0});
 		return true;
 	}
 
@@ -223,10 +370,12 @@ impl TodoEditorRuntime
 		}).flatten();
 		let Some(((focusId,focusByte),structureChanged)) = result else {
 			let text = self.document.with_untracked(|document| document.block_get(id).map(|block| block.text_get().to_string()).unwrap_or_default());
+			self.history_commit(TodoEditorCaret {blockId: id,byteIndex: caretByte.min(text.len())});
 			return TodoEditorInputResult {text,focus: Some((id,caretByte.min(previousDocument.block_get(id).map(|block| block.text_get().len()).unwrap_or_default())))};
 		};
 
 		self.source_sync();
+		self.history_commit(TodoEditorCaret {blockId: focusId,byteIndex: focusByte});
 		if (!structureChanged)
 		{
 			let text = self.document.with_untracked(|document| document.block_get(id).map(|block| block.text_get().to_string()).unwrap_or_default());
@@ -239,6 +388,7 @@ impl TodoEditorRuntime
 
 	fn block_enter(&self,id: TodoBlockId,byteStart: usize,byteEnd: usize) -> Option<(TodoBlockId,usize)>
 	{
+		self.history_begin(TodoEditorCaret {blockId: id,byteIndex: byteStart});
 		let previousDocument = self.document.get_untracked();
 		let result = self.document.try_update(|document| {
 			let result = document.block_enterRange(id,byteStart,byteEnd)?;
@@ -248,14 +398,20 @@ impl TodoEditorRuntime
 				return None;
 			}
 			return Some(result);
-		}).flatten()?;
+		}).flatten();
+		let Some(result) = result else {
+			self.history_cancel();
+			return None;
+		};
 
 		self.source_sync();
 		self.rebuild_apply();
-		return Some(match result {
+		let focus = match result {
 			TodoEnterResult::Inserted(newId) => (newId,0),
 			TodoEnterResult::Unstyled => (id,0),
-		});
+		};
+		self.history_commit(TodoEditorCaret {blockId: focus.0,byteIndex: focus.1});
+		return Some(focus);
 	}
 
 	fn block_rangeReplace(
@@ -267,6 +423,7 @@ impl TodoEditorRuntime
 		replacement: &str,
 	) -> Option<(TodoBlockId,usize)>
 	{
+		self.history_begin(TodoEditorCaret {blockId: secondId,byteIndex: secondByte});
 		let previousDocument = self.document.get_untracked();
 		let focus = self.document.try_update(|document| {
 			let Some(focus) = document.block_rangeReplace(firstId,firstByte,secondId,secondByte,replacement) else {
@@ -279,15 +436,21 @@ impl TodoEditorRuntime
 				return None;
 			}
 			return Some(focus);
-		}).flatten()?;
+		}).flatten();
+		let Some(focus) = focus else {
+			self.history_cancel();
+			return None;
+		};
 		self.source_sync();
 		self.rebuild_apply();
+		self.history_commit(TodoEditorCaret {blockId: focus.0,byteIndex: focus.1});
 		return Some(focus);
 	}
 
 	fn block_backspaceAtStart(&self,id: TodoBlockId) -> Option<(TodoBlockId,usize)>
 	{
 		let kind = self.document.with_untracked(|document| document.block_get(id).map(TodoBlock::kind_get))?;
+		self.history_begin(TodoEditorCaret {blockId: id,byteIndex: 0});
 		let focus = self.document.try_update(|document| {
 			if (kind==TodoBlockKind::Paragraph)
 			{
@@ -298,23 +461,36 @@ impl TodoEditorRuntime
 				return Some((id,0));
 			}
 			return None;
-		}).flatten()?;
+		}).flatten();
+		let Some(focus) = focus else {
+			self.history_cancel();
+			return None;
+		};
 
 		self.source_sync();
 		self.rebuild_apply();
+		self.history_commit(TodoEditorCaret {blockId: focus.0,byteIndex: focus.1});
 		return Some(focus);
 	}
 
 	fn block_deleteAtEnd(&self,id: TodoBlockId) -> Option<(TodoBlockId,usize)>
 	{
-		let caretIndex = self.document.try_update(|document| document.block_mergeNext(id)).flatten()?;
+		let beforeCaret = self.document.with_untracked(|document| document.block_get(id).map(|block| block.text_get().len()))?;
+		self.history_begin(TodoEditorCaret {blockId: id,byteIndex: beforeCaret});
+		let caretIndex = self.document.try_update(|document| document.block_mergeNext(id)).flatten();
+		let Some(caretIndex) = caretIndex else {
+			self.history_cancel();
+			return None;
+		};
 		self.source_sync();
 		self.rebuild_apply();
+		self.history_commit(TodoEditorCaret {blockId: id,byteIndex: caretIndex});
 		return Some((id,caretIndex));
 	}
 
 	fn block_taskToggle(&self,id: TodoBlockId) -> bool
 	{
+		self.history_begin(TodoEditorCaret {blockId: id,byteIndex: 0});
 		let previousDocument = self.document.get_untracked();
 		let toggled = self.document.try_update(|document| {
 			if (!document.block_task_toggle(id))
@@ -330,11 +506,13 @@ impl TodoEditorRuntime
 		}).unwrap_or(false);
 		if (!toggled)
 		{
+			self.history_cancel();
 			return false;
 		}
 
 		self.source_sync();
 		self.rebuild_apply();
+		self.history_commit(TodoEditorCaret {blockId: id,byteIndex: 0});
 		return true;
 	}
 
@@ -413,6 +591,7 @@ fn TodoEditor(
 	let childRuntime = runtime.clone();
 	let contentLength = content.clone();
 	let editorRef = NodeRef::<Div>::new();
+	let beforeInputRuntime = runtime.clone();
 	let inputRuntime = runtime.clone();
 	let compositionRuntime = runtime.clone();
 	let keyRuntime = runtime.clone();
@@ -431,6 +610,9 @@ fn TodoEditor(
 				aria-labelledby={labelId}
 				aria-describedby={format!("{} {}",counterId,helpId)}
 				node_ref=editorRef
+				on:beforeinput=move |_| {
+					todoEditorHistory_begin(beforeInputRuntime.clone(),editorRef);
+				}
 				on:input=move |event| {
 					let inputEvent = event.unchecked_ref::<InputEvent>();
 					let shortcutSeparatorInserted = inputEvent.data()
@@ -607,10 +789,32 @@ fn todoEditorInput_apply(
 	}
 }
 
+fn todoEditorHistory_begin(runtime: TodoEditorRuntime,editorRef: NodeRef<Div>)
+{
+	let Some(editor) = todoEditorElement_get(editorRef) else {return};
+	let Some(selection) = todoEditorSelection_get(&editor) else {return};
+	runtime.history_begin(selection.caret_get());
+}
+
 fn todoEditorKey_apply(runtime: TodoEditorRuntime,editorRef: NodeRef<Div>,event: KeyboardEvent)
 {
 	if (event.is_composing())
 	{
+		return;
+	}
+	let command = (event.ctrl_key() || event.meta_key()) && !event.alt_key();
+	let key = event.key().to_ascii_lowercase();
+	let redo = command && ((key=="z" && event.shift_key()) || key=="y");
+	let undo = command && key=="z" && !event.shift_key();
+	if (undo || redo)
+	{
+		event.prevent_default();
+		if let Some(caret) = runtime.history_restore(redo)
+		{
+			todoEditorText_focusSchedule(
+				runtime.editorId_get(),runtime.blockTextId_get(caret.blockId),caret.byteIndex,
+			);
+		}
 		return;
 	}
 	let Some(editor) = todoEditorElement_get(editorRef) else {return};
@@ -915,7 +1119,11 @@ fn todoEditorLink_open(_: &str)
 #[cfg(test)]
 mod tests
 {
-	use super::{text_truncate,todoEditorUtf16Offset_toByte};
+	use super::{
+		TodoEditorCaret,TodoEditorHistory,TodoEditorHistorySnapshot,text_truncate,
+		todoEditorUtf16Offset_toByte,
+	};
+	use crate::front::modules::todo::document::TodoEditorDocument;
 
 	#[test]
 	fn truncation_keepsUtf8Boundary()
@@ -933,5 +1141,43 @@ mod tests
 		assert_eq!(todoEditorUtf16Offset_toByte("a😀b",2),None);
 		assert_eq!(todoEditorUtf16Offset_toByte("a😀b",3),Some(5));
 		assert_eq!(todoEditorUtf16Offset_toByte("a😀b",4),Some(6));
+	}
+
+	#[test]
+	fn history_restoresDocumentAndCaretInBothDirections()
+	{
+		let before = TodoEditorDocument::source_parse("first");
+		let beforeId = before.blocks_get()[0].id_get();
+		let after = TodoEditorDocument::source_parse("first item");
+		let afterId = after.blocks_get()[0].id_get();
+		let mut history = TodoEditorHistory::default();
+		history.begin(before.clone(),TodoEditorCaret {blockId: beforeId,byteIndex: 5});
+		history.commit(after.clone(),TodoEditorCaret {blockId: afterId,byteIndex: 10});
+
+		assert_eq!(history.undo_take(),Some(TodoEditorHistorySnapshot {
+			document: before,
+			caret: TodoEditorCaret {blockId: beforeId,byteIndex: 5},
+		}));
+		assert_eq!(history.redo_take(),Some(TodoEditorHistorySnapshot {
+			document: after,
+			caret: TodoEditorCaret {blockId: afterId,byteIndex: 10},
+		}));
+	}
+
+	#[test]
+	fn newMutationAfterUndo_clearsRedoHistory()
+	{
+		let first = TodoEditorDocument::source_parse("a");
+		let id = first.blocks_get()[0].id_get();
+		let second = TodoEditorDocument::source_parse("ab");
+		let third = TodoEditorDocument::source_parse("ac");
+		let mut history = TodoEditorHistory::default();
+		history.begin(first.clone(),TodoEditorCaret {blockId: id,byteIndex: 1});
+		history.commit(second,TodoEditorCaret {blockId: id,byteIndex: 2});
+		assert!(history.undo_take().is_some());
+
+		history.begin(first,TodoEditorCaret {blockId: id,byteIndex: 1});
+		history.commit(third,TodoEditorCaret {blockId: id,byteIndex: 2});
+		assert!(history.redo_take().is_none());
 	}
 }

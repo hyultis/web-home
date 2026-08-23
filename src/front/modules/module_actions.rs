@@ -2,6 +2,7 @@ use std::sync::Arc;
 use leptoaster::ToasterContext;
 use crate::front::ai::AiAllowedOrigins;
 use crate::front::modules::module_holder::{ModuleHolder, ModuleHolderEpoch};
+use crate::front::modules::module_positions::{ModulePlacement,ModulePlacementMode};
 use crate::api::modules::components::ModuleID;
 use crate::front::utils::all_front_enum::AllFrontUIEnum;
 use crate::front::ai::automation::AiAutomationEvent;
@@ -16,7 +17,8 @@ pub struct ModuleActionFn
 	pub updateFn: Arc<dyn Fn(ModuleID) + Send + Sync>,
 	pub getFn: Arc<dyn Fn(ModuleID) + Send + Sync>,
 	pub removeFn: Arc<dyn Fn(ModuleID) + Send + Sync>,
-	pub refreshFn: Arc<dyn Fn(ModuleID) + Send + Sync>
+	pub refreshFn: Arc<dyn Fn(ModuleID) + Send + Sync>,
+	pub(super) layoutResolveFn: Arc<dyn Fn(ModuleID,[i32;2],[u32;2],ModulePlacementMode) -> Option<ModulePlacement> + Send + Sync>,
 }
 
 impl ModuleActionFn
@@ -34,6 +36,9 @@ impl ModuleActionFn
 			getFn: Arc::new(Self::module_get( toasterInnerValidate.clone(), true, epoch)),
 			removeFn: Arc::new(Self::module_remove(toasterInnerValidate.clone(), epoch)),
 			refreshFn: Arc::new(Self::module_refresh(toasterInnerValidate.clone(), epoch)),
+			layoutResolveFn: Arc::new(move |moduleId,position,size,mode| {
+				return ModuleHolder::layout_resolve(epoch,moduleId,position,size,mode);
+			}),
 		}
 	}
 
@@ -45,6 +50,11 @@ impl ModuleActionFn
 	pub(super) fn lifecycle_isActive(&self) -> bool
 	{
 		return ModuleHolder::network_isActive(self._epoch);
+	}
+
+	pub(crate) fn module_isActive(&self,moduleId: &ModuleID) -> bool
+	{
+		return ModuleHolder::module_isActive(self._epoch,moduleId);
 	}
 
 	pub(super) fn aiAutomation_eventsPublish(&self,events: Vec<AiAutomationEvent>) -> Vec<AiAutomationEvent>
@@ -73,6 +83,7 @@ impl ModuleActionFn
 			getFn: Arc::new(|_| {}),
 			removeFn: Arc::new(|_| {}),
 			refreshFn: Arc::new(|_| {}),
+			layoutResolveFn: Arc::new(|_,position,_,_| Some(ModulePlacement {position,depth: 0})),
 		};
 	}
 

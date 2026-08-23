@@ -12,7 +12,8 @@ use crate::front::ai::automation::{
 	AiModuleGrant,AiNamedValue,AiTextChoice,AiValidatedAction,AiValue,AiValueDefinition,
 };
 use crate::front::modules::components::{
-	Backable,BoxFuture,Cache,Cacheable,ModuleName,ModuleSizeContrainte,RefreshTime,moduleContent,
+	Backable,BoxFuture,Cache,Cacheable,ModuleConfigViewFn,ModuleName,ModuleSizeContrainte,
+	RefreshTime,moduleContent,
 };
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::browser;
@@ -28,12 +29,13 @@ use domain::{
 use domain::CALENDAR_MAX_REJECTED_SAMPLES;
 #[cfg(feature = "hydrate")]
 use holiday::holidays_get;
-use view::CalendarDraw;
+use view::{CalendarConfigDraw,CalendarDraw};
 use leptoaster::ToasterContext;
 use leptos::prelude::{ArcRwSignal,Get,GetUntracked,IntoAny,RwSignal,Update,ViewFn};
 use leptos::view;
 use std::fmt;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use time::{Date,Duration,Month,OffsetDateTime,PrimitiveDateTime,Time};
 
 const CALENDAR_AI_ACTION_CREATE: &str = "calendar.event.create";
@@ -596,6 +598,22 @@ impl Backable for Calendar
 				moduleId=moduleId.clone()
 			/>
 		}.into_any())
+	}
+
+	fn draw_config(&self,moduleActions: ModuleActionFn,_moduleId: ModuleID) -> Option<ModuleConfigViewFn>
+	{
+		let config = self.config.clone();
+		let runtime = self.runtime.clone();
+		let update = self._update.clone();
+		return Some(Arc::new(move |session| view! {
+			<CalendarConfigDraw
+				config=config.clone()
+				runtime=runtime.clone()
+				update=update.clone()
+				moduleActions=moduleActions.clone()
+				session
+			/>
+		}.into_any()));
 	}
 
 	fn refresh_time(&self) -> RefreshTime

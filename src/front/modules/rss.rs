@@ -1,5 +1,6 @@
 use std::collections::HashSet;
-use leptos::prelude::{AriaAttributes, ClassAttribute, CollectView, ElementChild, GlobalAttributes,event_target_checked};
+use std::sync::Arc;
+use leptos::prelude::{ClassAttribute,CollectView,ElementChild,GlobalAttributes,event_target_checked};
 use feed_rs::model::{Entry,Feed, Link, Text};
 use feed_rs::parser;
 use leptoaster::{ToasterContext};
@@ -9,7 +10,7 @@ use leptos::{component, view, IntoView};
 use serde::{Deserialize, Serialize};
 use crate::api::modules::components::{ModuleContent, ModuleID};
 use crate::api::proxys::wget::{API_proxys_wget};
-use crate::front::modules::components::{distant_time_simpler, Backable, BoxFuture, Cache, Cacheable, FieldHelper, ModuleName, ModuleSizeContrainte, RefreshTime};
+use crate::front::modules::components::{distant_time_simpler, Backable, BoxFuture, Cache, Cacheable, FieldHelper, ModuleConfigViewFn, ModuleName, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::ai::automation::{
 	AiAutomationCapable,AiAutomationError,AiAutomationEvent,AiCapabilityCatalog,AiEventCapability,
@@ -17,7 +18,7 @@ use crate::front::ai::automation::{
 	AiExposureFuture,AiExposureRequest,AiModuleGrant,AiNamedValue,AiValue,AiValueDefinition,
 };
 use crate::front::utils::toaster_helpers::toaster_api;
-use crate::front::utils::translate::{Translate, TranslateText};
+use crate::front::utils::translate::TranslateText;
 use crate::front::utils::SafeExternalUrl;
 use crate::global_security::hash;
 
@@ -674,16 +675,24 @@ impl Backable for Rss
 		Rss::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>, _moduleActions: ModuleActionFn, _: ModuleID) -> ViewFn
+	fn draw(&self, _editMode: RwSignal<bool>, _moduleActions: ModuleActionFn, _: ModuleID) -> ViewFn
 	{
 		let configInner = self.config.clone();
 		let contentInner = self.rssContent.clone();
-		let updateInner = self._update.clone();
 		ViewFn::from(move || {
 			view! {
-				<RssDraw config=configInner.clone() content=contentInner.clone() update=updateInner.clone() editMode=editMode/>
+				<RssContentDraw config=configInner.clone() content=contentInner.clone()/>
 			}.into_any()
 		})
+	}
+
+	fn draw_config(&self,_moduleActions: ModuleActionFn,_moduleId: ModuleID) -> Option<ModuleConfigViewFn>
+	{
+		let config = self.config.clone();
+		let update = self._update.clone();
+		return Some(Arc::new(move |_| view! {
+			<RssConfigDraw config=config.clone() update=update.clone()/>
+		}.into_any()));
 	}
 
 	fn refresh_time(&self) -> RefreshTime {
@@ -748,105 +757,93 @@ impl Backable for Rss
 }
 
 #[component]
-fn RssDraw(config: ArcRwSignal<RssConfig>,
-           content: ArcRwSignal<Option<(u64,Feed)>>,
-           update: ArcRwSignal<Cache>,
-           editMode: RwSignal<bool>) -> impl IntoView
+fn RssConfigDraw(config: ArcRwSignal<RssConfig>,update: ArcRwSignal<Cache>) -> impl IntoView
 {
-	view! {{move || {
-		let editMode = editMode.get();
-			if editMode
-			{
-				let mut titleF = FieldHelper::new(&config,&update,"MODULE_TITLE_CONF",
-					|d| d.get().title,
-					|ev,inner| inner.title = ev.target().value());
-				titleF.setFullSize();
-				let mut linkF = FieldHelper::new(&config,&update,"MODULE_RSS_LINK",
-					|d| d.get().link,
-					|ev,inner| inner.link_set(ev.target().value()));
-				linkF.setFullSize();
-				let maxLineF = FieldHelper::new(&config,&update,"MODULE_RSS_MAXLINE",
-					|d| d.get().maxline.to_string(),
-					|ev,inner| inner.maxline = ev.target().value().parse::<u8>().unwrap_or(10));
-				let aiEventCheckedConfig = config.clone();
-				let aiEventChangeConfig = config.clone();
-				let aiEventChangeCache = update.clone();
-				let aiFieldsConfig = config.clone();
-				let aiFieldsCache = update.clone();
-				let aiFieldChoices = [
-					(RSS_AI_FIELD_FEED_TITLE,"MODULE_RSS_AI_FIELD_FEED_TITLE"),
-					(RSS_AI_FIELD_TITLE,"MODULE_RSS_AI_FIELD_TITLE"),
-					(RSS_AI_FIELD_LINK,"MODULE_RSS_AI_FIELD_LINK"),
-					(RSS_AI_FIELD_PUBLISHED,"MODULE_RSS_AI_FIELD_PUBLISHED"),
-					(RSS_AI_FIELD_UPDATED,"MODULE_RSS_AI_FIELD_UPDATED"),
-					(RSS_AI_FIELD_SUMMARY,"MODULE_RSS_AI_FIELD_SUMMARY"),
-					(RSS_AI_FIELD_CONTENT,"MODULE_RSS_AI_FIELD_CONTENT"),
-				];
+	let mut titleF = FieldHelper::new(&config,&update,"MODULE_TITLE_CONF",
+		|d| d.get().title,
+		|ev,inner| inner.title = ev.target().value());
+	titleF.setFullSize();
+	let mut linkF = FieldHelper::new(&config,&update,"MODULE_RSS_LINK",
+		|d| d.get().link,
+		|ev,inner| inner.link_set(ev.target().value()));
+	linkF.setFullSize();
+	let maxLineF = FieldHelper::new(&config,&update,"MODULE_RSS_MAXLINE",
+		|d| d.get().maxline.to_string(),
+		|ev,inner| inner.maxline = ev.target().value().parse::<u8>().unwrap_or(10));
+	let aiEventCheckedConfig = config.clone();
+	let aiEventChangeConfig = config.clone();
+	let aiEventChangeCache = update.clone();
+	let aiFieldsConfig = config.clone();
+	let aiFieldsCache = update.clone();
+	let aiFieldChoices = [
+		(RSS_AI_FIELD_FEED_TITLE,"MODULE_RSS_AI_FIELD_FEED_TITLE"),
+		(RSS_AI_FIELD_TITLE,"MODULE_RSS_AI_FIELD_TITLE"),
+		(RSS_AI_FIELD_LINK,"MODULE_RSS_AI_FIELD_LINK"),
+		(RSS_AI_FIELD_PUBLISHED,"MODULE_RSS_AI_FIELD_PUBLISHED"),
+		(RSS_AI_FIELD_UPDATED,"MODULE_RSS_AI_FIELD_UPDATED"),
+		(RSS_AI_FIELD_SUMMARY,"MODULE_RSS_AI_FIELD_SUMMARY"),
+		(RSS_AI_FIELD_CONTENT,"MODULE_RSS_AI_FIELD_CONTENT"),
+	];
 
-				view!{
-					<div class="module_config module_rss_config">
-						{titleF.draw()}
-						{linkF.draw()}
-						{maxLineF.draw()}
-						<fieldset class="module_ai_permissions">
-							<legend><TranslateText key="MODULE_AI_PERMISSIONS"/></legend>
+	view!{
+		<div class="module_config module_rss_config">
+			{titleF.draw()}
+			{linkF.draw()}
+			{maxLineF.draw()}
+			<fieldset class="module_ai_permissions">
+				<legend><TranslateText key="MODULE_AI_PERMISSIONS"/></legend>
+				<label class="module_ai_permission">
+					<input
+						type="checkbox"
+						prop:checked=move || aiEventCheckedConfig.get().aiEvent_isEnabled()
+						on:change=move |event| {
+							aiEventChangeConfig.update(|config| config.aiEvent_set(event_target_checked(&event)));
+							aiEventChangeCache.update(|cache| cache.update());
+						}
+					/>
+					<span><TranslateText key="MODULE_RSS_AI_NEW_EVENT"/></span>
+				</label>
+				<p class="module_config_help"><TranslateText key="MODULE_RSS_AI_HELP"/></p>
+				<div class="module_ai_permission_fields">
+					{aiFieldChoices.into_iter().map(|(field,translateKey)| {
+						let checkedConfig = aiFieldsConfig.clone();
+						let enabledConfig = aiFieldsConfig.clone();
+						let changeConfig = aiFieldsConfig.clone();
+						let changeCache = aiFieldsCache.clone();
+						view! {
 							<label class="module_ai_permission">
 								<input
 									type="checkbox"
-									prop:checked=move || aiEventCheckedConfig.get().aiEvent_isEnabled()
+									disabled=move || !enabledConfig.get().aiEvent_isEnabled()
+									prop:checked=move || checkedConfig.get().aiField_isEnabled(field)
 									on:change=move |event| {
-										aiEventChangeConfig.update(|config| config.aiEvent_set(event_target_checked(&event)));
-										aiEventChangeCache.update(|cache| cache.update());
+										changeConfig.update(|config| config.aiField_set(field,event_target_checked(&event)));
+										changeCache.update(|cache| cache.update());
 									}
 								/>
-								<span><TranslateText key="MODULE_RSS_AI_NEW_EVENT"/></span>
+								<span><TranslateText key=translateKey/></span>
 							</label>
-							<p class="module_config_help"><TranslateText key="MODULE_RSS_AI_HELP"/></p>
-							<div class="module_ai_permission_fields">
-								{aiFieldChoices.into_iter().map(|(field,translateKey)| {
-									let checkedConfig = aiFieldsConfig.clone();
-									let enabledConfig = aiFieldsConfig.clone();
-									let changeConfig = aiFieldsConfig.clone();
-									let changeCache = aiFieldsCache.clone();
-									view! {
-										<label class="module_ai_permission">
-											<input
-												type="checkbox"
-												disabled=move || !enabledConfig.get().aiEvent_isEnabled()
-												prop:checked=move || checkedConfig.get().aiField_isEnabled(field)
-												on:change=move |event| {
-													changeConfig.update(|config| config.aiField_set(field,event_target_checked(&event)));
-													changeCache.update(|cache| cache.update());
-												}
-											/>
-											<span><TranslateText key=translateKey/></span>
-										</label>
-									}
-								}).collect_view()}
-							</div>
-						</fieldset>
-						<div class="module_config_preview">
-							<span class="module_config_section_title"><Translate key="MODULE_RSS_DEMO"/></span>
-							<table class="module_rss_table" aria-hidden="true"><tbody><tr>
-								<td class="module_rss_age">{"0d"}</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse nulla nisi, faucibus ut eros non, porttitor posuere ante.</td>
-							</tr></tbody></table>
-						</div>
-					</div>
-				}.into_any()
-			}
-			else
-			{
-				view!{{
-					let config = config.clone();
-					content.get().map(|(_,mut rssContent)|{
+						}
+					}).collect_view()}
+				</div>
+			</fieldset>
+		</div>
+	}
+}
 
-					view!{
-						<>
-						<div class="module_titlebar">
-							<h2 class="module_title">{Rss::utils_title(config.get().title,rssContent.title)}</h2>
-							<div class="module_title_actions">{Rss::utils_desc(&rssContent.description)}{Rss::utils_link(rssContent.links)}</div>
-						</div>
-						<div class="module_rss_upper">
+#[component]
+fn RssContentDraw(config: ArcRwSignal<RssConfig>,content: ArcRwSignal<Option<(u64,Feed)>>) -> impl IntoView
+{
+	view!{{move || {
+		let config = config.clone();
+		content.get().map(|(_,mut rssContent)|{
+			view!{
+				<>
+					<div class="module_titlebar">
+						<h2 class="module_title">{Rss::utils_title(config.get().title,rssContent.title)}</h2>
+						<div class="module_title_actions">{Rss::utils_desc(&rssContent.description)}{Rss::utils_link(rssContent.links)}</div>
+					</div>
+					<div class="module_rss_upper">
 						<table class="module_rss_table"><tbody>
 						{   rssContent.entries.sort_by(|a,b| a.published.cmp(&b.published).reverse());
 							rssContent.entries.iter().enumerate()
@@ -874,14 +871,11 @@ fn RssDraw(config: ArcRwSignal<RssConfig>,
 							}).collect_view()
 						}
 						</tbody></table>
-						</div>
-						</>
-					}.into_any()
-				})
-				}
-				}.into_any()
-			}
-			}}}.into_any()
+					</div>
+				</>
+			}.into_any()
+		})
+	}}}.into_any()
 }
 
 #[cfg(test)]

@@ -22,7 +22,9 @@ use crate::front::ai::inbox::{
 use crate::front::modules::components::{API_return_apply, ApiCall, Backable, BoxFuture, Cacheable, ModuleName, PausableStocker, RefreshTime};
 use crate::front::modules::link::LinksHolder;
 use crate::front::modules::module_actions;
-use crate::front::modules::module_positions::ModulePositions;
+use crate::front::modules::module_positions::{
+	ModulePlacement,ModulePlacementMode,ModulePositions,ModuleRect,modulePosition_freeFind,modulePosition_nearestFreeFind,
+};
 use crate::front::modules::module_type::ModuleType;
 use crate::front::utils::all_front_enum::{AllFrontErrorEnum, AllFrontUIEnum};
 use crate::front::utils::toaster_helpers;
@@ -82,17 +84,48 @@ mod tests
 	};
 	use crate::front::ai::chat::{AiChatHolder,ChatDocument};
 	use crate::front::ai::inbox::{AiInboxAction,AiInboxDocument,AiInboxEntry,AiInboxHolder};
-	use crate::front::modules::components::{API_return_apply,PausableStocker};
+	use crate::front::modules::components::{API_return_apply,Backable,PausableStocker};
+	use crate::front::modules::link::LinksHolder;
+	use crate::front::modules::mail::Mail;
 	use crate::front::modules::module_actions::ModuleActionFn;
-	use crate::front::modules::module_positions::ModulePositions;
+	use crate::front::modules::module_positions::{ModulePlacementMode,ModulePositions};
 	use crate::front::modules::module_type::ModuleType;
+	use crate::front::modules::calendar::Calendar;
+	use crate::front::modules::rss::Rss;
 	use crate::front::modules::todo::Todo;
+	use crate::front::modules::weather::Weather;
 	use crate::front::utils::all_front_enum::AllFrontErrorEnum;
 	use crate::front::utils::users_data::ClientCryptoContext;
 	use leptoaster::ToasterContext;
-	use leptos::prelude::{ArcRwSignal,GetUntracked,Owner};
+	use leptos::prelude::{ArcRwSignal,GetUntracked,Owner,WithUntracked};
 
 	use super::ModuleHolder;
+
+	#[test]
+	fn positionableModulesExposeConfigurationButLinksRemainExcluded()
+	{
+		let parentOwner = Owner::new();
+		parentOwner.with(|| {
+			let mut holder = ModuleHolder::new();
+			let (epoch,_) = holder.lifecycle_open_inner();
+			let moduleActions = ModuleActionFn::test_get(epoch);
+			let moduleId = ModuleID {id: "configuration-contract".to_string()};
+			let modules = [
+				ModuleType::RSS(Rss::new()),
+				ModuleType::TODO(Todo::new()),
+				ModuleType::MAIL(Mail::default()),
+				ModuleType::WEATHER(Weather::default()),
+				ModuleType::CALENDAR(Calendar::default()),
+			];
+
+			for module in modules
+			{
+				assert!(module.draw_config(moduleActions.clone(),moduleId.clone()).is_some());
+			}
+			assert!(LinksHolder::new().draw_config(moduleActions,moduleId).is_none());
+		});
+		parentOwner.cleanup();
+	}
 
 	#[test]
 	fn networkError_authRequiredMarksLocalSessionInvalid()
@@ -504,6 +537,109 @@ mod tests
 				.collect::<Vec<_>>();
 
 			assert_eq!(orderedIds,["upper-left-a","upper-left-b","upper-right","lower"]);
+		});
+		parentOwner.cleanup();
+	}
+
+	#[test]
+	fn newModule_isPlacedBelowCollisionAndAboveExistingDepths()
+	{
+		let parentOwner = Owner::new();
+		parentOwner.with(|| {
+			let mut holder = ModuleHolder::new();
+			let (epoch,_) = holder.lifecycle_open_inner();
+			let existingId = ModuleID {id: "existing".to_string()};
+			holder._blocks.insert(
+				existingId.clone(),
+				ArcRwSignal::new(ModulePositions::newFromModuleContent(ModuleContent {
+					id: existingId,size: [100,100],depth: 7,..Default::default()
+				},ModuleType::TODO(Todo::new()))),
+			);
+
+			holder.blocks_insert(epoch,ModulePositions::new(ModuleType::TODO(Todo::new())));
+
+			let inserted = holder._blocks.iter()
+				.find(|(id,_)| id.id != "existing")
+				.map(|(_,module)| module.with_untracked(ModulePositions::export))
+				.unwrap();
+			assert_eq!(inserted.pos,[0,112]);
+			assert_eq!(inserted.size,[150,150]);
+			assert_eq!(inserted.depth,8);
+		});
+		parentOwner.cleanup();
+	}
+
+	#[test]
+	fn newModule_usesItsDeclaredMinimumSize()
+	{
+		let module = ModulePositions::new(ModuleType::CALENDAR(Calendar::default()));
+
+		assert_eq!(module.export().size,[420,360]);
+	}
+
+	#[test]
+	fn fixedResize_rejectsCollisionWithoutMovingTheModule()
+	{
+		let parentOwner = Owner::new();
+		parentOwner.with(|| {
+			let mut holder = ModuleHolder::new();
+			let (epoch,_) = holder.lifecycle_open_inner();
+			let resizedId = ModuleID {id: "resized".to_string()};
+			let obstacleId = ModuleID {id: "obstacle".to_string()};
+			for (moduleId,position,size,depth) in [
+				(resizedId.clone(),[10,20],[150,150],2),
+				(obstacleId.clone(),[180,20],[100,100],7),
+			]
+			{
+				holder._blocks.insert(
+					moduleId.clone(),
+					ArcRwSignal::new(ModulePositions::newFromModuleContent(ModuleContent {
+						id: moduleId,pos: position,size,depth,..Default::default()
+					},ModuleType::TODO(Todo::new()))),
+				);
+			}
+
+			let accepted = holder.layout_resolve_inner(
+				epoch,&resizedId,[10,20],[170,150],ModulePlacementMode::Fixed,
+			).unwrap();
+			assert_eq!(accepted.position,[10,20]);
+			assert_eq!(accepted.depth,2);
+			assert!(holder.layout_resolve_inner(
+				epoch,&resizedId,[10,20],[171,150],ModulePlacementMode::Fixed,
+			).is_none());
+
+			let unchanged = holder._blocks[&resizedId]
+				.with_untracked(ModulePositions::export);
+			assert_eq!(unchanged.pos,[10,20]);
+			assert_eq!(unchanged.size,[150,150]);
+			assert_eq!(unchanged.depth,2);
+		});
+		parentOwner.cleanup();
+	}
+
+	#[test]
+	fn loadedOverlaps_areResolvedDeterministically()
+	{
+		let parentOwner = Owner::new();
+		parentOwner.with(|| {
+			let mut holder = ModuleHolder::new();
+			for (id,depth) in [("first",0),("second",1)]
+			{
+				let moduleId = ModuleID {id: id.to_string()};
+				holder._blocks.insert(
+					moduleId.clone(),
+					ArcRwSignal::new(ModulePositions::newFromModuleContent(ModuleContent {
+						id: moduleId,size: [100,100],depth,..Default::default()
+					},ModuleType::TODO(Todo::new()))),
+				);
+			}
+
+			holder.layout_normalize();
+
+			assert_eq!(holder._blocks[&ModuleID {id: "first".to_string()}]
+				.with_untracked(ModulePositions::export).pos,[0,0]);
+			assert_eq!(holder._blocks[&ModuleID {id: "second".to_string()}]
+				.with_untracked(ModulePositions::export).pos,[0,112]);
 		});
 		parentOwner.cleanup();
 	}
@@ -2117,6 +2253,7 @@ impl ModuleHolder
 		}
 		toApply.retrieve.into_iter().for_each(|f| f(self));
 		toApply.update.into_iter().for_each(|f| f(self));
+		self.layout_normalize();
 
 		return self.module_refresh_prepare(epoch, toApply.moduleIdToRefresh.drain(..).collect(), toaster);
 	}
@@ -2748,6 +2885,120 @@ impl ModuleHolder
 		return &self._blocks;
 	}
 
+	pub(super) fn module_isActive(epoch: ModuleHolderEpoch,moduleId: &ModuleID) -> bool
+	{
+		return Self::getSingleton().with_untracked(|holder| {
+			return holder.lifecycle_epoch_isActive(epoch) && holder._blocks.contains_key(moduleId);
+		});
+	}
+
+	pub(super) fn layout_resolve(
+		epoch: ModuleHolderEpoch,
+		moduleId: ModuleID,
+		position: [i32;2],
+		size: [u32;2],
+		mode: ModulePlacementMode,
+	) -> Option<ModulePlacement>
+	{
+		return Self::getSingleton().try_update(|holder| {
+			return holder.layout_resolve_inner(epoch,&moduleId,position,size,mode);
+		}).flatten();
+	}
+
+	fn layout_resolve_inner(
+		&mut self,
+		epoch: ModuleHolderEpoch,
+		moduleId: &ModuleID,
+		position: [i32;2],
+		size: [u32;2],
+		mode: ModulePlacementMode,
+	) -> Option<ModulePlacement>
+	{
+		if (!self.lifecycle_epoch_isActive(epoch)) {return None;}
+		let currentDepth = self._blocks.get(moduleId)?
+			.with_untracked(ModulePositions::depth_get);
+		let occupied = self._blocks.iter()
+			.filter(|(id,_)| *id != moduleId)
+			.map(|(_,module)| module.with_untracked(ModulePositions::rect_get))
+			.collect::<Vec<_>>();
+		let requested = ModuleRect::new(position,size);
+		let position = match mode
+		{
+			ModulePlacementMode::Fixed => {
+				if (occupied.iter().any(|occupied| requested.intersects(*occupied)))
+				{
+					return None;
+				}
+				return Some(ModulePlacement {position: requested.position_get(),depth: currentDepth});
+			},
+			ModulePlacementMode::Nearest => modulePosition_nearestFreeFind(requested,&occupied),
+		}?;
+		let maximumOtherDepth = self._blocks.iter()
+			.filter(|(id,_)| *id != moduleId)
+			.map(|(_,module)| module.with_untracked(ModulePositions::depth_get))
+			.max();
+		let depth = if (maximumOtherDepth.is_none_or(|maximum| currentDepth > maximum))
+		{
+			currentDepth
+		}
+		else
+		{
+			self.layout_frontDepthNext()
+		};
+		return Some(ModulePlacement {position,depth});
+	}
+
+	fn layout_frontDepthNext(&mut self) -> u32
+	{
+		let Some(maximum) = self._blocks.values()
+			.map(|module| module.with_untracked(ModulePositions::depth_get))
+			.max()
+		else {return 0};
+		if (maximum < u32::MAX)
+		{
+			return maximum + 1;
+		}
+
+		let mut ordered = self._blocks.iter()
+			.map(|(id,module)| (id.clone(),module.with_untracked(ModulePositions::depth_get)))
+			.collect::<Vec<_>>();
+		ordered.sort_by(|(leftId,leftDepth),(rightId,rightDepth)| {
+			return leftDepth.cmp(rightDepth).then_with(|| leftId.cmp(rightId));
+		});
+		for (index,(id,_)) in ordered.iter().enumerate()
+		{
+			if let Some(module) = self._blocks.get(id)
+			{
+				module.with_untracked(|module| module.depth_set(index as u32));
+			}
+		}
+		return ordered.len() as u32;
+	}
+
+	fn layout_normalize(&mut self)
+	{
+		let mut ordered = self._blocks.iter()
+			.map(|(id,module)| (id.clone(),module.clone()))
+			.collect::<Vec<_>>();
+		ordered.sort_by(|(leftId,leftModule),(rightId,rightModule)| {
+			let leftOrder = leftModule.with_untracked(|module| module.visual_order_get());
+			let rightOrder = rightModule.with_untracked(|module| module.visual_order_get());
+			return leftOrder.cmp(&rightOrder).then_with(|| leftId.cmp(rightId));
+		});
+		let mut occupied = Vec::with_capacity(ordered.len());
+		for (_,module) in ordered
+		{
+			let rect = module.with_untracked(ModulePositions::rect_get);
+			let Some(position) = modulePosition_freeFind(rect,&occupied) else {continue};
+			let resolved = ModuleRect::new(position,[rect.width,rect.height]);
+			if (position != rect.position_get())
+			{
+				module.with_untracked(|module| module.position_set(position));
+			}
+			occupied.push(resolved);
+		}
+	}
+
 	pub fn blocks_view(&self) -> Vec<(ModuleID, ArcRwSignal<ModulePositions<ModuleType>>)> {
 		let mut blocks = self._blocks
 			.iter()
@@ -2767,7 +3018,12 @@ impl ModuleHolder
 		{
 			return;
 		}
-		newmodule.depth_set(self._blockNb as u32);
+		let occupied = self._blocks.values()
+			.map(|module| module.with_untracked(ModulePositions::rect_get))
+			.collect::<Vec<_>>();
+		let Some(position) = modulePosition_freeFind(newmodule.rect_get(),&occupied) else {return};
+		newmodule.position_set(position);
+		newmodule.depth_set(self.layout_frontDepthNext());
 		self._blocks.insert(ModuleID::new(), ArcRwSignal::new(newmodule));
 		self._blockNb += 1;
 	}

@@ -3,6 +3,7 @@ mod editor;
 
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 use leptoaster::ToasterContext;
 use leptos::prelude::{ClassAttribute,ElementChild,Get,GetUntracked,IntoAny,OnAttribute,PropAttribute,Set,Update,event_target_checked};
 use leptos::prelude::{ArcRwSignal, RwSignal};
@@ -15,7 +16,7 @@ use crate::front::ai::automation::{
 	AiAutomationError,AiCapabilityCatalog,AiModuleGrant,AiNamedValue,AiTextChoice,AiValidatedAction,
 	AiValue,AiValueDefinition,
 };
-use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleName, ModuleSizeContrainte, RefreshTime};
+use crate::front::modules::components::{Backable, BoxFuture, Cache, Cacheable, ModuleConfigViewFn, ModuleName, ModuleSizeContrainte, RefreshTime};
 use crate::front::modules::module_actions::ModuleActionFn;
 use crate::front::utils::translate::TranslateText;
 
@@ -371,23 +372,29 @@ impl Backable for Todo
 		Todo::MODULE_NAME.to_string()
 	}
 
-	fn draw(&self, editMode: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> ViewFn
+	fn draw(&self, _editMode: RwSignal<bool>,moduleActions: ModuleActionFn, moduleId: ModuleID) -> ViewFn
 	{
 		let contentInner = self.content.clone();
-		let aiGrantInner = self.aiGrant.clone();
 		let updateInner = self._update.clone();
 		ViewFn::from(move || {
 			return view! {
 				<TodoDraw
 					content=contentInner.clone()
-					aiGrant=aiGrantInner.clone()
 					update=updateInner.clone()
-					editMode
 					moduleActions=moduleActions.clone()
 					moduleId=moduleId.clone()
 				/>
 			}.into_any();
 		})
+	}
+
+	fn draw_config(&self,_moduleActions: ModuleActionFn,_moduleId: ModuleID) -> Option<ModuleConfigViewFn>
+	{
+		let aiGrant = self.aiGrant.clone();
+		let update = self._update.clone();
+		return Some(Arc::new(move |_| view! {
+			<TodoAiPermissions aiGrant=aiGrant.clone() update=update.clone()/>
+		}.into_any()));
 	}
 
 	fn refresh_time(&self) -> RefreshTime {
@@ -448,28 +455,12 @@ impl Backable for Todo
 #[component]
 fn TodoDraw(
 	content: ArcRwSignal<String>,
-	aiGrant: ArcRwSignal<AiModuleGrant>,
 	update: ArcRwSignal<Cache>,
-	editMode: RwSignal<bool>,
 	moduleActions: ModuleActionFn,
 	moduleId: ModuleID,
 ) -> impl IntoView
 {
-	let permissionGrant = aiGrant.clone();
-	let permissionCache = update.clone();
-	view! {
-		<>
-			{editor::draw(content,update,moduleActions,moduleId)}
-			{move || if (editMode.get())
-			{
-				view! {<TodoAiPermissions aiGrant=permissionGrant.clone() update=permissionCache.clone()/>}.into_any()
-			}
-			else
-			{
-				view! {}.into_any()
-			}}
-		</>
-	}
+	return editor::draw(content,update,moduleActions,moduleId);
 }
 
 #[component]

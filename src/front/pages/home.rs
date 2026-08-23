@@ -54,15 +54,17 @@ pub fn Home() -> impl IntoView
 		}
 	});
 
-	// user data checker to force disconnect
+	// local client revocation checker
 	let toasterInner = toaster.clone();
 	let clientStateConnection = clientState.clone();
 	let dialogManagerConnection = dialogManager.clone();
 	let disconnectRequested = RwSignal::new(false);
 	Effect::new(move || {
-		if ((!clientStateConnection.login_isConnected() || !clientStateConnection.crypto_isAvailable()) && !disconnectRequested.get_untracked())
+		let Some(disconnectReason) = clientStateConnection.disconnectReason_get() else {return};
+		if (!disconnectRequested.get_untracked())
 		{
 			disconnectRequested.set(true);
+			HWebTrace!("automatic client logout requested: {}",disconnectReason.traceKey_get());
 			let callback = user_disconnected(hooks::use_navigate(), toasterInner.clone(), clientStateConnection.clone(), dialogManagerConnection.clone(), false);
 			callback(());
 		}

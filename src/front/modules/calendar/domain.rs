@@ -405,6 +405,14 @@ pub(super) struct CalendarCreateInput
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum CalendarEditScope
+{
+	Event,
+	Occurrence,
+	Series,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum CalendarCreateError
 {
 	MissingTitle,

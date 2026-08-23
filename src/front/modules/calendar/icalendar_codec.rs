@@ -2,7 +2,7 @@ use icalendar::{Calendar, CalendarDateTime, Component, DatePerhapsTime, Event, E
 use time::{Date, OffsetDateTime, PrimitiveDateTime, UtcOffset};
 
 use super::domain::{
-	CalendarCreateInput, CalendarCreateMoment, CalendarEvent, CalendarEventIdentity, CalendarMoment,
+	CalendarCreateInput, CalendarCreateMoment, CalendarEditScope, CalendarEvent, CalendarEventIdentity, CalendarMoment,
 	CalendarRecurrenceEnd, CalendarRecurrenceFrequency, CalendarRejectedEvent,
 	CalendarRejectedReason, CALENDAR_MAX_REJECTED_SAMPLES,
 };
@@ -292,6 +292,151 @@ pub(super) fn build_event(
 	return Ok(CalendarBuiltEvent {uid,content});
 }
 
+pub(super) fn update_event(
+	input: &str,
+	uid: &str,
+	occurrenceId: Option<&str>,
+	occurrence: Option<&CalendarMoment>,
+	editScope: CalendarEditScope,
+	update: &CalendarCreateInput,
+	now: OffsetDateTime,
+) -> Result<String,CalendarCodecError>
+{
+	if (input.len() > CALENDAR_MAX_ICALENDAR_BYTES)
+	{
+		return Err(CalendarCodecError::InputTooLarge);
+	}
+	update_fields_validate(update,uid)?;
+	let mut calendar: Calendar = input.parse().map_err(|_| CalendarCodecError::InvalidCalendar)?;
+	match editScope
+	{
+		CalendarEditScope::Event | CalendarEditScope::Series =>
+		{
+			let event = calendar.events_mut()
+				.find(|event| event.get_uid() == Some(uid) && event.get_recurrence_id().is_none())
+				.ok_or(CalendarCodecError::MasterEventNotFound)?;
+			event_fields_update(event,update,now)?;
+		},
+		CalendarEditScope::Occurrence =>
+		{
+			let occurrence = occurrence.ok_or(CalendarCodecError::UnsupportedDateTime)?;
+			let masterIsRecurring = calendar.events()
+				.any(|event| event.get_uid() == Some(uid)
+					&& event.get_recurrence_id().is_none()
+					&& event.property_value("RRULE").is_some());
+			if (!masterIsRecurring)
+			{
+				return Err(CalendarCodecError::EventIsNotRecurring);
+			}
+			let existing = calendar.events().any(|event| {
+				event_occurrence_matches(event,uid,occurrenceId,occurrence,&update.timezone)
+			});
+			if (existing)
+			{
+				let event = calendar.events_mut()
+					.find(|event| event_occurrence_matches(event,uid,occurrenceId,occurrence,&update.timezone))
+					.ok_or(CalendarCodecError::InvalidCalendar)?;
+				event_fields_update(event,update,now)?;
+			}
+			else
+			{
+				let mut event = Event::with_uid(uid);
+				event.append_property(moment_property("RECURRENCE-ID",occurrence)?);
+				event_fields_update(&mut event,update,now)?;
+				calendar.push(event);
+			}
+		},
+	}
+	if (matches!(update.start,CalendarCreateMoment::Local(_)))
+	{
+		calendar.properties.retain(|property| property.key() != "X-WR-TIMEZONE");
+		calendar.timezone(update.timezone.clone());
+	}
+	let content = calendar.to_string();
+	if (content.len() > CALENDAR_MAX_ICALENDAR_BYTES)
+	{
+		return Err(CalendarCodecError::InputTooLarge);
+	}
+	return Ok(content);
+}
+
+fn update_fields_validate(input: &CalendarCreateInput,uid: &str) -> Result<(),CalendarCodecError>
+{
+	input.validate().map_err(|_| CalendarCodecError::InvalidCreateInput)?;
+	if (uid.is_empty() || uid.len() > CALENDAR_MAX_UID_BYTES
+		|| input.title.len() > CALENDAR_MAX_TITLE_BYTES
+		|| input.location.len() > CALENDAR_MAX_LOCATION_BYTES
+		|| input.description.len() > CALENDAR_MAX_DESCRIPTION_BYTES)
+	{
+		return Err(CalendarCodecError::FieldTooLarge);
+	}
+	return Ok(());
+}
+
+fn event_fields_update(
+	event: &mut Event,
+	input: &CalendarCreateInput,
+	now: OffsetDateTime,
+) -> Result<(),CalendarCodecError>
+{
+	event.summary(input.title.trim());
+	if (input.description.is_empty())
+	{
+		event.remove_property("DESCRIPTION");
+	}
+	else
+	{
+		event.description(&input.description);
+	}
+	if (input.location.is_empty())
+	{
+		event.remove_property("LOCATION");
+	}
+	else
+	{
+		event.location(&input.location);
+	}
+	event.remove_property("DTSTART");
+	event.remove_property("DTEND");
+	event.remove_property("DURATION");
+	match (&input.start,&input.end)
+	{
+		(CalendarCreateMoment::AllDay(start),CalendarCreateMoment::AllDay(end)) =>
+		{
+			event.starts(*start).ends(*end);
+		},
+		(CalendarCreateMoment::Local(start),CalendarCreateMoment::Local(end)) =>
+		{
+			event.append_property(local_property("DTSTART",*start,&input.timezone));
+			event.append_property(local_property("DTEND",*end,&input.timezone));
+		},
+		_ => return Err(CalendarCodecError::InvalidCreateInput),
+	}
+	let sequence = event.get_sequence().unwrap_or(0).saturating_add(1);
+	event.sequence(sequence);
+	event.append_property(Property::new("DTSTAMP",format_utc(now)));
+	return Ok(());
+}
+
+fn event_occurrence_matches(
+	event: &Event,
+	uid: &str,
+	occurrenceId: Option<&str>,
+	occurrence: &CalendarMoment,
+	floatingTimezone: &str,
+) -> bool
+{
+	if (event.get_uid() != Some(uid)) {return false;}
+	let Some(property) = event.properties().get("RECURRENCE-ID") else {return false};
+	if (occurrenceId.is_some_and(|occurrenceId| property_identity(property) == occurrenceId))
+	{
+		return true;
+	}
+	return DatePerhapsTime::from_property(property)
+		.and_then(|moment| moment_from_icalendar(moment,floatingTimezone).ok())
+		.as_ref() == Some(occurrence);
+}
+
 fn recurrence_format(
 	recurrence: &super::domain::CalendarRecurrence,
 	start: &CalendarCreateMoment,
@@ -334,6 +479,7 @@ fn local_property(name: &str, dateTime: PrimitiveDateTime, timezone: &str) -> Pr
 pub(super) fn exclude_occurrence(
 	input: &str,
 	uid: &str,
+	occurrenceId: Option<&str>,
 	occurrence: &CalendarMoment,
 	now: OffsetDateTime,
 ) -> Result<String,CalendarCodecError>
@@ -361,6 +507,10 @@ pub(super) fn exclude_occurrence(
 	let sequence = event.get_sequence().unwrap_or(0).saturating_add(1);
 	event.sequence(sequence);
 	event.append_property(Property::new("DTSTAMP",format_utc(now)));
+	calendar.components.retain(|component| {
+		let Some(event) = component.as_event() else {return true};
+		return !event_occurrence_matches(event,uid,occurrenceId,occurrence,"UTC");
+	});
 	let content = calendar.to_string();
 	if (content.len() > CALENDAR_MAX_ICALENDAR_BYTES)
 	{
@@ -369,6 +519,7 @@ pub(super) fn exclude_occurrence(
 	return Ok(content);
 }
 
+#[cfg(test)]
 pub(super) fn event_is_recurring(input: &str, uid: &str) -> Result<bool,CalendarCodecError>
 {
 	if (input.len() > CALENDAR_MAX_ICALENDAR_BYTES)
@@ -388,13 +539,18 @@ pub(super) fn event_is_recurring(input: &str, uid: &str) -> Result<bool,Calendar
 
 fn occurrence_property(occurrence: &CalendarMoment) -> Result<Property,CalendarCodecError>
 {
-	return match occurrence
+	return moment_property("EXDATE",occurrence);
+}
+
+fn moment_property(name: &str,moment: &CalendarMoment) -> Result<Property,CalendarCodecError>
+{
+	return match moment
 	{
-		CalendarMoment::AllDay(date) => Ok(Property::new("EXDATE",format_date(*date)).add_parameter("VALUE","DATE").done()),
+		CalendarMoment::AllDay(date) => Ok(Property::new(name,format_date(*date)).add_parameter("VALUE","DATE").done()),
 		CalendarMoment::Timed(timestamp) =>
 		{
 			let dateTime = OffsetDateTime::from_unix_timestamp(*timestamp).map_err(|_| CalendarCodecError::UnsupportedDateTime)?;
-			Ok(Property::new("EXDATE",format_utc(dateTime)))
+			Ok(Property::new(name,format_utc(dateTime)))
 		},
 	};
 }
@@ -426,9 +582,10 @@ mod tests
 {
 	use super::{
 		CalendarResourceSource, build_event, event_is_recurring, exclude_occurrence, parse_expanded_events,
+		update_event,
 	};
 	use crate::front::modules::calendar::domain::{
-		CalendarCreateInput, CalendarCreateMoment, CalendarMoment, CalendarRecurrence,
+		CalendarCreateInput, CalendarCreateMoment, CalendarEditScope, CalendarMoment, CalendarRecurrence,
 		CalendarRecurrenceEnd, CalendarRecurrenceFrequency, CalendarRejectedReason,
 	};
 	use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset};
@@ -518,13 +675,14 @@ mod tests
 	#[test]
 	fn excludeOccurrence_preservesMasterAndIncrementsSequence()
 	{
-		let input = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\nBEGIN:VEVENT\r\nUID:series\r\nDTSTART:20260813T080000Z\r\nDTEND:20260813T090000Z\r\nRRULE:FREQ=DAILY\r\nSEQUENCE:2\r\nSUMMARY:Daily\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+		let input = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\nBEGIN:VEVENT\r\nUID:series\r\nDTSTART:20260813T080000Z\r\nDTEND:20260813T090000Z\r\nRRULE:FREQ=DAILY\r\nSEQUENCE:2\r\nSUMMARY:Daily\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:series\r\nRECURRENCE-ID:20260814T080000Z\r\nDTSTART:20260814T100000Z\r\nDTEND:20260814T110000Z\r\nSUMMARY:Overridden\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
 
-		let updated = exclude_occurrence(input,"series",&CalendarMoment::Timed(1_786_694_400),OffsetDateTime::from_unix_timestamp(1_786_608_000).unwrap()).unwrap();
+		let updated = exclude_occurrence(input,"series",None,&CalendarMoment::Timed(1_786_694_400),OffsetDateTime::from_unix_timestamp(1_786_608_000).unwrap()).unwrap();
 
 		assert!(updated.contains("EXDATE:20260814T080000Z"));
 		assert!(updated.contains("SEQUENCE:3"));
 		assert!(updated.contains("SUMMARY:Daily"));
+		assert!(!updated.contains("SUMMARY:Overridden"));
 	}
 
 	#[test]
@@ -535,5 +693,64 @@ mod tests
 
 		assert_eq!(event_is_recurring(recurring,"series"),Ok(true));
 		assert_eq!(event_is_recurring(simple,"single"),Ok(false));
+	}
+
+	#[test]
+	fn seriesUpdate_preservesRecurrenceAndExclusions()
+	{
+		let source = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:series\r\nDTSTART:20260813T080000Z\r\nDTEND:20260813T090000Z\r\nRRULE:FREQ=DAILY\r\nEXDATE:20260814T080000Z\r\nSUMMARY:Old\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+		let input = CalendarCreateInput {
+			title: "Updated".to_string(),
+			description: "Description".to_string(),
+			location: "Office".to_string(),
+			start: CalendarCreateMoment::Local(PrimitiveDateTime::new(
+				Date::from_calendar_date(2026,Month::August,13).unwrap(),Time::from_hms(10,0,0).unwrap(),
+			)),
+			end: CalendarCreateMoment::Local(PrimitiveDateTime::new(
+				Date::from_calendar_date(2026,Month::August,13).unwrap(),Time::from_hms(11,0,0).unwrap(),
+			)),
+			timezone: "Europe/Paris".to_string(),
+			recurrence: None,
+		};
+		let updated = update_event(
+			source,"series",None,None,CalendarEditScope::Series,&input,
+			OffsetDateTime::from_unix_timestamp(1_786_608_000).unwrap(),
+		).unwrap();
+
+		assert!(updated.contains("UID:series"));
+		assert!(updated.contains("RRULE:FREQ=DAILY"));
+		assert!(updated.contains("EXDATE:20260814T080000Z"));
+		assert!(updated.contains("SUMMARY:Updated"));
+		assert!(updated.contains("DTSTART;TZID=Europe/Paris:20260813T100000"));
+		assert_eq!(updated.matches("X-WR-TIMEZONE:Europe/Paris").count(),1);
+	}
+
+	#[test]
+	fn occurrenceUpdate_createsOneExplicitException()
+	{
+		let source = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:series\r\nDTSTART:20260813T080000Z\r\nDTEND:20260813T090000Z\r\nRRULE:FREQ=DAILY\r\nSUMMARY:Old\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+		let input = CalendarCreateInput {
+			title: "Moved occurrence".to_string(),
+			description: String::new(),
+			location: String::new(),
+			start: CalendarCreateMoment::Local(PrimitiveDateTime::new(
+				Date::from_calendar_date(2026,Month::August,14).unwrap(),Time::from_hms(11,0,0).unwrap(),
+			)),
+			end: CalendarCreateMoment::Local(PrimitiveDateTime::new(
+				Date::from_calendar_date(2026,Month::August,14).unwrap(),Time::from_hms(12,0,0).unwrap(),
+			)),
+			timezone: "Europe/Paris".to_string(),
+			recurrence: None,
+		};
+		let updated = update_event(
+			source,"series",None,Some(&CalendarMoment::Timed(1_786_694_400)),
+			CalendarEditScope::Occurrence,&input,
+			OffsetDateTime::from_unix_timestamp(1_786_608_000).unwrap(),
+		).unwrap();
+
+		assert_eq!(updated.matches("UID:series").count(),2);
+		assert!(updated.contains("RECURRENCE-ID:20260814T080000Z"));
+		assert!(updated.contains("SUMMARY:Moved occurrence"));
+		assert!(updated.contains("RRULE:FREQ=DAILY"));
 	}
 }

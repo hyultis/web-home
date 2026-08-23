@@ -13,14 +13,15 @@ use url::Url;
 #[cfg(feature = "hydrate")]
 use super::domain::{
 	CALENDAR_MAX_COLLECTIONS,CALENDAR_MAX_COLLECTION_NAME_BYTES,CALENDAR_MAX_REJECTED_SAMPLES,CALENDAR_MAX_URL_BYTES,
-	CalendarCollection,CalendarConfig,CalendarEvent,CalendarPeriod,
+	CalendarCollection,CalendarConfig,CalendarEditScope,CalendarEvent,CalendarPeriod,
 };
 use super::domain::CalendarConfigError;
 #[cfg(any(feature = "hydrate",test))]
 use super::icalendar_codec::CalendarCodecError;
 #[cfg(feature = "hydrate")]
 use super::icalendar_codec::{
-	CalendarParsedEvents,CalendarResourceSource,build_event,event_is_recurring,exclude_occurrence,parse_expanded_events,
+	CalendarParsedEvents,CalendarResourceSource,build_event,exclude_occurrence,parse_expanded_events,
+	update_event,
 };
 #[cfg(feature = "hydrate")]
 use super::domain::CalendarCreateInput;
@@ -52,6 +53,7 @@ pub(super) enum CalDavError
 	InvalidResponse,
 	InvalidCalendar,
 	MissingEtag,
+	MoveIncomplete,
 }
 
 #[cfg(any(feature = "hydrate",test))]
@@ -404,7 +406,7 @@ mod browser
 	use wasm_bindgen_futures::JsFuture;
 	use web_sys::{
 		AbortController, Headers, ReadableStreamDefaultReader, ReadableStreamReadResult, ReferrerPolicy,
-		Request, RequestCredentials, RequestInit, RequestMode, RequestRedirect, Response,
+		Request, RequestCache, RequestCredentials, RequestInit, RequestMode, RequestRedirect, Response,
 	};
 
 	const CALDAV_TIMEOUT_MS: u32 = 20_000;
@@ -601,6 +603,88 @@ mod browser
 			return eventCreateStatus_validate(response.status,alreadyExistingIsSuccess);
 		}
 
+		pub async fn event_master_get(
+			&self,
+			event: &CalendarEvent,
+			floatingTimezone: &str,
+		) -> Result<CalendarEvent,CalDavError>
+		{
+			let (resourceUrl,response,etag) = self.event_resource_read(event).await?;
+			let source = CalendarResourceSource {
+				collectionHref: event.identity.collectionHref.clone(),
+				collectionName: event.collectionName.clone(),
+				collectionColor: event.collectionColor.clone(),
+				resourceHref: resourceUrl.to_string(),
+				etag: Some(etag),
+			};
+			return parse_expanded_events(&response.body,&source,floatingTimezone)?
+				.events.into_iter()
+				.find(|parsed| parsed.identity.uid == event.identity.uid && parsed.identity.occurrenceId.is_none())
+				.ok_or(CalDavError::InvalidCalendar);
+		}
+
+		pub async fn event_update(
+			&self,
+			event: &CalendarEvent,
+			targetCollection: &CalendarCollection,
+			input: &CalendarCreateInput,
+			editScope: CalendarEditScope,
+		) -> Result<(),CalDavError>
+		{
+			let sourceCollectionUrl = href_resolve(&self.baseUrl,&event.identity.collectionHref)?;
+			let targetCollectionUrl = href_resolve(&self.baseUrl,&targetCollection.href)?;
+			let sameCollection = sourceCollectionUrl == targetCollectionUrl;
+			let (sourceResourceUrl,response,sourceEtag) = self.event_resource_read(event).await?;
+			let occurrence = event.occurrence.as_ref().unwrap_or(&event.start);
+			if (editScope == CalendarEditScope::Occurrence && !sameCollection)
+			{
+				let mut standaloneInput = input.clone();
+				standaloneInput.recurrence = None;
+				let standaloneUid = uuid::Uuid::new_v4().to_string();
+				let built = build_event(&standaloneInput,standaloneUid,OffsetDateTime::now_utc())?;
+				let targetResourceUrl = self.event_targetResource_get(&targetCollectionUrl)?;
+				let targetResponse = self.event_resourceCreate(&targetCollectionUrl,&targetResourceUrl,&built.content).await?;
+				let updatedSource = exclude_occurrence(
+					&response.body,&event.identity.uid,event.identity.occurrenceId.as_deref(),occurrence,
+					OffsetDateTime::now_utc(),
+				)?;
+				let sourceResult = self.event_resourceReplace(&sourceResourceUrl,&sourceEtag,&updatedSource).await;
+				if let Err(error) = sourceResult
+				{
+					if (!self.event_createdResourceRollback(&targetResourceUrl,targetResponse.etag.as_deref()).await)
+					{
+						return Err(CalDavError::MoveIncomplete);
+					}
+					return Err(error);
+				}
+				return Ok(());
+			}
+
+			let updated = update_event(
+				&response.body,&event.identity.uid,event.identity.occurrenceId.as_deref(),
+				Some(occurrence),editScope,input,OffsetDateTime::now_utc(),
+			)?;
+			if (sameCollection)
+			{
+				return self.event_resourceReplace(&sourceResourceUrl,&sourceEtag,&updated).await;
+			}
+
+			let targetResourceUrl = self.event_targetResource_get(&targetCollectionUrl)?;
+			let targetResponse = self.event_resourceCreate(&targetCollectionUrl,&targetResourceUrl,&updated).await?;
+			let deleteResult = self.request(
+				"DELETE",&sourceResourceUrl,&[("If-Match",sourceEtag.as_str())],None,CALDAV_MAX_DISCOVERY_BYTES,
+			).await.and_then(|response| status_expect(response.status,&[200,204]));
+			if let Err(error) = deleteResult
+			{
+				if (!self.event_createdResourceRollback(&targetResourceUrl,targetResponse.etag.as_deref()).await)
+				{
+					return Err(CalDavError::MoveIncomplete);
+				}
+				return Err(error);
+			}
+			return Ok(());
+		}
+
 		pub async fn event_delete_series(&self, event: &CalendarEvent) -> Result<(),CalDavError>
 		{
 			let resourceUrl = self.event_resource_get(event)?;
@@ -614,9 +698,12 @@ mod browser
 			let resourceUrl = self.event_resource_get(event)?;
 			let response = self.request("GET",&resourceUrl,&[],None,CALDAV_MAX_RESOURCE_BYTES).await?;
 			status_expect(response.status,&[200])?;
-			let etag = response.etag.or_else(|| event.etag.clone()).ok_or(CalDavError::MissingEtag)?;
+			let etag = response.etag.ok_or(CalDavError::MissingEtag)?;
 			let occurrence = event.occurrence.as_ref().unwrap_or(&event.start);
-			let updated = exclude_occurrence(&response.body,&event.identity.uid,occurrence,OffsetDateTime::now_utc())?;
+			let updated = exclude_occurrence(
+				&response.body,&event.identity.uid,event.identity.occurrenceId.as_deref(),occurrence,
+				OffsetDateTime::now_utc(),
+			)?;
 			let response = self.request(
 				"PUT",&resourceUrl,
 				&[("Content-Type","text/calendar; charset=utf-8"),("If-Match",etag.as_str())],
@@ -625,12 +712,70 @@ mod browser
 			return status_expect(response.status,&[200,201,204]);
 		}
 
-		pub async fn event_recurrence_get(&self, event: &CalendarEvent) -> Result<bool,CalDavError>
+		async fn event_resource_read(
+			&self,
+			event: &CalendarEvent,
+		) -> Result<(Url,DavHttpResponse,String),CalDavError>
 		{
 			let resourceUrl = self.event_resource_get(event)?;
 			let response = self.request("GET",&resourceUrl,&[],None,CALDAV_MAX_RESOURCE_BYTES).await?;
 			status_expect(response.status,&[200])?;
-			return event_is_recurring(&response.body,&event.identity.uid).map_err(Into::into);
+			let etag = response.etag.clone().ok_or(CalDavError::MissingEtag)?;
+			return Ok((resourceUrl,response,etag));
+		}
+
+		fn event_targetResource_get(&self,collectionUrl: &Url) -> Result<Url,CalDavError>
+		{
+			let resourceUrl = collection_directory_get(collectionUrl)
+				.join(&format!("{}.ics",uuid::Uuid::new_v4())).map_err(|_| CalDavError::InvalidConfiguration)?;
+			if (!collection_resource_contains(collectionUrl,&resourceUrl))
+			{
+				return Err(CalDavError::InvalidConfiguration);
+			}
+			return Ok(resourceUrl);
+		}
+
+		async fn event_resourceCreate(
+			&self,
+			collectionUrl: &Url,
+			resourceUrl: &Url,
+			content: &str,
+		) -> Result<DavHttpResponse,CalDavError>
+		{
+			if (!collection_resource_contains(collectionUrl,resourceUrl))
+			{
+				return Err(CalDavError::InvalidConfiguration);
+			}
+			let response = self.request(
+				"PUT",resourceUrl,
+				&[("Content-Type","text/calendar; charset=utf-8"),("If-None-Match","*")],
+				Some(content),CALDAV_MAX_DISCOVERY_BYTES,
+			).await?;
+			eventCreateStatus_validate(response.status,false)?;
+			return Ok(response);
+		}
+
+		async fn event_resourceReplace(
+			&self,
+			resourceUrl: &Url,
+			etag: &str,
+			content: &str,
+		) -> Result<(),CalDavError>
+		{
+			let response = self.request(
+				"PUT",resourceUrl,
+				&[("Content-Type","text/calendar; charset=utf-8"),("If-Match",etag)],
+				Some(content),CALDAV_MAX_DISCOVERY_BYTES,
+			).await?;
+			return status_expect(response.status,&[200,201,204]);
+		}
+
+		async fn event_createdResourceRollback(&self,resourceUrl: &Url,etag: Option<&str>) -> bool
+		{
+			let etag = etag.unwrap_or("*");
+			return self.request(
+				"DELETE",resourceUrl,&[("If-Match",etag)],None,CALDAV_MAX_DISCOVERY_BYTES,
+			).await.and_then(|response| status_expect(response.status,&[200,204])).is_ok();
 		}
 
 		fn event_resource_get(&self, event: &CalendarEvent) -> Result<Url,CalDavError>
@@ -667,6 +812,7 @@ mod browser
 			let requestInit = RequestInit::new();
 			requestInit.set_method(method);
 			requestInit.set_headers_headers(&requestHeaders);
+			requestInit.set_cache(RequestCache::NoStore);
 			requestInit.set_credentials(RequestCredentials::Omit);
 			requestInit.set_mode(RequestMode::Cors);
 			requestInit.set_redirect(RequestRedirect::Error);

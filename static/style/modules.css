@@ -39,6 +39,13 @@
 	background: var(--color-surface-2);
 }
 
+.module_header_actions
+{
+	display: flex;
+	align-items: center;
+	gap: var(--space-1);
+}
+
 .module_handle
 {
 	width: var(--control-height-compact);
@@ -79,6 +86,17 @@
 .module_remove_button
 {
 	color: var(--color-danger);
+}
+
+.module_config_button
+{
+	color: var(--color-accent);
+}
+
+.module_content--preview
+{
+	pointer-events: none;
+	user-select: none;
 }
 
 .module_remove_button:hover:not(:disabled)
@@ -277,13 +295,30 @@
 	opacity: 0.55;
 }
 
-.module_config_preview
+.dialog-content .module_config .module_config_field,
+.dialog-content .module_config .module_ai_permission,
+.dialog-content .module_config .module_calendar_checkbox_option,
+.dialog-content .module_config .module_calendar_collection_choice
 {
-	overflow: hidden;
-	padding: var(--space-2);
-	border: 1px solid var(--color-border);
-	border-radius: var(--radius-control);
-	background: var(--color-surface-2);
+	margin-top: 0;
+}
+
+.dialog-content .module_config .module_ai_permission,
+.dialog-content .module_config .module_calendar_checkbox_option
+{
+	display: flex;
+	grid-template-columns: none;
+}
+
+.dialog-content .module_config .module_calendar_collection_choice
+{
+	display: grid;
+	grid-template-columns: auto auto minmax(0, 1fr);
+}
+
+.dialog-content .module_config :where(.module_ai_permission, .module_calendar_checkbox_option, .module_calendar_collection_choice) input
+{
+	width: auto;
 }
 
 .module_todo_layout
@@ -836,7 +871,6 @@
 	white-space: nowrap;
 }
 
-.module_mail_connection_fields,
 .module_weather_position_fields
 {
 	display: grid;
@@ -1836,7 +1870,6 @@
 		padding: var(--space-2);
 	}
 
-	.module_mail_connection_fields,
 	.module_weather_position_fields,
 	.module_calendar_connection_fields,
 	.module_calendar_form_row

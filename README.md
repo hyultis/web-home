@@ -7,17 +7,19 @@ The project was originally created in PHP in 2013 and is now built in Rust with 
 ## Features
 
 - Links
-- Notes and to-do lists
+- Continuous notes and to-do editor with headings, lists, persistent checkable tasks and automatic HTTP(S) links
 - RSS feeds
 - Weather forecasts
 - Email reading, attachments and mark-as-read actions through IMAP
-- CalDAV calendars with month/week views and event creation or deletion
-- Encrypted client-side AI configuration, an account-wide Chat workspace and explicit module automations
-- English and French interface selected from the browser language
+- Multi-collection CalDAV calendars with month/week views, recurring events, weekend and holiday highlighting, and event creation, editing or deletion
+- Account settings for English/French language selection, primary hue customization and password changes
+- Encrypted client-side AI configuration, an account-wide Chat workspace, saved alerts and explicit module automations
 
-![WebHome dashboard](example.png)
+## Screenshots
 
-![WebHome edit mode](example_edit.png)
+| Dashboard | Module configuration in edit mode |
+| :---: | :---: |
+| [![WebHome dashboard](example.png)](example.png) | [![WebHome edit mode with a module configuration dialog](example_edit.png)](example_edit.png) |
 
 ## Run WebHome
 
@@ -31,23 +33,9 @@ cargo leptos watch --wasm-debug
 
 WebHome is available at `http://127.0.0.1:3002` by default.
 
-### Docker
+### Docker example
 
-Build the image with:
-
-```bash
-./docker/build.sh
-```
-
-The provided `docker/docker-compose.yml` is intended to be copied into the deployment directory. It expects writable `config` and `dynamic` directories beside it:
-
-```bash
-mkdir -p config dynamic
-sudo chown -R 1000:1000 config dynamic
-docker compose up --detach
-```
-
-The container listens on port `3002` inside the Docker network named `internal_web`. The default Compose file does not publish this port on the host; a reverse proxy on the same network can reach the service as `webhome:3002`.
+A functional Docker image, build script and Compose configuration are available in [`docker/`](docker/). They are provided as a deployment example and should be adapted to the target environment.
 
 ## Configuration
 
@@ -64,14 +52,31 @@ WebHome creates `config/site.json` on first start. User records are stored under
 
 Back up the complete `config` directory. It contains the server salt and all persistent user records.
 
-## AI providers and automations
+## To-do editor
 
-WebHome supports one active direct connection per account: OpenAI API, Anthropic, Gemini, Mistral or Ollama. The user supplies the provider credential; a ChatGPT/Codex subscription is not an OpenAI API credential, and Codex account login is not integrated.
+The to-do module stays directly editable: typing a supported marker followed by a space at the beginning of a line changes that line in place.
 
-- Chat calls start only when the user sends a message. An automation call requires an enabled context, a module grant and a new module event; no LLM request starts merely because the dashboard loads or refreshes.
-- Automations run only while `/home` is open and the account is connected. There is no permanent backend worker. Actions are checked locally against the current module, permission and closed argument schema; confirmation is the default, while automatic mutation requires an explicit opt-in.
-- Browser-side accident limits allow at most two provider requests at once, one active automation, four matching contexts per event, eight requested actions per response, 32 queued events, and 10 calls per hour / 50 per day for each context. The configurable output limit is 256 to 8,192 tokens. These limits do not enforce a quota against a modified client, and a provider may already have charged work before a timeout or cancellation.
-- Ollama server validation and model installation are explicit user actions. Installing a model can be large and may take up to 30 minutes before WebHome aborts the local wait.
+| Input | Result |
+| --- | --- |
+| `# `, `## ` or `### ` | Heading |
+| `- ` | Simple list item |
+| `* ` | Unchecked task |
+| `*x ` | Completed task, kept visible and crossed out |
+| `http://...` or `https://...` | Automatically detected link with a separate open action |
+
+Plain text remains supported, and completed tasks stay in the document until they are removed manually.
+
+## AI workspace and automations
+
+The account-wide AI workspace provides Chat and explicit module automations.
+
+| Chat | Automations | Provider configuration |
+| :---: | :---: | :---: |
+| [![WebHome AI Chat workspace](example_ia_chat.png)](example_ia_chat.png) | [![WebHome AI module automations](example_ia_auto.png)](example_ia_auto.png) | [![WebHome AI provider configuration](example_ia_config.png)](example_ia_config.png) |
+
+WebHome supports one active direct BYOK connection per account: OpenAI API, Anthropic, Gemini, Mistral or Ollama. ChatGPT/Codex account login is not integrated.
+
+Automations currently connect selected Mail or RSS events to saved alerts, Calendar events or TODO tasks. They run in the browser while `/home` is open and use only explicitly exposed fields and authorized actions.
 
 ## Production constraints
 

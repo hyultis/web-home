@@ -76,8 +76,9 @@ mod tests
 	use crate::api::modules::components::{ModuleContent, ModuleID};
 	use crate::front::ai::{AiConfigDocument,AiConfigHolder,AiProfile,AiProvider};
 	use crate::front::ai::automation::{
-		AiAutomationContext,AiAutomationHistoryEntry,AiAutomationSource,AiAutomationTarget,
+		AiAutomationContext,AiAutomationEvent,AiAutomationHistoryEntry,AiAutomationSource,AiAutomationTarget,
 		AiAutomationTargetAction,AiConfirmationPolicy,AiNamedValue,AiValidatedAction,AiValue,
+		AiEventCausation,
 	};
 	use crate::front::ai::chat::{AiChatHolder,ChatDocument};
 	use crate::front::ai::inbox::{AiInboxAction,AiInboxDocument,AiInboxEntry,AiInboxHolder};
@@ -350,6 +351,21 @@ mod tests
 			holder._crons.insert(moduleId, PausableStocker::test_paused());
 			holder._moduleActions = Some(ModuleActionFn::test_get(epoch));
 			holder._blockNb = 7;
+			holder._aiConfigReady = true;
+			let mut aiConfig = AiConfigDocument::default();
+			aiConfig.profile = Some(AiProfile {
+				provider: AiProvider::OpenAI,
+				model: "gpt-test".to_string(),
+				credential: "account-a-private-key".to_string(),
+				baseUrl: String::new(),
+				maxOutputTokens: 512,
+			});
+			holder._aiConfig.import(ModuleContent {
+				id: ModuleID {id: AiConfigHolder::MODULE_ID.to_string()},
+				typeModule: AiConfigHolder::MODULE_NAME.to_string(),
+				content: aiConfig.serialize().unwrap(),
+				..Default::default()
+			}).unwrap();
 			holder._aiChatReady = true;
 			holder._aiInboxReady = true;
 			holder._aiChat.import(ModuleContent {
@@ -364,6 +380,14 @@ mod tests
 				content: r#"{"version":1,"entries":[]}"#.to_string(),
 				..Default::default()
 			}).unwrap();
+			holder._aiAutomationInbox.push_back(AiAutomationEvent::new(
+				ModuleID {id: "account-a-module".to_string()},
+				"item.created".to_string(),
+				"event-1".to_string(),
+				1,
+				AiEventCausation::External,
+			));
+			holder._aiAutomationRunning = true;
 
 			let ownerWasCleaned = Arc::new(AtomicBool::new(false));
 			let ownerWasCleanedInner = ownerWasCleaned.clone();
@@ -378,10 +402,14 @@ mod tests
 			assert!(holder._moduleActions.is_none());
 			assert_eq!(holder._blockNb, 0);
 			assert_ne!(holder._links.id_get().id, "account-a-links");
+			assert!(!holder._aiConfigReady);
+			assert_eq!(holder._aiConfig.document_get(),AiConfigDocument::default());
 			assert!(!holder._aiChatReady);
 			assert_eq!(holder._aiChat.document_get().get_untracked(),ChatDocument::default());
 			assert!(!holder._aiInboxReady);
 			assert_eq!(holder._aiInbox.document_get(),AiInboxDocument::default());
+			assert!(holder._aiAutomationInbox.is_empty());
+			assert!(!holder._aiAutomationRunning);
 
 			taskOwner.cleanup();
 			assert!(ownerWasCleaned.load(Ordering::Relaxed));

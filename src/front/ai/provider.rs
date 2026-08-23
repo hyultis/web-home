@@ -3,6 +3,8 @@ use serde_json::Value;
 use std::fmt::{Debug,Formatter};
 use std::rc::Rc;
 #[cfg(any(feature="hydrate",test))]
+use std::cell::Cell;
+#[cfg(any(feature="hydrate",test))]
 use super::AiProvider;
 #[cfg(any(feature="hydrate",test))]
 use std::collections::BTreeMap;
@@ -37,6 +39,42 @@ const AI_OLLAMA_SERVER_TIMEOUT_MS: u32 = 10_000;
 const AI_STREAM_LINE_MAXIMUM_BYTES: usize = 16 * 1024;
 #[cfg(any(feature="hydrate",test))]
 const AI_STREAM_EVENTS_MAXIMUM: usize = 65_536;
+#[cfg(any(feature="hydrate",test))]
+const AI_CONCURRENT_REQUESTS_MAXIMUM: u8 = 2;
+
+#[cfg(any(feature="hydrate",test))]
+thread_local! {
+	static ACTIVE_REQUESTS: Cell<u8> = const { Cell::new(0) };
+}
+
+#[cfg(any(feature="hydrate",test))]
+struct RequestPermit;
+
+#[cfg(any(feature="hydrate",test))]
+impl RequestPermit
+{
+	fn acquire() -> Result<Self,AiTransportError>
+	{
+		return ACTIVE_REQUESTS.with(|active| {
+			let value = active.get();
+			if (value >= AI_CONCURRENT_REQUESTS_MAXIMUM)
+			{
+				return Err(AiTransportError::Busy);
+			}
+			active.set(value + 1);
+			Ok(Self)
+		});
+	}
+}
+
+#[cfg(any(feature="hydrate",test))]
+impl Drop for RequestPermit
+{
+	fn drop(&mut self)
+	{
+		ACTIVE_REQUESTS.with(|active| active.set(active.get().saturating_sub(1)));
+	}
+}
 
 #[derive(Clone,Copy,Debug,Eq,PartialEq)]
 #[cfg(any(feature="hydrate",test))]
@@ -862,45 +900,12 @@ mod browser
 	use gloo_timers::callback::Timeout;
 	use js_sys::Uint8Array;
 	use leptos::prelude::Owner;
-	use std::cell::Cell;
 	use wasm_bindgen::{JsCast,JsValue};
 	use wasm_bindgen_futures::JsFuture;
 	use web_sys::{
 		AbortController,Headers,ReadableStreamDefaultReader,ReadableStreamReadResult,ReferrerPolicy,
 		Request,RequestCredentials,RequestInit,RequestMode,RequestRedirect,Response,
 	};
-
-	const AI_CONCURRENT_REQUESTS_MAXIMUM: u8 = 2;
-
-	thread_local! {
-		static ACTIVE_REQUESTS: Cell<u8> = const { Cell::new(0) };
-	}
-
-	struct RequestPermit;
-
-	impl RequestPermit
-	{
-		fn acquire() -> Result<Self,AiTransportError>
-		{
-			return ACTIVE_REQUESTS.with(|active| {
-				let value = active.get();
-				if (value >= AI_CONCURRENT_REQUESTS_MAXIMUM)
-				{
-					return Err(AiTransportError::Busy);
-				}
-				active.set(value + 1);
-				Ok(Self)
-			});
-		}
-	}
-
-	impl Drop for RequestPermit
-	{
-		fn drop(&mut self)
-		{
-			ACTIVE_REQUESTS.with(|active| active.set(active.get().saturating_sub(1)));
-		}
-	}
 
 	struct ActiveResponse
 	{
@@ -1155,6 +1160,80 @@ mod tests
 				assert_eq!(serde_json::from_str::<Value>(&body).unwrap().get("think"),Some(&Value::Bool(false)));
 			}
 		}
+	}
+
+	#[test]
+	fn requestBudgetsRejectForgedOversizedInputs()
+	{
+		let profile = profile_get(AiProvider::Ollama);
+		let request = |messages: Vec<AiMessage>,responseJsonSchema: Option<Value>| AiCompletionRequest {
+			messages,
+			maxOutputTokens: 512,
+			responseJsonSchema,
+		};
+
+		assert_eq!(
+			request_body_get(&profile,&request(Vec::new(),None)),
+			Err(AiTransportError::InvalidRequest),
+		);
+		assert_eq!(
+			request_body_get(&profile,&request(
+				(0..=AI_MESSAGES_MAXIMUM).map(|_| AiMessage::user("message")).collect(),None,
+			)),
+			Err(AiTransportError::InvalidRequest),
+		);
+		assert_eq!(
+			request_body_get(&profile,&request(
+				vec![AiMessage::user("x".repeat(AI_MESSAGE_MAXIMUM_BYTES + 1))],None,
+			)),
+			Err(AiTransportError::InvalidRequest),
+		);
+		assert_eq!(
+			request_body_get(&profile,&request(
+				vec![
+					AiMessage::user("x".repeat((AI_PROMPT_MAXIMUM_BYTES / 2) + 1)),
+					AiMessage::user("y".repeat((AI_PROMPT_MAXIMUM_BYTES / 2) + 1)),
+				],None,
+			)),
+			Err(AiTransportError::InvalidRequest),
+		);
+		assert_eq!(
+			request_body_get(&profile,&request(
+				vec![AiMessage::user("message")],
+				Some(json!({"description": "x".repeat(AI_PROMPT_MAXIMUM_BYTES)})),
+			)),
+			Err(AiTransportError::InvalidRequest),
+		);
+	}
+
+	#[test]
+	fn responseBudgetsRejectOversizedBodiesAndExtractedText()
+	{
+		assert_eq!(
+			response_text_get(AiProvider::OpenAI,&"x".repeat(AI_RESPONSE_MAXIMUM_BYTES + 1)),
+			Err(AiTransportError::ResponseTooLarge),
+		);
+		let oversizedText = "x".repeat(AI_RESPONSE_TEXT_MAXIMUM_BYTES + 1);
+		let body = serde_json::to_string(&json!({
+			"output": [{"content": [{"type": "output_text","text": oversizedText}]}],
+		})).unwrap();
+		assert!(body.len() < AI_RESPONSE_MAXIMUM_BYTES);
+		assert_eq!(
+			response_text_get(AiProvider::OpenAI,&body),
+			Err(AiTransportError::ResponseTooLarge),
+		);
+	}
+
+	#[test]
+	fn concurrentRequestBudgetIsReleasedWithThePermit()
+	{
+		let first = RequestPermit::acquire().unwrap();
+		let second = RequestPermit::acquire().unwrap();
+		assert!(matches!(RequestPermit::acquire(),Err(AiTransportError::Busy)));
+
+		drop(first);
+		let replacement = RequestPermit::acquire().unwrap();
+		drop((second,replacement));
 	}
 
 	#[test]

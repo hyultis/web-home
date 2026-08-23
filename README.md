@@ -12,7 +12,7 @@ The project was originally created in PHP in 2013 and is now built in Rust with 
 - Weather forecasts
 - Email reading, attachments and mark-as-read actions through IMAP
 - CalDAV calendars with month/week views and event creation or deletion
-- Encrypted client-side AI configuration and an account-wide Chat workspace with persistent conversations
+- Encrypted client-side AI configuration, an account-wide Chat workspace and explicit module automations
 - English and French interface selected from the browser language
 
 ![WebHome dashboard](example.png)
@@ -64,6 +64,15 @@ WebHome creates `config/site.json` on first start. User records are stored under
 
 Back up the complete `config` directory. It contains the server salt and all persistent user records.
 
+## AI providers and automations
+
+WebHome supports one active direct connection per account: OpenAI API, Anthropic, Gemini, Mistral or Ollama. The user supplies the provider credential; a ChatGPT/Codex subscription is not an OpenAI API credential, and Codex account login is not integrated.
+
+- Chat calls start only when the user sends a message. An automation call requires an enabled context, a module grant and a new module event; no LLM request starts merely because the dashboard loads or refreshes.
+- Automations run only while `/home` is open and the account is connected. There is no permanent backend worker. Actions are checked locally against the current module, permission and closed argument schema; confirmation is the default, while automatic mutation requires an explicit opt-in.
+- Browser-side accident limits allow at most two provider requests at once, one active automation, four matching contexts per event, eight requested actions per response, 32 queued events, and 10 calls per hour / 50 per day for each context. The configurable output limit is 256 to 8,192 tokens. These limits do not enforce a quota against a modified client, and a provider may already have charged work before a timeout or cancellation.
+- Ollama server validation and model installation are explicit user actions. Installing a model can be large and may take up to 30 minutes before WebHome aborts the local wait.
+
 ## Production constraints
 
 - Serve WebHome over HTTPS. Its authenticated session cookie is `Secure` and is not intended for plain HTTP production use.
@@ -97,6 +106,8 @@ Persistent module payloads are encrypted in the browser before they are stored b
 CalDAV credentials are part of that encrypted module configuration. Calendar requests and event contents travel directly between the browser and the configured CalDAV origin; WebHome does not proxy or cache them.
 
 LLM credentials are likewise encrypted as account data and are never sent to the WebHome API. The browser decrypts a credential only to call the selected provider directly. This avoids a backend copy but does not protect a credential from a compromised WebHome origin, delivered frontend or browser extension.
+
+Chat prompts and only the module fields selected in enabled automation contexts follow the same direct browser-to-provider path. The chosen provider can process or retain this data under its own policy. WebHome stores AI configuration, conversations and pending AI actions only through its client-side encrypted account data.
 
 When holiday highlighting is enabled, the browser requests public holidays from Nager.Date by country and year. Successful responses are cached in memory for the browser session; no calendar event or WebHome credential is sent to that service.
 
